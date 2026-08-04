@@ -1,9 +1,10 @@
-import csv
-from collections import defaultdict
 from datetime import datetime, timedelta
 import io
 import os
 from flask import Flask, render_template, request, redirect, url_for, send_file, flash
+from flask_sqlalchemy import SQLAlchemy
+from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
+from werkzeug.security import generate_password_hash, check_password_hash
 
 # Bibliotecas para o PDF
 from reportlab.lib import colors
@@ -12,153 +13,186 @@ from reportlab.platypus import SimpleDocTemplate, Spacer, Table, TableStyle, Par
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
 app = Flask(__name__)
-app.secret_key = "chave_secreta_para_mensagens"
+app.secret_key = "chave_secreta_super_segura"
 
-CONTROLE_PONTO = "registro_ponto.csv"
+# Configuração do Banco de Dados SQLite
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///ponto_database.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+db = SQLAlchemy(app)
+login_manager = LoginManager(app)
+login_manager.login_view = 'login'
+
 CARGA_HORARIA_DIARIA = timedelta(hours=8)
 
+# ==========================================
+# MODELOS DO BANCO DE DADOS
+# ==========================================
+class Usuario(UserMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    nome = db.Column(db.String(100), nullable=False)
+    email = db.Column(db.String(100), unique=True, nullable=False)
+    senha_hash = db.Column(db.String(200), nullable=False)
+    pontos = db.relationship('RegistroPonto', backref='usuario', lazy=True)
 
-def make_csv_if_not_exists():
-    if not os.path.exists(CONTROLE_PONTO):
-        with open(CONTROLE_PONTO, mode="w", newline="", encoding="utf-8") as file:
-            writer = csv.writer(file)
-            writer.writerow(["Data", "Tipo de Registro", "Hora"])
+class RegistroPonto(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    data = db.Column(db.String(10), nullable=False)  # DD/MM/YYYY
+    tipo = db.Column(db.String(20), nullable=False)  # Entrada, Almoço, Retorno, Saída
+    hora = db.Column(db.String(8), nullable=False)   # HH:MM:SS
+    usuario_id = db.Column(db.Integer, db.ForeignKey('usuario.id'), nullable=False)
 
+@login_manager.user_loader
+def load_user(user_id):
+    return Usuario.query.get(int(user_id))
 
-def obter_pontos_hoje():
-    if not os.path.exists(CONTROLE_PONTO):
-        return []
+# Cria o banco de dados na primeira execução
+with app.app_context():
+    db.create_all()
 
+# ==========================================
+# ROTAS DE AUTENTICAÇÃO
+# ==========================================
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        email = request.form.get('email')
+        senha = request.form.get('senha')
+        user = Usuario.query.filter_by(email=email).first()
+
+        if user and check_password_hash(user.senha_hash, senha):
+            login_user(user)
+            return redirect(url_for('index'))
+        else:
+            flash('E-mail ou senha incorretos.')
+
+    return render_template('login.html')
+
+@app.route('/cadastro', methods=['GET', 'POST'])
+def cadastro():
+    if request.method == 'POST':
+        nome = request.form.get('nome')
+        email = request.form.get('email')
+        senha = request.form.get('senha')
+
+        if Usuario.query.filter_by(email=email).first():
+            flash('Este e-mail já está cadastrado.')
+            return redirect(url_for('cadastro'))
+
+        novo_usuario = Usuario(
+            nome=nome,
+            email=email,
+            senha_hash=generate_password_hash(senha, method='scrypt')
+        )
+        db.session.add(novo_usuario)
+        db.session.commit()
+
+        flash('Conta criada com sucesso! Faça login.')
+        return redirect(url_for('login'))
+
+    return render_template('register.html')
+
+@app.route('/logout')
+@login_required
+def logout():
+    logout_user()
+    return redirect(url_for('login'))
+
+# ==========================================
+# ROTAS DO PONTO (PROTEGIDAS)
+# ==========================================
+@app.route('/')
+@login_required
+def index():
     data_hoje = datetime.now().strftime("%d/%m/%Y")
-    pontos_hoje = []
+    
+    # Busca apenas os pontos do usuário logado no dia de hoje
+    pontos_hoje_objs = RegistroPonto.query.filter_by(usuario_id=current_user.id, data=data_hoje).all()
+    pontos_batidos = [p.tipo for p in pontos_hoje_objs]
 
-    with open(CONTROLE_PONTO, mode="r", encoding="utf-8") as file:
-        reader = csv.reader(file)
-        next(reader, None)
-        for linha in reader:
-            if len(linha) >= 3 and linha[0] == data_hoje:
-                pontos_hoje.append(linha[1])
+    ultimo_ponto_obj = RegistroPonto.query.filter_by(usuario_id=current_user.id).order_by(RegistroPonto.id.desc()).first()
+    
+    if ultimo_ponto_obj:
+        ultimo_ponto = f"{ultimo_ponto_obj.tipo} às {ultimo_ponto_obj.hora} ({ultimo_ponto_obj.data})"
+    else:
+        ultimo_ponto = "Nenhum ponto registrado"
 
-    return pontos_hoje
+    return render_template('index.html', pontos_batidos=pontos_batidos, ultimo_ponto=ultimo_ponto)
 
+@app.route('/registrar/<tipo>', methods=['POST'])
+@login_required
+def registrar(tipo):
+    agora = datetime.now()
+    novo_ponto = RegistroPonto(
+        data=agora.strftime("%d/%m/%Y"),
+        tipo=tipo,
+        hora=agora.strftime("%H:%M:%S"),
+        usuario_id=current_user.id
+    )
+    db.session.add(novo_ponto)
+    db.session.commit()
 
-def obter_ultimo_ponto():
-    if not os.path.exists(CONTROLE_PONTO):
-        return "Nenhum ponto registrado hoje"
+    flash(f"Ponto ({tipo}) registrado com sucesso!")
+    return redirect(url_for('index'))
 
-    with open(CONTROLE_PONTO, mode="r", encoding="utf-8") as file:
-        reader = list(csv.reader(file))
-        if len(reader) <= 1:
-            return "Nenhum ponto registrado"
+@app.route('/exportar-pdf')
+@login_required
+def exportar_pdf():
+    # Busca todos os pontos do usuário logado
+    registros = RegistroPonto.query.filter_by(usuario_id=current_user.id).order_by(RegistroPonto.id.asc()).all()
 
-        ultima_linha = reader[-1]
-        return f"{ultima_linha[1]} às {ultima_linha[2]} ({ultima_linha[0]})"
+    if not registros:
+        flash("Nenhum registro encontrado para exportar.")
+        return redirect(url_for('index'))
 
-
-def processar_dados_ponto():
-    if not os.path.exists(CONTROLE_PONTO):
-        return None, None
-
+    # Agrupamento dos dados
+    from collections import defaultdict
     dias = defaultdict(dict)
-    with open(CONTROLE_PONTO, mode="r", encoding="utf-8") as file:
-        reader = csv.reader(file)
-        next(reader, None)
-        for linha in reader:
-            if len(linha) >= 3:
-                data, tipo, hora = linha[0], linha[1], linha[2]
-                dias[data][tipo] = hora
-
-    if not dias:
-        return None, None
+    for r in registros:
+        dias[r.data][r.tipo] = r.hora
 
     tabela_linhas = [["Dia", "Entrada", "Almoço", "Retorno", "Saída", "Total Horas"]]
     total_segundos_trabalhados = 0
     total_segundos_extras = 0
     FMT = "%H:%M:%S"
 
-    for dia, registros in dias.items():
-        e_str = registros.get("Entrada", "--:--")
-        a_str = registros.get("Almoço", "--:--")
-        r_str = registros.get("Retorno", "--:--")
-        s_str = registros.get("Saída", "--:--")
+    for dia, reg in dias.items():
+        e, a, r, s = reg.get("Entrada", "--:--"), reg.get("Almoço", "--:--"), reg.get("Retorno", "--:--"), reg.get("Saída", "--:--")
+        tempo = timedelta()
 
-        tempo_trabalhado = timedelta()
+        if e != "--:--" and a != "--:--":
+            t1, t2 = datetime.strptime(e, FMT), datetime.strptime(a, FMT)
+            if t2 > t1: tempo += (t2 - t1)
 
-        if e_str != "--:--" and a_str != "--:--":
-            t1, t2 = datetime.strptime(e_str, FMT), datetime.strptime(a_str, FMT)
-            if t2 > t1:
-                tempo_trabalhado += (t2 - t1)
+        if r != "--:--" and s != "--:--":
+            t3, t4 = datetime.strptime(r, FMT), datetime.strptime(s, FMT)
+            if t4 > t3: tempo += (t4 - t3)
 
-        if r_str != "--:--" and s_str != "--:--":
-            t3, t4 = datetime.strptime(r_str, FMT), datetime.strptime(s_str, FMT)
-            if t4 > t3:
-                tempo_trabalhado += (t4 - t3)
+        tot = int(tempo.total_seconds())
+        total_segundos_trabalhados += tot
 
-        total_seg = int(tempo_trabalhado.total_seconds())
-        total_segundos_trabalhados += total_seg
-
-        if tempo_trabalhado > CARGA_HORARIA_DIARIA:
-            extra = tempo_trabalhado - CARGA_HORARIA_DIARIA
+        if tempo > CARGA_HORARIA_DIARIA:
+            extra = tempo - CARGA_HORARIA_DIARIA
             total_segundos_extras += int(extra.total_seconds())
 
-        hrs, mins = divmod(total_seg // 60, 60)
-        tabela_linhas.append([dia, e_str, a_str, r_str, s_str, f"{hrs:02d}:{mins:02d}h"])
+        hrs, mins = divmod(tot // 60, 60)
+        tabela_linhas.append([dia, e, a, r, s, f"{hrs:02d}:{mins:02d}h"])
 
     hrs_t, mins_t = divmod(total_segundos_trabalhados // 60, 60)
     hrs_e, mins_e = divmod(total_segundos_extras // 60, 60)
 
-    resumo = {
-        "total_trabalhado": f"{hrs_t:02d}:{mins_t:02d}h",
-        "total_extras": f"{hrs_e:02d}:{mins_e:02d}h",
-    }
-
-    return tabela_linhas, resumo
-
-
-# --- ROTAS DA APLICAÇÃO WEB ---
-
-@app.route("/")
-def index():
-    make_csv_if_not_exists()
-    pontos_batidos = obter_pontos_hoje()
-    ultimo_ponto = obter_ultimo_ponto()
-    return render_template("index.html", pontos_batidos=pontos_batidos, ultimo_ponto=ultimo_ponto)
-
-
-@app.route("/registrar/<tipo>", methods=["POST"])
-def registrar(tipo):
-    make_csv_if_not_exists()
-    agora = datetime.now()
-    data_atual = agora.strftime("%d/%m/%Y")
-    hora_atual = agora.strftime("%H:%M:%S")
-
-    with open(CONTROLE_PONTO, mode="a", newline="", encoding="utf-8") as file:
-        writer = csv.writer(file)
-        writer.writerow([data_atual, tipo, hora_atual])
-
-    flash(f"Ponto ({tipo}) registrado às {hora_atual} com sucesso!")
-    return redirect(url_for("index"))
-
-
-@app.route("/exportar-pdf")
-def exportar_pdf():
-    tabela_dados, resumo = processar_dados_ponto()
-
-    if not tabela_dados or len(tabela_dados) <= 1:
-        flash("Nenhum registro encontrado para exportar.")
-        return redirect(url_for("index"))
-
+    # Geração do PDF
     buffer = io.BytesIO()
     pdf = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
     elementos = []
     estilos = getSampleStyleSheet()
 
     titulo_estilo = ParagraphStyle("T", parent=estilos["Heading1"], fontSize=18, alignment=1, spaceAfter=15)
-    elementos.append(Paragraph("<b>Relatório de Folha de Ponto</b>", titulo_estilo))
-    elementos.append(Paragraph(f"<b>Emissão:</b> {datetime.now().strftime('%d/%m/%Y às %H:%M')}", estilos["Normal"]))
+    elementos.append(Paragraph(f"<b>Folha de Ponto - {current_user.nome}</b>", titulo_estilo))
+    elementos.append(Paragraph(f"<b>E-mail:</b> {current_user.email} | <b>Emissão:</b> {datetime.now().strftime('%d/%m/%Y às %H:%M')}", estilos["Normal"]))
     elementos.append(Spacer(1, 15))
 
-    tabela = Table(tabela_dados, colWidths=[80, 85, 85, 85, 85, 90])
+    tabela = Table(tabela_linhas, colWidths=[80, 85, 85, 85, 85, 90])
     tabela.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2c3e50")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
@@ -171,8 +205,8 @@ def exportar_pdf():
     elementos.append(Spacer(1, 20))
 
     dados_resumo = [
-        ["Horas Totais Trabalhadas:", resumo["total_trabalhado"]],
-        ["Total de Horas Extras (Excedente 8h/dia):", resumo["total_extras"]],
+        ["Horas Totais Trabalhadas:", f"{hrs_t:02d}:{mins_t:02d}h"],
+        ["Total de Horas Extras (Excedente 8h/dia):", f"{hrs_e:02d}:{mins_e:02d}h"],
     ]
     tabela_resumo = Table(dados_resumo, colWidths=[300, 210])
     tabela_resumo.setStyle(TableStyle([
@@ -188,10 +222,9 @@ def exportar_pdf():
     return send_file(
         buffer,
         as_attachment=True,
-        download_name=f"Folha_de_Ponto_{datetime.now().strftime('%m_%Y')}.pdf",
-        mimetype="application/pdf",
+        download_name=f"Folha_Ponto_{current_user.nome.replace(' ', '_')}.pdf",
+        mimetype="application/pdf"
     )
 
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     app.run(debug=True)

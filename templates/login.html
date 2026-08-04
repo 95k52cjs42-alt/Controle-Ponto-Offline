@@ -1,0 +1,18 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2>Entrar no Sistema</h2>
+<form method="POST">
+    <div class="input-group">
+        <label>E-mail:</label>
+        <input type="email" name="email" required>
+    </div>
+    <div class="input-group">
+        <label>Senha:</label>
+        <input type="password" name="senha" required>
+    </div>
+    <button class="btn btn-primary" type="submit">Entrar</button>
+</form>
+<p style="font-size: 13px; margin-top: 15px;">
+    Não tem uma conta? <a href="/cadastro">Cadastre-se</a>
+</p>
+{% endblock %}

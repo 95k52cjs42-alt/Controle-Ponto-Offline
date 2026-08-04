@@ -1,106 +1,25 @@
-<!DOCTYPE html>
-<html lang="pt-br">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Controle de Ponto Web</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            background-color: #f0f0f0;
-            display: flex;
-            justify-content: center;
-            padding-top: 40px;
-            margin: 0;
-        }
-        .container {
-            background-color: white;
-            padding: 30px;
-            border-radius: 12px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-            width: 360px;
-            text-align: center;
-        }
-        h2 { margin-top: 0; color: #333; }
-        .painel-ultimo {
-            background-color: #e0e0e0;
-            padding: 10px;
-            border-radius: 6px;
-            font-size: 14px;
-            font-weight: bold;
-            color: #333;
-            margin-bottom: 20px;
-            border: 1px solid #ccc;
-        }
-        .btn {
-            display: block;
-            width: 100%;
-            padding: 12px 0;
-            margin: 8px 0;
-            border: none;
-            border-radius: 6px;
-            color: white;
-            font-size: 16px;
-            font-weight: bold;
-            cursor: pointer;
-        }
-        .btn:disabled {
-            background-color: #cccccc !important;
-            color: #888888;
-            cursor: not-allowed;
-        }
-        .btn-entrada { background-color: #4CAF50; }
-        .btn-almoco { background-color: #FF9800; }
-        .btn-retorno { background-color: #2196F3; }
-        .btn-saida { background-color: #F44336; }
-        .btn-pdf { background-color: #607D8B; margin-top: 15px; }
-        .alert {
-            background-color: #d4edda;
-            color: #155724;
-            padding: 10px;
-            border-radius: 6px;
-            font-size: 13px;
-            margin-bottom: 15px;
-        }
-    </style>
-</head>
-<body>
+{% extends 'base.html' %}
+{% block content %}
+<h2>Controle de Ponto</h2>
 
-<div class="container">
-    <h2>Controle de Ponto</h2>
-
-    {% with messages = get_flashed_messages() %}
-      {% if messages %}
-        {% for message in messages %}
-          <div class="alert">{{ message }}</div>
-        {% endfor %}
-      {% endif %}
-    {% endwith %}
-
-    <div class="painel-ultimo">
-        Último ponto: {{ ultimo_ponto }}
-    </div>
-
-    <form action="/registrar/Entrada" method="POST">
-        <button class="btn btn-entrada" {% if 'Entrada' in pontos_batidos %}disabled{% endif %}>Entrada</button>
-    </form>
-
-    <form action="/registrar/Almoço" method="POST">
-        <button class="btn btn-almoco" {% if 'Almoço' in pontos_batidos %}disabled{% endif %}>Almoço</button>
-    </form>
-
-    <form action="/registrar/Retorno" method="POST">
-        <button class="btn btn-retorno" {% if 'Retorno' in pontos_batidos %}disabled{% endif %}>Retorno</button>
-    </form>
-
-    <form action="/registrar/Saída" method="POST">
-        <button class="btn btn-saida" {% if 'Saída' in pontos_batidos %}disabled{% endif %}>Saída</button>
-    </form>
-
-    <a href="/exportar-pdf" style="text-decoration: none;">
-        <button class="btn btn-pdf">📄 Exportar PDF</button>
-    </a>
+<div style="background-color: #e0e0e0; padding: 10px; border-radius: 6px; font-size: 13px; font-weight: bold; margin-bottom: 20px;">
+    Último ponto: {{ ultimo_ponto }}
 </div>
 
-</body>
-</html>
+<form action="/registrar/Entrada" method="POST">
+    <button class="btn btn-entrada" {% if 'Entrada' in pontos_batidos %}disabled{% endif %}>Entrada</button>
+</form>
+<form action="/registrar/Almoço" method="POST">
+    <button class="btn btn-almoco" {% if 'Almoço' in pontos_batidos %}disabled{% endif %}>Almoço</button>
+</form>
+<form action="/registrar/Retorno" method="POST">
+    <button class="btn btn-retorno" {% if 'Retorno' in pontos_batidos %}disabled{% endif %}>Retorno</button>
+</form>
+<form action="/registrar/Saída" method="POST">
+    <button class="btn btn-saida" {% if 'Saída' in pontos_batidos %}disabled{% endif %}>Saída</button>
+</form>
+
+<a href="/exportar-pdf" style="text-decoration: none;">
+    <button class="btn btn-pdf">📄 Exportar Meu PDF</button>
+</a>
+{% endblock %}
