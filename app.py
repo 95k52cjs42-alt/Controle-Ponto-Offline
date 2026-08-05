@@ -34,7 +34,7 @@ app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "chave_secreta_super_segura_ponto_web")
 
 # Configuração com fallback para o Transaction Pooler (Porta 6543)
-URL_PADRAO = "postgresql://ponto_db_pq4u_user:IfzZGwiFXZa6Qn9E6HR9WPAT8W8frCMf@dpg-d9pk4el3erlc7399um4g-a/ponto_db_pq4u"
+URL_PADRAO = "postgresql://postgres:Smartpixel2026@db.qptqynskpqabslxjedtf.supabase.co:5432/postgres"
 
 DATABASE_URL = os.environ.get("DATABASE_URL", URL_PADRAO)
 
