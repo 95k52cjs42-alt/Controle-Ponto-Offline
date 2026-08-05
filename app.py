@@ -36,7 +36,7 @@ app.secret_key = os.environ.get("SECRET_KEY", "chave_secreta_super_segura_ponto_
 # Busca a URL do banco nas variáveis de ambiente do servidor, usando a sua URL como padrão caso não configurada
 DATABASE_URL = os.environ.get(
     "DATABASE_URL",
-    "postgresql+psycopg2://postgres.qptqynskpqabslxjedtf:Smartpixel2026@aws-0-sa-east-1.pooler.supabase.com:6543/postgres"
+    "postgresql+psycopg2://postgres:Smartpixel2026@db.qptqynskpqabslxjedtf.supabase.co:5432/postgres"
 )
 
 # Correção automática para o SQLAlchemy se a URL vier como 'postgres://'
