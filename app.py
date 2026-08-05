@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from collections import defaultdict
 from datetime import datetime, timedelta
 import io
@@ -136,7 +138,7 @@ def logout():
 @app.route("/")
 @login_required
 def index():
-  data_hoje = datetime.now().strftime("%d/%m/%Y")
+  data_hoje = datetime.now(ZoneInfo('America/Sao_Paulo')).strftime("%d/%m/%Y")
 
   pontos_hoje_objs = RegistroPonto.query.filter_by(
       usuario_id=current_user.id, data=data_hoje
@@ -162,7 +164,7 @@ def index():
 @app.route("/registrar/<tipo>", methods=["POST"])
 @login_required
 def registrar(tipo):
-  agora = datetime.now()
+  agora = datetime.now(ZoneInfo('America/Sao_Paulo'))
   data_atual = agora.strftime("%d/%m/%Y")
   hora_atual = agora.strftime("%H:%M:%S")
 
@@ -256,7 +258,7 @@ def exportar_pdf():
   elementos.append(
       Paragraph(
           f"<b>E-mail:</b> {current_user.email} | <b>Emissão:</b>"
-          f" {datetime.now().strftime('%d/%m/%Y às %H:%M')}",
+          f" {datetime.now(ZoneInfo('America/Sao_Paulo')).strftime('%d/%m/%Y às %H:%M')}",
           estilos["Normal"],
       )
   )
