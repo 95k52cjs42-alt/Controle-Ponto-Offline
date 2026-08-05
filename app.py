@@ -31,7 +31,7 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 app = Flask(__name__)
 app.secret_key = "chave_secreta_super_segura_ponto_web"
 
-app.config["SQLALCHEMY_DATABASE_URI"] = "postgresql+psycopg2://postgres:%2BD10m09ivr%40147258%40%40four1103@db.qptqynskpqabslxjedtf.supabase.co:5432/postgres"
+app.config["SQLALCHEMY_DATABASE_URI"] = "postgresql+psycopg2://postgres:Smartpixel2026@db.qptqynskpqabslxjedtf.supabase.co:5432/postgres"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 db = SQLAlchemy(app)
