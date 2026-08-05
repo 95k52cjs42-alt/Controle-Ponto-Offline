@@ -34,6 +34,7 @@ app.secret_key = "chave_secreta_super_segura_ponto_web"
 app.config["SQLALCHEMY_DATABASE_URI"] = "postgresql+psycopg2://postgres:Smartpixel2026@db.qptqynskpqabslxjedtf.supabase.co:5432/postgres"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
+
 db = SQLAlchemy(app)
 login_manager = LoginManager(app)
 login_manager.login_view = "login"
