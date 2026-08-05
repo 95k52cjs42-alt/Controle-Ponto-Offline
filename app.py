@@ -33,15 +33,16 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "chave_secreta_super_segura_ponto_web")
 
-# Busca a URL do banco nas variáveis de ambiente do servidor, usando a sua URL como padrão caso não configurada
-DATABASE_URL = os.environ.get(
-    "DATABASE_URL",
-    "postgresql+psycopg2://postgres:Smartpixel2026@db.qptqynskpqabslxjedtf.supabase.co:5432/postgres"
-)
+# Configuração com fallback para o Transaction Pooler (Porta 6543)
+URL_PADRAO = "postgresql+psycopg2://postgres.qptqynskpqabslxjedtf:Smartpixel2026@aws-0-sa-east-1.pooler.supabase.com:6543/postgres"
 
-# Correção automática para o SQLAlchemy se a URL vier como 'postgres://'
+DATABASE_URL = os.environ.get("DATABASE_URL", URL_PADRAO)
+
+# Ajuste automático caso a variável venha como postgres:// ou sem o driver psycopg2
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg2://", 1)
+elif DATABASE_URL.startswith("postgresql://"):
+    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg2://", 1)
 
 app.config["SQLALCHEMY_DATABASE_URI"] = DATABASE_URL
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
