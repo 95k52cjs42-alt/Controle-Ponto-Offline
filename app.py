@@ -293,9 +293,14 @@ def registrar(tipo):
 # ==========================================
 # ROTAS DE SOLICITAÇÃO DE CORREÇÃO
 # ==========================================
+# ==========================================
+# ROTAS DE SOLICITAÇÃO DE CORREÇÃO
+# ==========================================
 @app.route("/solicitar-correcao", methods=["GET", "POST"])
 @login_required
 def solicitar_correcao():
+    hoje = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
+
     if request.method == "POST":
         data_raw = request.form.get("data_ponto")
         tipo_ponto = request.form.get("tipo_ponto")
@@ -306,7 +311,12 @@ def solicitar_correcao():
             flash("Preencha todos os campos para solicitar a correção.", "warning")
             return redirect(url_for("solicitar_correcao"))
 
-        data_obj = datetime.strptime(data_raw, "%Y-%m-%d")
+        # Validação no servidor (Back-end) contra datas futuras
+        data_obj = datetime.strptime(data_raw, "%Y-%m-%d").date()
+        if data_obj > hoje:
+            flash("Não é permitido solicitar ajuste para datas futuras.", "danger")
+            return redirect(url_for("solicitar_correcao"))
+
         data_formatada = data_obj.strftime("%d/%m/%Y")
         
         if len(hora) == 5:
@@ -329,8 +339,14 @@ def solicitar_correcao():
         usuario_id=current_user.id
     ).order_by(SolicitacaoCorrecao.id.desc()).all()
 
-    return render_template("solicitar_correcao.html", solicitacoes=minhas_solicitacoes)
+    # Formata a data de hoje como YYYY-MM-DD para o atributo max do input
+    data_hoje_str = hoje.strftime("%Y-%m-%d")
 
+    return render_template(
+        "solicitar_correcao.html", 
+        solicitacoes=minhas_solicitacoes,
+        data_hoje=data_hoje_str
+    )
 
 @app.route("/exportar-pdf")
 @login_required

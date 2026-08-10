@@ -15,10 +15,10 @@
             <a href="{{ url_for('index') }}" class="btn btn-outline-secondary btn-sm">Voltar ao Início</a>
         </div>
 
-        {% with messages = get_flashed_messages() %}
+        {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
-                {% for message in messages %}
-                    <div class="alert alert-info alert-dismissible fade show" role="alert">
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category if category != 'message' else 'info' }} alert-dismissible fade show" role="alert">
                         {{ message }}
                         <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
                     </div>
@@ -36,7 +36,8 @@
                     <div class="row g-3">
                         <div class="col-md-6">
                             <label class="form-label font-weight-bold">Data do Ponto:</label>
-                            <input type="date" name="data_ponto" class="form-control" required>
+                            <!-- Adicionado max="{{ data_hoje }}" para bloquear dias futuros no calendário -->
+                            <input type="date" name="data_ponto" class="form-control" max="{{ data_hoje }}" required>
                         </div>
                         <div class="col-md-6">
                             <label class="form-label font-weight-bold">Tipo de Ponto:</label>
@@ -61,7 +62,7 @@
             </div>
         </div>
 
-        <!-- Minhas Solicitacoes Recentes -->
+        <!-- Minhas Solicitações Recentes -->
         <div class="card shadow-sm">
             <div class="card-header bg-secondary text-white">
                 <h6 class="mb-0">Minhas Solicitações Enviadas</h6>
