@@ -241,11 +241,14 @@ def meu_historico():
 def index():
     data_hoje = datetime.now(ZoneInfo("America/Sao_Paulo")).strftime("%d/%m/%Y")
 
+    # 1. Filtra APENAS os registros feitos HOJE para controlar os botões
     pontos_hoje_objs = RegistroPonto.query.filter_by(
         usuario_id=current_user.id, data=data_hoje
-    ).all()
+    ).order_by(RegistroPonto.id.asc()).all()
+    
     pontos_batidos = [p.tipo for p in pontos_hoje_objs]
 
+    # 2. Busca o último registro geral apenas para exibir no card informativo de Status
     ultimo_ponto_obj = (
         RegistroPonto.query.filter_by(usuario_id=current_user.id)
         .order_by(RegistroPonto.id.desc())
