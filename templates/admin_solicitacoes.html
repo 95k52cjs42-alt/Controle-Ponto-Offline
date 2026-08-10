@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Solicitações de Ajuste - Admin</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+
+    <nav class="navbar navbar-dark bg-dark mb-4">
+        <div class="container">
+            <span class="navbar-brand mb-0 h1">Ponto Web - Solicitações</span>
+            <a href="{{ url_for('admin_panel') }}" class="btn btn-outline-light btn-sm">Voltar ao Painel</a>
+        </div>
+    </nav>
+
+    <div class="container">
+        
+        {% with messages = get_flashed_messages() %}
+            {% if messages %}
+                {% for message in messages %}
+                    <div class="alert alert-info alert-dismissible fade show" role="alert">
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <div class="card shadow-sm">
+            <div class="card-header bg-warning text-dark">
+                <h5 class="mb-0">Solicitações de Correção de Ponto</h5>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-striped align-middle mb-0">
+                        <thead>
+                            <tr>
+                                <th>Funcionário</th>
+                                <th>Data do Ponto</th>
+                                <th>Tipo</th>
+                                <th>Horário Solicitado</th>
+                                <th>Justificativa</th>
+                                <th>Status</th>
+                                <th>Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for s in solicitacoes %}
+                            <tr>
+                                <td><strong>{{ s.usuario.nome }}</strong></td>
+                                <td>{{ s.data_ponto }}</td>
+                                <td><span class="badge bg-secondary">{{ s.tipo_ponto }}</span></td>
+                                <td><strong>{{ s.hora_correta }}</strong></td>
+                                <td><small>{{ s.justificativa }}</small></td>
+                                <td>
+                                    {% if s.status == 'Pendente' %}
+                                        <span class="badge bg-warning text-dark">Pendente</span>
+                                    {% elif s.status == 'Aprovada' %}
+                                        <span class="badge bg-success">Aprovada</span>
+                                    {% else %}
+                                        <span class="badge bg-danger">Recusada</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if s.status == 'Pendente' %}
+                                        <form action="{{ url_for('responder_solicitacao', id=s.id, acao='aprovar') }}" method="POST" style="display:inline;">
+                                            <button type="submit" class="btn btn-success btn-sm me-1">Aprovar</button>
+                                        </form>
+                                        <form action="{{ url_for('responder_solicitacao', id=s.id, acao='recusar') }}" method="POST" style="display:inline;">
+                                            <button type="submit" class="btn btn-danger btn-sm">Recusar</button>
+                                        </form>
+                                    {% else %}
+                                        <small class="text-muted">Finalizado</small>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="7" class="text-center text-muted py-3">Nenhuma solicitação até o momento.</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

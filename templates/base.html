@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Controle de Ponto Web</title>
+    <style>
+        body { font-family: Arial, sans-serif; background-color: #f0f0f0; display: flex; justify-content: center; padding-top: 30px; margin: 0; }
+        .container { background-color: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); width: 360px; text-align: center; }
+        .header-user { display: flex; justify-content: space-between; align-items: center; font-size: 13px; margin-bottom: 15px; background: #f8f9fa; padding: 8px 12px; border-radius: 6px; }
+        .input-group { text-align: left; margin-bottom: 12px; }
+        .input-group label { font-size: 13px; font-weight: bold; display: block; margin-bottom: 4px; }
+        .input-group input { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; }
+        .btn { display: block; width: 100%; padding: 12px 0; margin: 8px 0; border: none; border-radius: 6px; color: white; font-size: 15px; font-weight: bold; cursor: pointer; text-decoration: none; text-align: center;}
+        .btn:disabled { background-color: #cccccc !important; color: #888888; cursor: not-allowed; }
+        .btn-primary { background-color: #2196F3; }
+        .btn-entrada { background-color: #4CAF50; }
+        .btn-almoco { background-color: #FF9800; }
+        .btn-retorno { background-color: #00BCD4; }
+        .btn-saida { background-color: #F44336; }
+        .btn-pdf { background-color: #607D8B; margin-top: 15px; }
+        .alert { background-color: #fff3cd; color: #856404; padding: 10px; border-radius: 6px; font-size: 13px; margin-bottom: 15px; text-align: left; }
+    </style>
+</head>
+<body>
+<div class="container">
+    {% if current_user.is_authenticated %}
+        <div class="header-user">
+            <span>Olá, <b>{{ current_user.nome }}</b></span>
+            <a href="/logout" style="color: #d9534f; text-decoration: none; font-weight: bold;">Sair</a>
+        </div>
+    {% endif %}
+
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}
+        {% for message in messages %}
+          <div class="alert">{{ message }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    {% block content %}{% endblock %}
+</div>
+</body>
+</html>
