@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Histórico de Pontos - Admin</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
+</head>
+<body class="bg-light">
+
+    <nav class="navbar navbar-dark bg-dark mb-4">
+        <div class="container">
+            <span class="navbar-brand fw-bold"><i class="bi bi-shield-lock me-2"></i>Histórico Geral (Admin)</span>
+            <a href="{{ url_for('admin_panel') }}" class="btn btn-outline-light btn-sm">Voltar ao Painel</a>
+        </div>
+    </nav>
+
+    <div class="container">
+        
+        <!-- Filtros do Admin -->
+        <div class="card shadow-sm mb-4">
+            <div class="card-header bg-white fw-bold">
+                <i class="bi bi-funnel me-1"></i> Filtros de Busca
+            </div>
+            <div class="card-body">
+                <form action="{{ url_for('admin_historico') }}" method="GET" class="row g-3">
+                    
+                    <div class="col-md-3">
+                        <label class="form-label small fw-semibold">Buscar por Nome / E-mail:</label>
+                        <input type="text" name="busca_nome" value="{{ busca_nome }}" placeholder="Ex: Luan ou email@..." class="form-control form-control-sm">
+                    </div>
+
+                    <div class="col-md-3">
+                        <label class="form-label small fw-semibold">Selecione o Funcionário:</label>
+                        <select name="usuario_id" class="form-select form-select-sm">
+                            <option value="">Todos</option>
+                            {% for u in usuarios %}
+                                <option value="{{ u.id }}" {% if usuario_id_selecionado == u.id %}selected{% endif %}>
+                                    {{ u.nome }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="col-md-2">
+                        <label class="form-label small fw-semibold">Tipo de Ponto:</label>
+                        <select name="tipo_ponto" class="form-select form-select-sm">
+                            <option value="">Todos</option>
+                            <option value="Entrada" {% if tipo_ponto == 'Entrada' %}selected{% endif %}>Entrada</option>
+                            <option value="Almoço" {% if tipo_ponto == 'Almoço' %}selected{% endif %}>Almoço</option>
+                            <option value="Retorno" {% if tipo_ponto == 'Retorno' %}selected{% endif %}>Retorno</option>
+                            <option value="Saída" {% if tipo_ponto == 'Saída' %}selected{% endif %}>Saída</option>
+                        </select>
+                    </div>
+
+                    <div class="col-md-2">
+                        <label class="form-label small fw-semibold">Data Início:</label>
+                        <input type="date" name="data_inicio" value="{{ data_inicio }}" class="form-control form-control-sm">
+                    </div>
+
+                    <div class="col-md-2">
+                        <label class="form-label small fw-semibold">Data Fim:</label>
+                        <input type="date" name="data_fim" value="{{ data_fim }}" class="form-control form-control-sm">
+                    </div>
+
+                    <div class="col-12 d-flex justify-content-end gap-2">
+                        <a href="{{ url_for('admin_historico') }}" class="btn btn-outline-secondary btn-sm px-3">Limpar Filtros</a>
+                        <button type="submit" class="btn btn-primary btn-sm px-4 fw-semibold"><i class="bi bi-search"></i> Filtrar</button>
+                    </div>
+
+                </form>
+            </div>
+        </div>
+
+        <!-- Tabela de Registros -->
+        <div class="card shadow-sm mb-4">
+            <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+                <h6 class="mb-0 fw-bold"><i class="bi bi-list-check me-1"></i> Registros de Ponto ({{ registros|length }})</h6>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-striped align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Funcionário</th>
+                                <th>E-mail</th>
+                                <th>Data</th>
+                                <th>Tipo</th>
+                                <th>Horário</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for r in registros %}
+                            <tr>
+                                <td><strong>{{ r.usuario.nome }}</strong></td>
+                                <td class="text-muted small">{{ r.usuario.email }}</td>
+                                <td>{{ r.data }}</td>
+                                <td>
+                                    <span class="badge 
+                                        {% if r.tipo == 'Entrada' %}bg-success
+                                        {% elif r.tipo == 'Almoço' %}bg-warning text-dark
+                                        {% elif r.tipo == 'Retorno' %}bg-info text-white
+                                        {% else %}bg-danger{% endif %}">
+                                        {{ r.tipo }}
+                                    </span>
+                                </td>
+                                <td>{{ r.hora }}</td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="5" class="text-center text-muted py-4">Nenhum registro encontrado com os parâmetros informados.</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
