@@ -1,22 +1,38 @@
 {% extends 'base.html' %}
+
 {% block content %}
-<h2>Criar Conta</h2>
-<form method="POST">
-    <div class="input-group">
-        <label>Nome Completo:</label>
-        <input type="text" name="nome" required>
+<div class="row justify-content-center">
+    <div class="col-md-6 col-lg-5">
+        <div class="card main-card p-4 p-md-5">
+            <div class="text-center mb-4">
+                <h3 class="fw-bold mb-1">Criar Conta</h3>
+                <p class="text-muted small">Preencha os campos abaixo para se cadastrar</p>
+            </div>
+
+            <form method="POST" action="{{ url_for('cadastro') }}">
+                <div class="mb-3">
+                    <label for="nome" class="form-label fw-semibold">Nome Completo</label>
+                    <input type="text" class="form-control py-2" id="nome" name="nome" placeholder="Seu Nome" required>
+                </div>
+
+                <div class="mb-3">
+                    <label for="email" class="form-label fw-semibold">E-mail</label>
+                    <input type="email" class="form-control py-2" id="email" name="email" placeholder="seu@email.com" required>
+                </div>
+
+                <div class="mb-4">
+                    <label for="senha" class="form-label fw-semibold">Senha</label>
+                    <input type="password" class="form-control py-2" id="senha" name="senha" placeholder="••••••••" required>
+                </div>
+
+                <button type="submit" class="btn btn-success w-100 py-2 fw-semibold">Cadastrar</button>
+            </form>
+
+            <div class="text-center mt-4">
+                <span class="text-muted small">Já possui uma conta?</span>
+                <a href="{{ url_for('login') }}" class="small fw-bold text-decoration-none ms-1">Fazer Login</a>
+            </div>
+        </div>
     </div>
-    <div class="input-group">
-        <label>E-mail:</label>
-        <input type="email" name="email" required>
-    </div>
-    <div class="input-group">
-        <label>Senha:</label>
-        <input type="password" name="senha" required>
-    </div>
-    <button class="btn btn-primary" type="submit">Cadastrar</button>
-</form>
-<p style="font-size: 13px; margin-top: 15px;">
-    Já possui conta? <a href="/login">Fazer Login</a>
-</p>
+</div>
 {% endblock %}
