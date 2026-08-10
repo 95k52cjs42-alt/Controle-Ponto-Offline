@@ -1,18 +1,33 @@
 {% extends 'base.html' %}
+
 {% block content %}
-<h2>Entrar no Sistema</h2>
-<form method="POST">
-    <div class="input-group">
-        <label>E-mail:</label>
-        <input type="email" name="email" required>
+<div class="row justify-content-center">
+    <div class="col-md-5 col-lg-4">
+        <div class="card main-card p-4 p-md-5">
+            <div class="text-center mb-4">
+                <h3 class="fw-bold mb-1">Entrar no Sistema</h3>
+                <p class="text-muted small">Informe seus dados para acessar</p>
+            </div>
+
+            <form method="POST" action="{{ url_for('login') }}">
+                <div class="mb-3">
+                    <label for="email" class="form-label fw-semibold">E-mail</label>
+                    <input type="email" class="form-control py-2" id="email" name="email" placeholder="seu@email.com" required>
+                </div>
+
+                <div class="mb-4">
+                    <label for="senha" class="form-label fw-semibold">Senha</label>
+                    <input type="password" class="form-control py-2" id="senha" name="senha" placeholder="••••••••" required>
+                </div>
+
+                <button type="submit" class="btn btn-primary w-100 py-2 fw-semibold">Entrar</button>
+            </form>
+
+            <div class="text-center mt-4">
+                <span class="text-muted small">Não tem uma conta?</span>
+                <a href="{{ url_for('cadastro') }}" class="small fw-bold text-decoration-none ms-1">Cadastre-se</a>
+            </div>
+        </div>
     </div>
-    <div class="input-group">
-        <label>Senha:</label>
-        <input type="password" name="senha" required>
-    </div>
-    <button class="btn btn-primary" type="submit">Entrar</button>
-</form>
-<p style="font-size: 13px; margin-top: 15px;">
-    Não tem uma conta? <a href="/cadastro">Cadastre-se</a>
-</p>
+</div>
 {% endblock %}

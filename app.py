@@ -1,9 +1,9 @@
-from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
-from collections import defaultdict
-from functools import wraps
 import io
 import os
+from collections import defaultdict
+from datetime import datetime, timedelta
+from functools import wraps
+from zoneinfo import ZoneInfo
 
 from flask import (
     Flask,
@@ -22,11 +22,10 @@ from flask_login import (
     login_user,
     logout_user,
 )
-
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import check_password_hash, generate_password_hash
 
-# Bibliotecas para o PDF (ReportLab)
+# Bibliotecas para a geração do PDF (ReportLab)
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
@@ -56,7 +55,7 @@ CARGA_HORARIA_DIARIA = timedelta(hours=8)
 
 
 # ==========================================
-#         MODELOS DO BANCO DE DADOS
+#          MODELOS DO BANCO DE DADOS
 # ==========================================
 class Usuario(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -74,6 +73,7 @@ class RegistroPonto(db.Model):
     tipo = db.Column(db.String(20), nullable=False)
     hora = db.Column(db.String(8), nullable=False)   # HH:MM:SS
     usuario_id = db.Column(db.Integer, db.ForeignKey("usuario.id"), nullable=False)
+    foi_ajustado = db.Column(db.Boolean, default=False)
 
 
 class SolicitacaoCorrecao(db.Model):
@@ -96,7 +96,7 @@ def admin_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if not current_user.is_authenticated or not current_user.is_admin:
-            flash("Acesso permitido apenas para administradores.")
+            flash("Acesso permitido apenas para administradores.", "danger")
             return redirect(url_for("index"))
         return f(*args, **kwargs)
     return decorated_function
@@ -106,8 +106,24 @@ def admin_required(f):
 with app.app_context():
     db.create_all()
     try:
-        from sqlalchemy import text
-        db.session.execute(text("ALTER TABLE usuario ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE;"))
+        from sqlalchemy import inspect, text
+
+        inspector = inspect(db.engine)
+
+        # Migração da coluna is_admin em usuario
+        colunas_usuario = [c["name"] for c in inspector.get_columns("usuario")]
+        if "is_admin" not in colunas_usuario:
+            db.session.execute(
+                text("ALTER TABLE usuario ADD COLUMN is_admin BOOLEAN DEFAULT FALSE;")
+            )
+
+        # Migração da coluna foi_ajustado em registro_ponto
+        colunas_ponto = [c["name"] for c in inspector.get_columns("registro_ponto")]
+        if "foi_ajustado" not in colunas_ponto:
+            db.session.execute(
+                text("ALTER TABLE registro_ponto ADD COLUMN foi_ajustado BOOLEAN DEFAULT FALSE;")
+            )
+
         db.session.commit()
     except Exception as e:
         db.session.rollback()
@@ -131,7 +147,7 @@ def login():
             login_user(user)
             return redirect(url_for("index"))
         else:
-            flash("E-mail ou senha incorretos. Tente novamente.")
+            flash("E-mail ou senha incorretos. Tente novamente.", "danger")
 
     return render_template("login.html")
 
@@ -147,18 +163,20 @@ def cadastro():
         senha = request.form.get("senha", "")
 
         if Usuario.query.filter_by(email=email).first():
-            flash("Este e-mail já está cadastrado.")
+            flash("Este e-mail já está cadastrado.", "warning")
             return redirect(url_for("cadastro"))
 
+        is_first = Usuario.query.count() == 0
         novo_usuario = Usuario(
             nome=nome,
             email=email,
             senha_hash=generate_password_hash(senha, method="scrypt"),
+            is_admin=is_first
         )
         db.session.add(novo_usuario)
         db.session.commit()
 
-        flash("Conta criada com sucesso! Faça seu login.")
+        flash("Conta criada com sucesso! Faça seu login.", "success")
         return redirect(url_for("login"))
 
     return render_template("register.html")
@@ -168,7 +186,7 @@ def cadastro():
 @login_required
 def logout():
     logout_user()
-    flash("Você saiu da conta.")
+    flash("Você saiu da conta.", "info")
     return redirect(url_for("login"))
 
 
@@ -184,13 +202,11 @@ def meu_historico():
 
     query = RegistroPonto.query.filter_by(usuario_id=current_user.id)
 
-    # Filtro por Tipo de Ponto
     if tipo_ponto:
         query = query.filter_by(tipo=tipo_ponto)
 
     registros = query.order_by(RegistroPonto.id.desc()).all()
 
-    # Filtro por Intervalo de Datas no Python (formato DD/MM/YYYY)
     if data_inicio or data_fim:
         registros_filtrados = []
         d_inicio = datetime.strptime(data_inicio, "%Y-%m-%d").date() if data_inicio else None
@@ -215,6 +231,8 @@ def meu_historico():
         data_fim=data_fim,
         tipo_ponto=tipo_ponto,
     )
+
+
 # ==========================================
 #               ROTAS DO PONTO
 # ==========================================
@@ -240,7 +258,11 @@ def index():
         ultimo_ponto = "Nenhum ponto registrado ainda"
 
     return render_template(
-        "index.html", pontos_batidos=pontos_batidos, ultimo_ponto=ultimo_ponto
+        "index.html",
+        pontos_batidos=pontos_batidos,
+        ultimo_ponto=ultimo_ponto,
+        data_hoje=data_hoje,
+        registros_hoje=pontos_hoje_objs
     )
 
 
@@ -256,35 +278,34 @@ def registrar(tipo):
         tipo=tipo,
         hora=hora_atual,
         usuario_id=current_user.id,
+        foi_ajustado=False
     )
     db.session.add(novo_ponto)
     db.session.commit()
 
-    flash(f"Ponto ({tipo}) registrado às {hora_atual} com sucesso!")
+    flash(f"Ponto ({tipo}) registrado às {hora_atual} com sucesso!", "success")
     return redirect(url_for("index"))
 
 
 # ==========================================
-# ROTAS DE SOLICITAÇÃO DE CORREÇÃO (FUNCIONÁRIO)
+# ROTAS DE SOLICITAÇÃO DE CORREÇÃO
 # ==========================================
 @app.route("/solicitar-correcao", methods=["GET", "POST"])
 @login_required
 def solicitar_correcao():
     if request.method == "POST":
-        data_raw = request.form.get("data_ponto")  # Formato YYYY-MM-DD
+        data_raw = request.form.get("data_ponto")
         tipo_ponto = request.form.get("tipo_ponto")
-        hora = request.form.get("hora_correta")    # Formato HH:MM
+        hora = request.form.get("hora_correta")
         justificativa = request.form.get("justificativa", "").strip()
 
         if not data_raw or not tipo_ponto or not hora or not justificativa:
-            flash("Preencha todos os campos para solicitar a correção.")
+            flash("Preencha todos os campos para solicitar a correção.", "warning")
             return redirect(url_for("solicitar_correcao"))
 
-        # Formata data para DD/MM/YYYY
         data_obj = datetime.strptime(data_raw, "%Y-%m-%d")
         data_formatada = data_obj.strftime("%d/%m/%Y")
         
-        # Garante segundos no horário (HH:MM:SS)
         if len(hora) == 5:
             hora += ":00"
 
@@ -298,7 +319,7 @@ def solicitar_correcao():
         db.session.add(solicitacao)
         db.session.commit()
 
-        flash("Solicitação de correção enviada com sucesso ao Administrador!")
+        flash("Solicitação de correção enviada com sucesso ao Administrador!", "info")
         return redirect(url_for("solicitar_correcao"))
 
     minhas_solicitacoes = SolicitacaoCorrecao.query.filter_by(
@@ -318,7 +339,7 @@ def exportar_pdf():
     )
 
     if not registros:
-        flash("Nenhum registro encontrado para exportar em PDF.")
+        flash("Nenhum registro encontrado para exportar em PDF.", "warning")
         return redirect(url_for("index"))
 
     dias = defaultdict(dict)
@@ -464,23 +485,19 @@ def admin_historico():
 
     query = RegistroPonto.query.join(Usuario)
 
-    # Filtro por Funcionário via Select
     if usuario_id:
         query = query.filter(RegistroPonto.usuario_id == usuario_id)
 
-    # Filtro por Nome ou E-mail
     if busca_nome:
         query = query.filter(
             (Usuario.nome.ilike(f"%{busca_nome}%")) | (Usuario.email.ilike(f"%{busca_nome}%"))
         )
 
-    # Filtro por Tipo de Ponto
     if tipo_ponto:
         query = query.filter(RegistroPonto.tipo == tipo_ponto)
 
     registros = query.order_by(RegistroPonto.id.desc()).all()
 
-    # Filtro por Intervalo de Datas no Python (formato DD/MM/YYYY)
     if data_inicio or data_fim:
         registros_filtrados = []
         d_inicio = datetime.strptime(data_inicio, "%Y-%m-%d").date() if data_inicio else None
@@ -511,6 +528,7 @@ def admin_historico():
         tipo_ponto=tipo_ponto,
     )
 
+
 @app.route("/admin/solicitacoes")
 @login_required
 @admin_required
@@ -528,7 +546,6 @@ def responder_solicitacao(id, acao):
     if acao == "aprovar":
         solicitacao.status = "Aprovada"
         
-        # Verifica se já existe um registro do mesmo tipo nessa data para o usuário
         ponto_existente = RegistroPonto.query.filter_by(
             usuario_id=solicitacao.usuario_id,
             data=solicitacao.data_ponto,
@@ -537,20 +554,22 @@ def responder_solicitacao(id, acao):
 
         if ponto_existente:
             ponto_existente.hora = solicitacao.hora_correta
+            ponto_existente.foi_ajustado = True
         else:
             novo_ponto = RegistroPonto(
                 data=solicitacao.data_ponto,
                 tipo=solicitacao.tipo_ponto,
                 hora=solicitacao.hora_correta,
-                usuario_id=solicitacao.usuario_id
+                usuario_id=solicitacao.usuario_id,
+                foi_ajustado=True
             )
             db.session.add(novo_ponto)
 
-        flash("Solicitação APROVADA e histórico de ponto atualizado!")
+        flash("Solicitação APROVADA e histórico de ponto atualizado!", "success")
 
     elif acao == "recusar":
         solicitacao.status = "Recusada"
-        flash("Solicitação RECUSADA com sucesso.")
+        flash("Solicitação RECUSADA com sucesso.", "warning")
 
     db.session.commit()
     return redirect(url_for("admin_solicitacoes"))
@@ -561,7 +580,7 @@ def responder_solicitacao(id, acao):
 @admin_required
 def toggle_admin(user_id):
     if user_id == current_user.id:
-        flash("Você não pode alterar o seu próprio status de administrador.")
+        flash("Você não pode alterar o seu próprio status de administrador.", "danger")
         return redirect(url_for("admin_panel"))
 
     usuario = Usuario.query.get_or_404(user_id)
@@ -569,7 +588,7 @@ def toggle_admin(user_id):
     db.session.commit()
 
     status = "promovido a" if usuario.is_admin else "removido de"
-    flash(f"Usuário {usuario.nome} foi {status} Administrador com sucesso!")
+    flash(f"Usuário {usuario.nome} foi {status} Administrador com sucesso!", "success")
     return redirect(url_for("admin_panel"))
 
 
