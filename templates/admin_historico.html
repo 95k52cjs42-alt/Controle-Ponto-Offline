@@ -1,117 +1,232 @@
 {% extends 'base.html' %}
 
+{% block title %}Histórico Geral de Pontos - Admin{% endblock %}
+
 {% block content %}
-<div class="row justify-content-center">
-    <div class="col-md-8 col-lg-7">
-        <div class="card main-card p-4 p-md-5">
-            <h3 class="fw-bold mb-4 text-center">Histórico Geral de Pontos</h3>
+<style>
+    .fade-in-up {
+        animation: fadeInUp 0.5s ease-out forwards;
+    }
 
-            <!-- Filtros Admin -->
-            <form method="GET" action="{{ url_for('admin_historico') }}" class="mb-4">
-                <div class="mb-3">
-                    <label for="usuario_id" class="form-label text-muted small fw-semibold">Funcionário</label>
-                    <select class="form-select py-2" id="usuario_id" name="usuario_id">
-                        <option value="">Todos os Funcionários</option>
-                        {% if usuarios %}
-                            {% for u in usuarios %}
-                                <option value="{{ u.id }}" {% if request.args.get('usuario_id')|int == u.id %}selected{% endif %}>
-                                    {{ u.nome }}
-                                </option>
-                            {% endfor %}
-                        {% endif %}
-                    </select>
-                </div>
+    @keyframes fadeInUp {
+        from { opacity: 0; transform: translateY(15px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
 
-                <div class="mb-3">
-                    <label for="data_inicio" class="form-label text-muted small fw-semibold">Data Inicial</label>
-                    <input type="date" class="form-control py-2" id="data_inicio" name="data_inicio" value="{{ request.args.get('data_inicio', '') }}">
-                </div>
+    /* Card dos Filtros Adaptável */
+    .pastel-card {
+        background: var(--bg-card) !important;
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-xl);
+        box-shadow: var(--shadow-sm);
+    }
 
-                <div class="mb-3">
-                    <label for="data_fim" class="form-label text-muted small fw-semibold">Data Final</label>
-                    <input type="date" class="form-control py-2" id="data_fim" name="data_fim" value="{{ request.args.get('data_fim', '') }}">
-                </div>
+    /* Inputs e Selects Adaptáveis */
+    .form-control, .form-select {
+        border-radius: 12px;
+        border: 1px solid var(--border-color) !important;
+        background-color: var(--bg-input) !important;
+        color: var(--text-main) !important;
+        padding: 0.6rem 1rem;
+    }
 
-                <div class="mb-4">
-                    <label for="tipo" class="form-label text-muted small fw-semibold">Tipo</label>
-                    <select class="form-select py-2" id="tipo" name="tipo">
-                        <option value="">Todos</option>
-                        <option value="Entrada" {% if request.args.get('tipo') == 'Entrada' %}selected{% endif %}>Entrada</option>
-                        <option value="Almoço" {% if request.args.get('tipo') == 'Almoço' %}selected{% endif %}>Almoço</option>
-                        <option value="Retorno" {% if request.args.get('tipo') == 'Retorno' %}selected{% endif %}>Retorno</option>
-                        <option value="Saída" {% if request.args.get('tipo') == 'Saída' %}selected{% endif %}>Saída</option>
-                    </select>
-                </div>
+    .form-control:focus, .form-select:focus {
+        background-color: var(--bg-card) !important;
+        border-color: var(--text-muted) !important;
+        box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.1);
+    }
 
-                <button type="submit" class="btn btn-primary w-100 py-2 fw-semibold">Filtrar</button>
-            </form>
+    /* --- TABELA CUSTOMIZADA FIXA PARA MODO ESCURO/CLARO --- */
+    .table-custom {
+        border-collapse: separate !important;
+        border-spacing: 0 10px !important;
+        background-color: transparent !important;
+    }
 
-            <!-- Tabela de Registros Admin -->
-            <div class="table-responsive">
-                <table class="table align-middle mb-0">
-                    <thead class="table-dark">
-                        <tr>
-                            <th scope="col">Usuário</th>
-                            <th scope="col" class="text-center">Data</th>
-                            <th scope="col" class="text-center">Tipo</th>
-                            <th scope="col" class="text-center">Horário</th>
-                            <th scope="col" class="text-end">Status</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for reg in registros %}
-                        <tr>
-                            <td>
-                                <div class="fw-bold">{{ reg.usuario.nome if reg.usuario is defined else (reg.nome if reg.nome is defined else 'Usuário') }}</div>
-                                <div class="text-muted small">{{ reg.usuario.email if reg.usuario is defined else (reg.email if reg.email is defined else '') }}</div>
-                            </td>
-                            <td class="text-center">
-                                {% if reg.data is defined %}{{ reg.data }}{% elif reg.data_hora is defined %}{{ reg.data_hora.strftime('%d/%m/%Y') }}{% endif %}
-                            </td>
-                            <td class="text-center">
-                                {% set t = reg.tipo if reg.tipo is defined else reg['tipo'] %}
-                                {% if t == 'Entrada' %}
-                                    <span class="badge bg-success px-3 py-1">Entrada</span>
-                                {% elif t == 'Almoço' %}
-                                    <span class="badge bg-warning text-dark px-3 py-1">Almoço</span>
-                                {% elif t == 'Retorno' %}
-                                    <span class="badge bg-info px-3 py-1">Retorno</span>
-                                {% elif t == 'Saída' %}
-                                    <span class="badge bg-danger px-3 py-1">Saída</span>
-                                {% else %}
-                                    <span class="badge bg-secondary px-3 py-1">{{ t }}</span>
-                                {% endif %}
-                            </td>
-                            <td class="fw-bold text-center">
-                                {% if reg.hora is defined %}{{ reg.hora }}{% elif reg.data_hora is defined %}{{ reg.data_hora.strftime('%H:%M:%S') }}{% endif %}
-                            </td>
-                            <td class="text-end">
-                                {% set e_ajustado = reg.foi_ajustado or reg.ajustado or reg.is_adjusted or reg.editado or (reg['foi_ajustado'] is defined and reg['foi_ajustado']) or (reg['ajustado'] is defined and reg['ajustado']) or (reg['status'] is defined and reg['status'] == 'Ajustado') %}
-                                {% if e_ajustado %}
-                                    <span class="badge bg-primary text-white px-2 py-1" data-bs-toggle="tooltip" title="Ponto editado/ajustado">
-                                        <i class="bi bi-pencil-fill me-1"></i>Ajustado
-                                    </span>
-                                {% else %}
-                                    <span class="text-muted small">-</span>
-                                {% endif %}
-                            </td>
-                        </tr>
-                        {% else %}
-                        <tr>
-                            <td colspan="5" class="text-center text-muted py-3">Nenhum registro encontrado.</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
+    /* Cabeçalho da tabela visível */
+    .table-custom thead th {
+        color: var(--text-muted) !important;
+        font-weight: 600;
+        border: none !important;
+        background: transparent !important;
+    }
+
+    /* Linhas da Tabela como Cards */
+    .table-custom tbody tr {
+        background-color: var(--bg-card) !important;
+        box-shadow: var(--shadow-sm);
+        border-radius: var(--radius-md);
+        transition: transform 0.2s ease;
+    }
+
+    .table-custom tbody tr:hover {
+        transform: translateY(-2px);
+    }
+
+    /* Células da Tabela */
+    .table-custom tbody td {
+        padding: 1rem !important;
+        vertical-align: middle !important;
+        border: none !important;
+        background-color: transparent !important;
+        color: var(--text-main) !important;
+    }
+
+    .table-custom tbody td:first-child { 
+        border-top-left-radius: var(--radius-md); 
+        border-bottom-left-radius: var(--radius-md); 
+    }
+    .table-custom tbody td:last-child { 
+        border-top-right-radius: var(--radius-md); 
+        border-bottom-right-radius: var(--radius-md); 
+    }
+
+    /* Badges Adaptáveis */
+    .badge-entrada { background: rgba(16, 185, 129, 0.2) !important; color: #34d399 !important; border: 1px solid rgba(16, 185, 129, 0.3); }
+    .badge-almoco { background: rgba(245, 158, 11, 0.2) !important; color: #fbbf24 !important; border: 1px solid rgba(245, 158, 11, 0.3); }
+    .badge-retorno { background: rgba(14, 165, 233, 0.2) !important; color: #38bdf8 !important; border: 1px solid rgba(14, 165, 233, 0.3); }
+    .badge-saida { background: rgba(239, 68, 68, 0.2) !important; color: #f87171 !important; border: 1px solid rgba(239, 68, 68, 0.3); }
+    .badge-ajustado { background: var(--bg-input) !important; color: var(--text-muted) !important; border: 1px solid var(--border-color); }
+</style>
+
+<div class="row justify-content-center fade-in-up">
+    <div class="col-lg-10 col-xl-9">
+
+        <!-- Cabeçalho -->
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <div>
+                <h3 class="fw-bold m-0" style="color: var(--text-main);">Histórico Geral de Pontos</h3>
+                <span class="small" style="color: var(--text-muted);">Consulte os pontos registrados por todos os colaboradores</span>
             </div>
-
-            <div class="mt-4 text-center">
-                <a href="{{ url_for('index') }}" class="btn btn-outline-secondary btn-sm fw-semibold">
-                    <i class="bi bi-arrow-left me-1"></i> Voltar ao Inicio
-                </a>
-            </div>
-
+            <a href="{{ url_for('index') }}" class="btn btn-outline-secondary rounded-4 px-3 py-2 fw-semibold">
+                <i class="bi bi-arrow-left me-1"></i> Voltar
+            </a>
         </div>
+
+        <!-- Filtros Admin -->
+        <div class="pastel-card p-4 mb-4">
+            <form method="GET" action="{{ url_for('admin_historico') }}">
+                <div class="row g-3">
+                    <div class="col-md-6 col-lg-3">
+                        <label for="usuario_id" class="form-label small fw-semibold" style="color: var(--text-muted);">Funcionário</label>
+                        <select class="form-select" id="usuario_id" name="usuario_id">
+                            <option value="">Todos os Funcionários</option>
+                            {% if usuarios %}
+                                {% for u in usuarios %}
+                                    <option value="{{ u.id }}" {% if request.args.get('usuario_id')|int == u.id %}selected{% endif %}>
+                                        {{ u.nome }}
+                                    </option>
+                                {% endfor %}
+                            {% endif %}
+                        </select>
+                    </div>
+
+                    <div class="col-md-6 col-lg-3">
+                        <label for="data_inicio" class="form-label small fw-semibold" style="color: var(--text-muted);">Data Inicial</label>
+                        <input type="date" class="form-control" id="data_inicio" name="data_inicio" value="{{ request.args.get('data_inicio', '') }}">
+                    </div>
+
+                    <div class="col-md-6 col-lg-3">
+                        <label for="data_fim" class="form-label small fw-semibold" style="color: var(--text-muted);">Data Final</label>
+                        <input type="date" class="form-control" id="data_fim" name="data_fim" value="{{ request.args.get('data_fim', '') }}">
+                    </div>
+
+                    <div class="col-md-6 col-lg-3">
+                        <label for="tipo" class="form-label small fw-semibold" style="color: var(--text-muted);">Tipo</label>
+                        <select class="form-select" id="tipo" name="tipo">
+                            <option value="">Todos</option>
+                            <option value="Entrada" {% if request.args.get('tipo') == 'Entrada' %}selected{% endif %}>Entrada</option>
+                            <option value="Almoço" {% if request.args.get('tipo') == 'Almoço' %}selected{% endif %}>Almoço</option>
+                            <option value="Retorno" {% if request.args.get('tipo') == 'Retorno' %}selected{% endif %}>Retorno</option>
+                            <option value="Saída" {% if request.args.get('tipo') == 'Saída' %}selected{% endif %}>Saída</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="d-flex justify-content-end gap-2 mt-4">
+                    <a href="{{ url_for('admin_historico') }}" class="btn btn-outline-secondary rounded-3 px-4 py-2">Limpar</a>
+                    <button type="submit" class="btn btn-primary rounded-3 px-4 py-2 fw-semibold">
+                        <i class="bi bi-funnel me-1"></i> Filtrar
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Tabela de Registros Admin -->
+        <div class="table-responsive">
+            <table class="table table-custom align-middle">
+                <thead>
+                    <tr class="small text-uppercase" style="color: var(--text-muted);">
+                        <th class="ps-3">Usuário</th>
+                        <th class="text-center">Data</th>
+                        <th class="text-center">Tipo</th>
+                        <th class="text-center">Horário</th>
+                        <th class="text-end pe-3">Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for reg in registros %}
+                    <tr>
+                        <td class="ps-3">
+                            <div class="d-flex align-items-center gap-2">
+                                <div class="rounded-circle d-flex align-items-center justify-content-center fw-bold" 
+                                     style="width: 35px; height: 35px; flex-shrink: 0; background-color: var(--bg-input); color: var(--text-main);">
+                                    {{ (reg.usuario.nome if reg.usuario is defined else (reg.nome if reg.nome is defined else 'U'))[0] | upper }}
+                                </div>
+                                <div>
+                                    <div class="fw-bold" style="color: var(--text-main);">{{ reg.usuario.nome if reg.usuario is defined else (reg.nome if reg.nome is defined else 'Usuário') }}</div>
+                                    <div class="small" style="color: var(--text-muted);">{{ reg.usuario.email if reg.usuario is defined else (reg.email if reg.email is defined else '') }}</div>
+                                </div>
+                            </div>
+                        </td>
+
+                        <td class="text-center fw-semibold" style="white-space: nowrap; color: var(--text-muted);">
+                            <i class="bi bi-calendar3 me-1"></i>
+                            {% if reg.data is defined %}{{ reg.data }}{% elif reg.data_hora is defined %}{{ reg.data_hora.strftime('%d/%m/%Y') }}{% endif %}
+                        </td>
+
+                        <td class="text-center">
+                            {% set t = reg.tipo if reg.tipo is defined else reg['tipo'] %}
+                            {% if t == 'Entrada' %}
+                                <span class="badge badge-entrada px-3 py-2 rounded-pill fw-semibold">Entrada</span>
+                            {% elif t == 'Almoço' %}
+                                <span class="badge badge-almoco px-3 py-2 rounded-pill fw-semibold">Almoço</span>
+                            {% elif t == 'Retorno' %}
+                                <span class="badge badge-retorno px-3 py-2 rounded-pill fw-semibold">Retorno</span>
+                            {% elif t == 'Saída' %}
+                                <span class="badge badge-saida px-3 py-2 rounded-pill fw-semibold">Saída</span>
+                            {% else %}
+                                <span class="badge bg-secondary px-3 py-2 rounded-pill">{{ t }}</span>
+                            {% endif %}
+                        </td>
+
+                        <td class="fw-bold text-center" style="white-space: nowrap; color: var(--text-main);">
+                            {% if reg.hora is defined %}{{ reg.hora }}{% elif reg.data_hora is defined %}{{ reg.data_hora.strftime('%H:%M:%S') }}{% endif %}
+                        </td>
+
+                        <td class="text-end pe-3">
+                            {% set e_ajustado = reg.foi_ajustado or reg.ajustado or reg.is_adjusted or reg.editado or (reg['foi_ajustado'] is defined and reg['foi_ajustado']) or (reg['ajustado'] is defined and reg['ajustado']) or (reg['status'] is defined and reg['status'] == 'Ajustado') %}
+                            {% if e_ajustado %}
+                                <span class="badge badge-ajustado px-2 py-1 rounded-3 small" data-bs-toggle="tooltip" title="Ponto editado/ajustado">
+                                    <i class="bi bi-pencil-fill me-1 text-primary"></i>Ajustado
+                                </span>
+                            {% else %}
+                                <span class="small" style="color: var(--text-muted);">-</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="5" class="text-center py-5 rounded-4" style="background-color: var(--bg-card); color: var(--text-muted);">
+                            <i class="bi bi-inbox fs-2 d-block mb-2"></i>
+                            Nenhum registro encontrado para estes filtros.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
     </div>
 </div>
 {% endblock %}

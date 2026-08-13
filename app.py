@@ -34,6 +34,8 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "chave_secreta_super_segura_ponto_web")
 
+
+
 # -----------------------------------------------------------------------------
 # CONFIGURAÇÃO DO BANCO DE DADOS
 # -----------------------------------------------------------------------------
@@ -128,8 +130,27 @@ with app.app_context():
 
 
 # ==========================================
-# SISTEMA DE NOTIFICAÇÕES
+#         SISTEMA DE NOTIFICAÇÕES
 # ==========================================
+
+# Definimos os 4 pontos obrigatórios da jornada diária
+PONTOS_OBRIGATORIOS = ["Entrada", "Almoço", "Retorno", "Saída"]
+
+
+def identificar_pontos_faltantes(registros_do_dia):
+    """Dado uma lista de registros de um único dia,
+
+    retorna uma lista com os tipos de ponto que faltaram bater.
+    """
+    # p.tipo garante que vai ler o tipo correto do seu model RegistroPonto
+    tipos_batidos = [
+        getattr(p, "tipo", getattr(p, "tipo_ponto", ""))
+        for p in registros_do_dia
+    ]
+    faltantes = [p for p in PONTOS_OBRIGATORIOS if p not in tipos_batidos]
+    return faltantes
+
+
 def obter_notificacoes_usuario(user_id):
     if not user_id:
         return []
@@ -138,25 +159,38 @@ def obter_notificacoes_usuario(user_id):
     notificacoes = []
 
     try:
+        # Busca todos os pontos do usuário
         registros = RegistroPonto.query.filter_by(usuario_id=user_id).all()
-        dias_com_ponto = set()
+
+        # Agrupa registros por data e guarda quais datas tiveram ponto
+        pontos_por_data = {}
         primeiro_registro_data = hoje
 
         for r in registros:
             try:
+                # Converte string 'DD/MM/AAAA' para objeto date
                 d_obj = datetime.strptime(r.data, "%d/%m/%Y").date()
-                dias_com_ponto.add(d_obj)
+
+                if d_obj not in pontos_por_data:
+                    pontos_por_data[d_obj] = []
+                pontos_por_data[d_obj].append(r)
+
                 if d_obj < primeiro_registro_data:
                     primeiro_registro_data = d_obj
-            except ValueError:
+            except (ValueError, TypeError):
                 pass
 
-        limite_busca = primeiro_registro_data if registros else (hoje - timedelta(days=30))
+        # 1. VERIFICAÇÃO DE DIAS ÚTEIS COM FALTAS TOTAIS
+        limite_busca = (
+            primeiro_registro_data
+            if registros
+            else (hoje - timedelta(days=30))
+        )
         curr = hoje - timedelta(days=1)
         faltas_count = 0
 
         while curr >= limite_busca:
-            if eh_dia_util(curr) and curr not in dias_com_ponto:
+            if eh_dia_util(curr) and curr not in pontos_por_data:
                 faltas_count += 1
             curr -= timedelta(days=1)
 
@@ -166,12 +200,35 @@ def obter_notificacoes_usuario(user_id):
                 "tipo": "danger",
                 "titulo": "Pontos Pendentes!",
                 "mensagem": f"Você possui {faltas_count} dia(s) útil(eis) com registro de ponto ausente.",
-                "link": url_for("meu_historico")
+                "link": url_for("meu_historico"),
             })
 
+        # 2. VERIFICAÇÃO DE PONTOS INCOMPLETOS EM DIAS ANTERIORES
+        dias_incompletos = 0
+        for d_obj, regs_do_dia in pontos_por_data.items():
+            if d_obj < hoje and eh_dia_util(d_obj):
+                faltantes = identificar_pontos_faltantes(regs_do_dia)
+                if faltantes:
+                    dias_incompletos += 1
+
+        if dias_incompletos > 0:
+            notificacoes.append({
+                "id": "pontos_incompletos",
+                "tipo": "warning",
+                "titulo": "Pontos Incompletos!",
+                "mensagem": f"Você tem {dias_incompletos} dia(s) com batidas de ponto incompletas.",
+                "link": url_for("meu_historico"),
+            })
+
+        # 3. VERIFICAÇÃO DO PONTO DE HOJE
         if eh_dia_util(hoje):
             data_hoje_str = hoje.strftime("%d/%m/%Y")
-            pontos_hoje = [p.tipo for p in RegistroPonto.query.filter_by(usuario_id=user_id, data=data_hoje_str).all()]
+            pontos_hoje = [
+                p.tipo
+                for p in RegistroPonto.query.filter_by(
+                    usuario_id=user_id, data=data_hoje_str
+                ).all()
+            ]
 
             if "Entrada" not in pontos_hoje:
                 notificacoes.append({
@@ -179,7 +236,7 @@ def obter_notificacoes_usuario(user_id):
                     "tipo": "warning",
                     "titulo": "Atenção ao Ponto",
                     "mensagem": "Você ainda não registrou o ponto de Entrada hoje!",
-                    "link": url_for("index")
+                    "link": url_for("index"),
                 })
 
     except Exception as e:
@@ -194,7 +251,9 @@ def inject_notifications():
     try:
         if current_user and current_user.is_authenticated:
             notifs = obter_notificacoes_usuario(current_user.id)
-            return dict(notificacoes_usuario=notifs, total_notificacoes=len(notifs))
+            return dict(
+                notificacoes_usuario=notifs, total_notificacoes=len(notifs)
+            )
     except Exception:
         pass
     return dict(notificacoes_usuario=[], total_notificacoes=0)
@@ -315,69 +374,37 @@ def registrar(tipo):
     return redirect(url_for("index"))
 
 
-@app.route("/meu-historico")
+@app.route("/meu_historico")
 @login_required
 def meu_historico():
-    data_inicio_str = request.args.get("data_inicio", "").strip()
-    data_fim_str = request.args.get("data_fim", "").strip()
-    tipo_ponto = request.args.get("tipo_ponto", "").strip()
-
-    hoje = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
-
-    registros_query = RegistroPonto.query.filter_by(usuario_id=current_user.id).all()
-
-    pontos_por_data = defaultdict(list)
-    primeira_data_banco = hoje
-
-    for r in registros_query:
-        try:
-            d_obj = datetime.strptime(r.data, "%d/%m/%Y").date()
-            pontos_por_data[d_obj].append(r)
-            if d_obj < primeira_data_banco:
-                primeira_data_banco = d_obj
-        except ValueError:
-            pass
-
-    d_inicio = datetime.strptime(data_inicio_str, "%Y-%m-%d").date() if data_inicio_str else primeira_data_banco
-    d_fim = datetime.strptime(data_fim_str, "%Y-%m-%d").date() if data_fim_str else hoje
-
-    lista_historico = []
-    curr = d_fim
-
-    while curr >= d_inicio:
-        registros_dia = pontos_por_data.get(curr, [])
-
-        if tipo_ponto:
-            registros_dia = [r for r in registros_dia if r.tipo == tipo_ponto]
-
-        if registros_dia:
-            for r in registros_dia:
-                lista_historico.append({
-                    "data": r.data,
-                    "tipo": r.tipo,
-                    "hora": r.hora,
-                    "status": "Ajustado" if r.foi_ajustado else "Normal",
-                    "is_falta": False
-                })
-        elif eh_dia_util(curr) and not tipo_ponto:
-            lista_historico.append({
-                "data": curr.strftime("%d/%m/%Y"),
-                "tipo": "Sem Registro",
-                "hora": "--:--:--",
-                "status": "FALTA",
-                "is_falta": True
-            })
-
-        curr -= timedelta(days=1)
-
-    return render_template(
-        "meu_historico.html",
-        registros=lista_historico,
-        data_inicio=data_inicio_str,
-        data_fim=data_fim_str,
-        tipo_ponto=tipo_ponto,
+    registros = (
+        RegistroPonto.query.filter_by(usuario_id=current_user.id)
+        .order_by(RegistroPonto.id.desc())
+        .all()
     )
 
+    # 1. Agrupa os pontos batidos por data ('DD/MM/AAAA')
+    pontos_por_data = {}
+    for r in registros:
+        data_str = r.data
+        if data_str not in pontos_por_data:
+            pontos_por_data[data_str] = []
+        pontos_por_data[data_str].append(r)
+
+    # 2. Analisa os pontos faltantes para cada dia
+    historico_analisado = []
+    for data_str, registros_do_dia in pontos_por_data.items():
+        faltantes = identificar_pontos_faltantes(registros_do_dia)
+        historico_analisado.append({
+            "data": data_str,
+            "registros": registros_do_dia,
+            "faltantes": faltantes,
+            "incompleto": len(faltantes) > 0,
+        })
+
+    return render_template(
+        "meu_historico.html", historico=historico_analisado
+    )
 
 @app.route("/solicitar-correcao", methods=["GET", "POST"])
 @login_required

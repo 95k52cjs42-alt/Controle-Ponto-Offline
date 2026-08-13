@@ -1,103 +1,424 @@
 <!DOCTYPE html>
-<html lang="pt-br">
+<html lang="pt-br" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Meu Histórico de Pontos</title>
+    <title>Meu Histórico | Controle de Ponto</title>
+    
+    <!-- Google Fonts: Outfit -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Bootstrap 5 & Icons -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
-</head>
-<body class="bg-light py-4">
 
-    <div class="container">
+    <style>
+        /* TEMA ESCURO (Padrão) */
+        [data-theme="dark"] {
+            --bg-dark: #0b0f19;
+            --card-bg: #111827;
+            --card-border: #1f293d;
+            --text-main: #ffffff;
+            --text-muted: #94a3b8;
+            
+            --input-bg: #1a2332;
+            --input-border: #2d3d54;
+            --input-text: #ffffff;
+            
+            --blue-accent: #2563eb;
+            --blue-hover: #1d4ed8;
+            --blue-glow: rgba(37, 99, 235, 0.25);
+
+            --nav-btn-bg: rgba(255, 255, 255, 0.05);
+            --nav-btn-hover: rgba(255, 255, 255, 0.12);
+
+            --table-row-bg: #111827;
+            --table-row-border: #1f293d;
+
+            --badge-ponto-bg: #1a2332;
+            --badge-ponto-text: #e2e8f0;
+            --badge-ponto-border: #2d3d54;
+
+            --badge-normal-bg: rgba(16, 185, 129, 0.15);
+            --badge-normal-text: #34d399;
+
+            --badge-falta-bg: rgba(239, 68, 68, 0.2);
+            --badge-falta-text: #fca5a5;
+        }
+
+        /* TEMA CLARO */
+        [data-theme="light"] {
+            --bg-dark: #f1f5f9;
+            --card-bg: #ffffff;
+            --card-border: #e2e8f0;
+            --text-main: #0f172a;
+            --text-muted: #64748b;
+            
+            --input-bg: #f8fafc;
+            --input-border: #cbd5e1;
+            --input-text: #0f172a;
+            
+            --blue-accent: #2563eb;
+            --blue-hover: #1d4ed8;
+            --blue-glow: rgba(37, 99, 235, 0.15);
+
+            --nav-btn-bg: #ffffff;
+            --nav-btn-hover: #e2e8f0;
+
+            --table-row-bg: #ffffff;
+            --table-row-border: #e2e8f0;
+
+            --badge-ponto-bg: #f1f5f9;
+            --badge-ponto-text: #334155;
+            --badge-ponto-border: #e2e8f0;
+
+            --badge-normal-bg: #e6f4ea;
+            --badge-normal-text: #1e7e34;
+
+            --badge-falta-bg: #ffebee;
+            --badge-falta-text: #c62828;
+        }
+
+        :root {
+            --radius-main: 24px;
+            --radius-btn: 12px;
+            --radius-md: 16px;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            min-height: 100vh;
+            padding: 2rem 1rem;
+            transition: background-color 0.3s ease, color 0.3s ease;
+        }
+
+        .text-muted {
+            color: var(--text-muted) !important;
+        }
+
+        .fade-in-up {
+            animation: fadeInUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(15px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Nav & Buttons */
+        .nav-btn {
+            background: var(--nav-btn-bg);
+            border: 1px solid var(--card-border);
+            color: var(--text-main);
+            padding: 0.5rem 1rem;
+            border-radius: var(--radius-btn);
+            font-size: 0.9rem;
+            font-weight: 500;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s ease;
+            cursor: pointer;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        }
+
+        .nav-btn:hover {
+            background: var(--nav-btn-hover);
+            color: var(--text-main);
+            border-color: rgba(148, 163, 184, 0.4);
+        }
+
+        .btn-theme {
+            padding: 0.5rem 0.8rem;
+            font-size: 1rem;
+        }
+
+        /* Card / Containers */
+        .custom-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: var(--radius-main);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
+            transition: background-color 0.3s ease, border-color 0.3s ease;
+        }
+
+        /* Form Inputs */
+        .form-control, .form-select {
+            border-radius: 12px;
+            border: 1px solid var(--input-border);
+            background-color: var(--input-bg);
+            color: var(--input-text);
+            padding: 0.6rem 1rem;
+            transition: all 0.2s ease;
+        }
+
+        .form-control:focus, .form-select:focus {
+            background-color: var(--input-bg);
+            color: var(--input-text);
+            border-color: var(--blue-accent);
+            box-shadow: 0 0 0 4px var(--blue-glow);
+        }
+
+        [data-theme="dark"] input[type="date"]::-webkit-calendar-picker-indicator {
+            filter: invert(1);
+        }
+
+        /* Tabela Customizada (Garantindo compatibilidade total no Dark Mode) */
+        .table-custom {
+            border-collapse: separate;
+            border-spacing: 0 10px;
+            color: var(--text-main);
+            width: 100%;
+        }
+
+        .table-custom th {
+            border: none;
+            color: var(--text-muted);
+            background: transparent !important;
+        }
+
+        .table-custom tbody tr {
+            background-color: var(--table-row-bg) !important;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+            border-radius: var(--radius-md);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .table-custom tbody tr:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 18px rgba(0, 0, 0, 0.15);
+        }
+
+        .table-custom td {
+            padding: 1.1rem 1rem;
+            vertical-align: middle;
+            background-color: var(--table-row-bg) !important;
+            color: var(--text-main) !important;
+            border-top: 1px solid var(--table-row-border);
+            border-bottom: 1px solid var(--table-row-border);
+        }
+
+        .table-custom td:first-child { 
+            border-left: 1px solid var(--table-row-border);
+            border-radius: var(--radius-md) 0 0 var(--radius-md); 
+        }
+        
+        .table-custom td:last-child { 
+            border-right: 1px solid var(--table-row-border);
+            border-radius: 0 var(--radius-md) var(--radius-md) 0; 
+        }
+
+        /* Badges de Estado */
+        .badge-normal { 
+            background: var(--badge-normal-bg); 
+            color: var(--badge-normal-text); 
+        }
+
+        .badge-falta { 
+            background: var(--badge-falta-bg); 
+            color: var(--badge-falta-text); 
+        }
+
+        .badge-ponto { 
+            background: var(--badge-ponto-bg); 
+            color: var(--badge-ponto-text); 
+            border: 1px solid var(--badge-ponto-border); 
+        }
+
+        .btn-adjust {
+            border-radius: 12px;
+            font-weight: 600;
+            padding: 0.4rem 0.9rem;
+            transition: all 0.2s ease;
+        }
+
+        .btn-adjust:hover {
+            transform: translateY(-2px);
+        }
+    </style>
+</head>
+<body class="py-5">
+
+    <div class="container fade-in-up" style="max-width: 900px;">
+        
         <!-- Cabeçalho -->
         <div class="d-flex justify-content-between align-items-center mb-4">
-            <h3 class="fw-bold text-dark m-0">Meu Histórico de Pontos</h3>
-            <a href="{{ url_for('index') }}" class="btn btn-outline-secondary btn-sm">
-                <i class="bi bi-arrow-left"></i> Voltar ao Início
-            </a>
+            <div>
+                <h3 class="fw-bold m-0">Meu Histórico de Pontos</h3>
+                <span class="text-muted small">Consulte e solicite correções dos seus registros</span>
+            </div>
+            <div class="d-flex align-items-center gap-2">
+                <!-- BOTÃO DE ALTERNAR TEMA -->
+                <button class="nav-btn btn-theme" id="themeToggle" title="Mudar Tema">
+                    <i class="bi bi-sun" id="themeIcon"></i>
+                </button>
+
+                <a href="{{ url_for('index') }}" class="nav-btn">
+                    <i class="bi bi-arrow-left"></i> Voltar
+                </a>
+            </div>
         </div>
+
+        <!-- Banner de Notificação (Alerta Global) -->
+        {% if notificacoes_usuario %}
+            <div class="mb-4">
+                {% for notif in notificacoes_usuario %}
+                    <div class="alert alert-{{ notif.tipo if notif.tipo else 'warning' }} border-0 shadow-sm rounded-4 d-flex justify-content-between align-items-center mb-2">
+                        <div class="d-flex align-items-center gap-2">
+                            <i class="bi bi-exclamation-triangle-fill fs-5"></i>
+                            <div>
+                                <strong>{{ notif.titulo }}:</strong> {{ notif.mensagem }}
+                            </div>
+                        </div>
+                        {% if notif.link %}
+                            <a href="{{ notif.link }}" class="btn btn-sm btn-dark rounded-3 px-3">
+                                Resolver
+                            </a>
+                        {% endif %}
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
 
         <!-- Filtros -->
-        <div class="card border-0 shadow-sm mb-4">
-            <div class="card-body">
-                <form method="GET" action="{{ url_for('meu_historico') }}" class="row g-3 align-items-end">
-                    <div class="col-md-4">
-                        <label class="form-label fw-semibold small">Data Início:</label>
-                        <input type="date" name="data_inicio" class="form-control" value="{{ data_inicio }}">
-                    </div>
-                    <div class="col-md-4">
-                        <label class="form-label fw-semibold small">Data Fim:</label>
-                        <input type="date" name="data_fim" class="form-control" value="{{ data_fim }}">
-                    </div>
-                    <div class="col-md-4">
-                        <label class="form-label fw-semibold small">Tipo:</label>
-                        <select name="tipo_ponto" class="form-select">
-                            <option value="">Todos</option>
-                            <option value="Entrada" {% if tipo_ponto == 'Entrada' %}selected{% endif %}>Entrada</option>
-                            <option value="Almoço" {% if tipo_ponto == 'Almoço' %}selected{% endif %}>Almoço</option>
-                            <option value="Retorno" {% if tipo_ponto == 'Retorno' %}selected{% endif %}>Retorno</option>
-                            <option value="Saída" {% if tipo_ponto == 'Saída' %}selected{% endif %}>Saída</option>
-                        </select>
-                    </div>
-                    <div class="col-12 d-flex justify-content-end gap-2">
-                        <a href="{{ url_for('meu_historico') }}" class="btn btn-light border">Limpar</a>
-                        <button type="submit" class="btn btn-primary"><i class="bi bi-funnel"></i> Filtrar</button>
-                    </div>
-                </form>
-            </div>
+        <div class="custom-card p-4 mb-4">
+            <form method="GET" action="{{ url_for('meu_historico') }}" class="row g-3 align-items-end">
+                <div class="col-md-3">
+                    <label class="form-label fw-semibold small text-muted">Data Início</label>
+                    <input type="date" name="data_inicio" class="form-control" value="{{ data_inicio if data_inicio else '' }}">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label fw-semibold small text-muted">Data Fim</label>
+                    <input type="date" name="data_fim" class="form-control" value="{{ data_fim if data_fim else '' }}">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label fw-semibold small text-muted">Tipo</label>
+                    <select name="tipo_ponto" class="form-select">
+                        <option value="">Todos</option>
+                        <option value="Entrada" {% if tipo_ponto == 'Entrada' %}selected{% endif %}>Entrada</option>
+                        <option value="Almoço" {% if tipo_ponto == 'Almoço' %}selected{% endif %}>Almoço</option>
+                        <option value="Retorno" {% if tipo_ponto == 'Retorno' %}selected{% endif %}>Retorno</option>
+                        <option value="Saída" {% if tipo_ponto == 'Saída' %}selected{% endif %}>Saída</option>
+                    </select>
+                </div>
+                <div class="col-md-3 d-flex gap-2">
+                    <a href="{{ url_for('meu_historico') }}" class="nav-btn w-100 justify-content-center py-2">Limpar</a>
+                    <button type="submit" class="btn btn-primary w-100 rounded-3 py-2 fw-semibold">
+                        <i class="bi bi-funnel"></i> Filtrar
+                    </button>
+                </div>
+            </form>
         </div>
 
-        <!-- Tabela de Histórico com Ação de Ajuste -->
-        <div class="card border-0 shadow-sm overflow-hidden">
-            <div class="table-responsive">
-                <table class="table table-hover align-middle mb-0">
-                    <thead class="table-dark">
+        <!-- Tabela -->
+        <div class="table-responsive">
+            <table class="table table-custom align-middle">
+                <thead>
+                    <tr class="small text-uppercase">
+                        <th class="ps-3">Data</th>
+                        <th>Batidas Realizadas</th>
+                        <th>Status / Faltantes</th>
+                        <th class="text-end pe-3">Ação</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% if historico %}
+                        {% for item in historico %}
                         <tr>
-                            <th>Data</th>
-                            <th>Tipo de Ponto</th>
-                            <th>Horário</th>
-                            <th>Status</th>
-                            <th class="text-end">Ações</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% if registros %}
-                            {% for r in registros %}
-                            <tr class="{% if r.is_falta %}table-danger{% endif %}">
-                                <td class="fw-semibold">{{ r.data }}</td>
-                                <td>{{ r.tipo }}</td>
-                                <td>{{ r.hora }}</td>
-                                <td>
-                                    {% if r.is_falta %}
-                                        <span class="badge bg-danger">FALTA</span>
-                                    {% elif r.status == 'Ajustado' %}
-                                        <span class="badge bg-warning text-dark">Ajustado</span>
+                            <!-- Data -->
+                            <td class="fw-bold ps-3" style="white-space: nowrap;">
+                                <i class="bi bi-calendar3 me-1 text-muted"></i>{{ item.data }}
+                            </td>
+
+                            <!-- Registros Batidos do Dia -->
+                            <td>
+                                <div class="d-flex flex-wrap gap-1">
+                                    {% for p in item.registros %}
+                                        <span class="badge badge-ponto rounded-3 px-2 py-2">
+                                            <strong>{{ p.tipo }}:</strong> {{ p.hora }}
+                                        </span>
                                     {% else %}
-                                        <span class="badge bg-success">Normal</span>
-                                    {% endif %}
-                                </td>
-                                <td class="text-end">
-                                    <!-- Botão que envia a data no formato ISO para preencher o formulário de ajuste -->
-                                    {% set dia, mes, ano = r.data.split('/') %}
-                                    <a href="{{ url_for('solicitar_correcao', data=ano + '-' + mes + '-' + dia) }}" 
-                                       class="btn btn-sm {% if r.is_falta %}btn-danger{% else %}btn-outline-primary{% endif %} fw-semibold">
-                                        <i class="bi bi-pencil-square"></i> Ajustar
-                                    </a>
-                                </td>
-                            </tr>
-                            {% endfor %}
-                        {% else %}
-                            <tr>
-                                <td colspan="5" class="text-center py-4 text-muted">Nenhum registro encontrado.</td>
-                            </tr>
-                        {% endif %}
-                    </tbody>
-                </table>
-            </div>
+                                        <span class="text-muted small italic">Nenhum ponto batido</span>
+                                    {% endfor %}
+                                </div>
+                            </td>
+
+                            <!-- Status / O que faltou -->
+                            <td>
+                                {% if item.incompleto %}
+                                    <div class="d-flex flex-wrap align-items-center gap-1">
+                                        <span class="text-danger small fw-bold me-1"><i class="bi bi-x-circle-fill"></i> Faltou:</span>
+                                        {% for f in item.faltantes %}
+                                            <span class="badge badge-falta px-2 py-1 rounded-pill small">
+                                                {{ f }}
+                                            </span>
+                                        {% endfor %}
+                                    </div>
+                                {% else %}
+                                    <span class="badge badge-normal px-3 py-2 rounded-pill fw-semibold">
+                                        <i class="bi bi-check-circle-fill me-1"></i> Completo
+                                    </span>
+                                {% endif %}
+                            </td>
+
+                            <!-- Botão de Ajuste -->
+                            <td class="text-end pe-3" style="white-space: nowrap;">
+                                {% set dia, mes, ano = item.data.split('/') %}
+                                <a href="{{ url_for('solicitar_correcao', data=ano + '-' + mes + '-' + dia) }}" 
+                                   class="btn btn-sm btn-adjust {% if item.incompleto %}btn-danger{% else %}btn-outline-primary{% endif %}">
+                                    <i class="bi bi-pencil-square me-1"></i> Ajustar
+                                </a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    {% else %}
+                        <tr>
+                            <td colspan="4" class="text-center py-5 text-muted custom-card rounded-4">
+                                <i class="bi bi-inbox fs-2 d-block mb-2 text-secondary"></i>
+                                Nenhum registro encontrado para este período.
+                            </td>
+                        </tr>
+                    {% endif %}
+                </tbody>
+            </table>
         </div>
+
     </div>
 
+    <!-- Scripts JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // LÓGICA DE TROCA DE TEMA (DARK / LIGHT)
+        const themeBtn = document.getElementById('themeToggle');
+        const themeIcon = document.getElementById('themeIcon');
+        const htmlTag = document.documentElement;
+
+        const savedTheme = localStorage.getItem('theme') || 'dark';
+        setTheme(savedTheme);
+
+        themeBtn.addEventListener('click', () => {
+            const currentTheme = htmlTag.getAttribute('data-theme');
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            setTheme(newTheme);
+        });
+
+        function setTheme(theme) {
+            htmlTag.setAttribute('data-theme', theme);
+            localStorage.setItem('theme', theme);
+
+            if (theme === 'dark') {
+                themeIcon.className = 'bi bi-sun';
+                themeBtn.setAttribute('title', 'Mudar para Tema Claro');
+            } else {
+                themeIcon.className = 'bi bi-moon-stars';
+                themeBtn.setAttribute('title', 'Mudar para Tema Escuro');
+            }
+        }
+    </script>
 </body>
 </html>

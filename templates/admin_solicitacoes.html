@@ -1,94 +1,223 @@
-<!DOCTYPE html>
-<html lang="pt-br">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Solicitações de Ajuste - Admin</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-</head>
-<body class="bg-light">
+{% extends 'base.html' %}
 
-    <nav class="navbar navbar-dark bg-dark mb-4">
-        <div class="container">
-            <span class="navbar-brand mb-0 h1">Ponto Web - Solicitações</span>
-            <a href="{{ url_for('admin_panel') }}" class="btn btn-outline-light btn-sm">Voltar ao Painel</a>
+{% block title %}Solicitações de Ajuste - Admin | Ponto Web{% endblock %}
+
+{% block content %}
+<style>
+    .fade-in-up {
+        animation: fadeInUp 0.5s ease-out forwards;
+    }
+
+    @keyframes fadeInUp {
+        from { opacity: 0; transform: translateY(15px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* --- TABELA CUSTOMIZADA FIXA --- */
+    .table-custom {
+        border-collapse: separate !important;
+        border-spacing: 0 10px !important;
+        background-color: transparent !important;
+    }
+
+    /* Cabeçalho da tabela visível */
+    .table-custom thead th {
+        color: var(--text-muted) !important;
+        font-weight: 600;
+        border: none !important;
+        background: transparent !important;
+    }
+
+    /* Cada linha vira um Card Escuro com texto Claro */
+    .table-custom tbody tr {
+        background-color: var(--bg-card) !important;
+        box-shadow: var(--shadow-sm);
+        border-radius: var(--radius-md);
+        transition: transform 0.2s ease;
+    }
+
+    .table-custom tbody tr:hover {
+        transform: translateY(-2px);
+    }
+
+    /* Células da Tabela */
+    .table-custom tbody td {
+        padding: 1rem !important;
+        vertical-align: middle !important;
+        border: none !important;
+        background-color: transparent !important;
+        color: var(--text-main) !important; /* Força o texto a ficar claro */
+    }
+
+    /* Arredondamento das pontas das linhas */
+    .table-custom tbody td:first-child { 
+        border-top-left-radius: var(--radius-md); 
+        border-bottom-left-radius: var(--radius-md); 
+    }
+    .table-custom tbody td:last-child { 
+        border-top-right-radius: var(--radius-md); 
+        border-bottom-right-radius: var(--radius-md); 
+    }
+
+    /* --- BADGES COM CONTRASTE CORRETO --- */
+    .badge-pendente { 
+        background-color: rgba(245, 158, 11, 0.2) !important; 
+        color: #fbbf24 !important; 
+        border: 1px solid rgba(245, 158, 11, 0.4); 
+    }
+    .badge-aprovada { 
+        background-color: rgba(16, 185, 129, 0.2) !important; 
+        color: #34d399 !important; 
+        border: 1px solid rgba(16, 185, 129, 0.4); 
+    }
+    .badge-recusada { 
+        background-color: rgba(239, 68, 68, 0.2) !important; 
+        color: #f87171 !important; 
+        border: 1px solid rgba(239, 68, 68, 0.4); 
+    }
+    .badge-tipo { 
+        background-color: var(--bg-input) !important; 
+        color: var(--text-main) !important; 
+        border: 1px solid var(--border-color);
+    }
+
+    .btn-action {
+        border-radius: 10px;
+        font-weight: 600;
+        padding: 0.35rem 0.75rem;
+    }
+</style>
+
+<!-- Topo da página (Sub-cabeçalho) -->
+<div class="mb-4">
+    <div class="d-flex justify-content-between align-items-center p-3 px-4 rounded-4 shadow-sm" style="background-color: var(--bg-card); border: 1px solid var(--border-color);">
+        <div class="d-flex align-items-center gap-2">
+            <div class="bg-warning text-dark rounded-3 p-2 d-flex align-items-center justify-content-center" style="width: 38px; height: 38px;">
+                <i class="bi bi-envelope-exclamation-fill"></i>
+            </div>
+            <span class="fw-bold fs-5">Solicitações de Ajuste</span>
         </div>
-    </nav>
-
-    <div class="container">
         
-        {% with messages = get_flashed_messages() %}
-            {% if messages %}
-                {% for message in messages %}
-                    <div class="alert alert-info alert-dismissible fade show" role="alert">
-                        {{ message }}
-                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        <a href="{{ url_for('admin_panel') }}" class="btn btn-outline-secondary rounded-3 btn-sm px-3 py-2 fw-semibold">
+            <i class="bi bi-arrow-left me-1"></i> Voltar ao Painel
+        </a>
+    </div>
+</div>
+
+<!-- Conteúdo Principal -->
+<div class="fade-in-up" style="max-width: 1100px; margin: 0 auto;">
+
+    <!-- Mensagens Flash -->
+    {% with messages = get_flashed_messages() %}
+        {% if messages %}
+            {% for message in messages %}
+                <div class="alert alert-info border-0 shadow-sm rounded-4 d-flex justify-content-between align-items-center mb-4" role="alert">
+                    <div class="d-flex align-items-center gap-2">
+                        <i class="bi bi-info-circle-fill fs-5"></i>
+                        <div>{{ message }}</div>
                     </div>
-                {% endfor %}
-            {% endif %}
-        {% endwith %}
-
-        <div class="card shadow-sm">
-            <div class="card-header bg-warning text-dark">
-                <h5 class="mb-0">Solicitações de Correção de Ponto</h5>
-            </div>
-            <div class="card-body p-0">
-                <div class="table-responsive">
-                    <table class="table table-striped align-middle mb-0">
-                        <thead>
-                            <tr>
-                                <th>Funcionário</th>
-                                <th>Data do Ponto</th>
-                                <th>Tipo</th>
-                                <th>Horário Solicitado</th>
-                                <th>Justificativa</th>
-                                <th>Status</th>
-                                <th>Ações</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for s in solicitacoes %}
-                            <tr>
-                                <td><strong>{{ s.usuario.nome }}</strong></td>
-                                <td>{{ s.data_ponto }}</td>
-                                <td><span class="badge bg-secondary">{{ s.tipo_ponto }}</span></td>
-                                <td><strong>{{ s.hora_correta }}</strong></td>
-                                <td><small>{{ s.justificativa }}</small></td>
-                                <td>
-                                    {% if s.status == 'Pendente' %}
-                                        <span class="badge bg-warning text-dark">Pendente</span>
-                                    {% elif s.status == 'Aprovada' %}
-                                        <span class="badge bg-success">Aprovada</span>
-                                    {% else %}
-                                        <span class="badge bg-danger">Recusada</span>
-                                    {% endif %}
-                                </td>
-                                <td>
-                                    {% if s.status == 'Pendente' %}
-                                        <form action="{{ url_for('responder_solicitacao', id=s.id, acao='aprovar') }}" method="POST" style="display:inline;">
-                                            <button type="submit" class="btn btn-success btn-sm me-1">Aprovar</button>
-                                        </form>
-                                        <form action="{{ url_for('responder_solicitacao', id=s.id, acao='recusar') }}" method="POST" style="display:inline;">
-                                            <button type="submit" class="btn btn-danger btn-sm">Recusar</button>
-                                        </form>
-                                    {% else %}
-                                        <small class="text-muted">Finalizado</small>
-                                    {% endif %}
-                                </td>
-                            </tr>
-                            {% else %}
-                            <tr>
-                                <td colspan="7" class="text-center text-muted py-3">Nenhuma solicitação até o momento.</td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
                 </div>
-            </div>
-        </div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
 
+    <!-- Título / Subtítulo -->
+    <div class="mb-3 px-2">
+        <h4 class="fw-bold m-0">Pendências e Pedidos de Correção</h4>
+        <span class="text-muted small">Análise e responda aos pedidos de ajuste de ponto enviados pelos colaboradores</span>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-</body>
-</html>
+    <!-- Tabela de Solicitações -->
+    <div class="table-responsive">
+        <table class="table table-custom align-middle">
+            <thead>
+                <tr class="text-muted small text-uppercase">
+                    <th class="ps-3">Funcionário</th>
+                    <th class="text-center">Data</th>
+                    <th class="text-center">Tipo</th>
+                    <th class="text-center">Horário Solicitado</th>
+                    <th>Justificativa</th>
+                    <th class="text-center">Status</th>
+                    <th class="text-end pe-3">Ações</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for s in solicitacoes %}
+                <tr>
+                    <td class="ps-3">
+                        <div class="d-flex align-items-center gap-2">
+                            <div class="rounded-circle d-flex align-items-center justify-content-center fw-bold" style="width: 35px; height: 35px; flex-shrink: 0; background-color: var(--bg-input);">
+                                {{ s.usuario.nome[0] | upper }}
+                            </div>
+                            <span class="fw-semibold">{{ s.usuario.nome }}</span>
+                        </div>
+                    </td>
+
+                    <td class="text-center fw-semibold text-muted" style="white-space: nowrap;">
+                        <i class="bi bi-calendar3 me-1"></i>{{ s.data_ponto }}
+                    </td>
+
+                    <td class="text-center">
+                        <span class="badge badge-tipo px-3 py-2 rounded-pill fw-medium">{{ s.tipo_ponto }}</span>
+                    </td>
+
+                    <td class="text-center fw-bold" style="white-space: nowrap;">
+                        <i class="bi bi-clock me-1 text-muted"></i>{{ s.hora_correta }}
+                    </td>
+
+                    <td style="max-width: 250px;">
+                        <span class="text-muted small d-inline-block text-truncate w-100" title="{{ s.justificativa }}">
+                            {{ s.justificativa }}
+                        </span>
+                    </td>
+
+                    <td class="text-center">
+                        {% if s.status == 'Pendente' %}
+                            <span class="badge badge-pendente px-3 py-2 rounded-pill fw-semibold">
+                                <i class="bi bi-hourglass-split me-1"></i>Pendente
+                            </span>
+                        {% elif s.status == 'Aprovada' %}
+                            <span class="badge badge-aprovada px-3 py-2 rounded-pill fw-semibold">
+                                <i class="bi bi-check-circle me-1"></i>Aprovada
+                            </span>
+                        {% else %}
+                            <span class="badge badge-recusada px-3 py-2 rounded-pill fw-semibold">
+                                <i class="bi bi-x-circle me-1"></i>Recusada
+                            </span>
+                        {% endif %}
+                    </td>
+
+                    <td class="text-end pe-3">
+                        {% if s.status == 'Pendente' %}
+                            <div class="d-inline-flex align-items-center gap-1">
+                                <form action="{{ url_for('responder_solicitacao', id=s.id, acao='aprovar') }}" method="POST" class="d-inline">
+                                    <button type="submit" class="btn btn-sm btn-action btn-success">
+                                        <i class="bi bi-check-lg me-1"></i>Aprovar
+                                    </button>
+                                </form>
+                                <form action="{{ url_for('responder_solicitacao', id=s.id, acao='recusar') }}" method="POST" class="d-inline">
+                                    <button type="submit" class="btn btn-sm btn-action btn-outline-danger">
+                                        <i class="bi bi-x-lg me-1"></i>Recusar
+                                    </button>
+                                </form>
+                            </div>
+                        {% else %}
+                            <span class="badge text-muted border px-2 py-1 rounded-3 small me-1" style="border-color: var(--border-color) !important;">Finalizado</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="7" class="text-center py-5 text-muted rounded-4" style="background-color: var(--bg-card);">
+                        <i class="bi bi-check2-all fs-2 d-block mb-2 text-success"></i>
+                        Nenhuma solicitação pendente ou cadastrada até o momento.
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+</div>
+{% endblock %}

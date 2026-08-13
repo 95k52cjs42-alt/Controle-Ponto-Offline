@@ -1,37 +1,119 @@
 {% extends 'base.html' %}
 
 {% block content %}
-<div class="row justify-content-center">
-    <div class="col-md-6 col-lg-5">
-        <div class="card main-card p-4 p-md-5">
+<style>
+    :root {
+        --pastel-bg: #f7f9fc;
+        --text-dark: #2d3748;
+        --border-soft: #edf2f7;
+        --radius-xl: 28px;
+        --radius-md: 16px;
+    }
+
+    .fade-in-up {
+        animation: fadeInUp 0.5s ease-out forwards;
+    }
+
+    @keyframes fadeInUp {
+        from { opacity: 0; transform: translateY(15px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+
+    .pastel-card {
+        background: #ffffff;
+        border: 2px solid #ffffff;
+        border-radius: var(--radius-xl);
+        box-shadow: 0 10px 30px rgba(160, 175, 200, 0.12);
+    }
+
+    .form-control {
+        border-radius: 14px;
+        border: 1px solid var(--border-soft);
+        background-color: #f8fafc;
+        padding: 0.75rem 1rem;
+        transition: all 0.2s ease;
+    }
+
+    .form-control:focus {
+        background-color: #ffffff;
+        border-color: #cbd5e1;
+        box-shadow: 0 0 0 4px rgba(226, 232, 240, 0.6);
+    }
+
+    .btn-register {
+        background-color: #059669;
+        color: #ffffff;
+        border-radius: 14px;
+        padding: 0.75rem;
+        font-weight: 600;
+        transition: all 0.2s ease;
+        border: none;
+    }
+
+    .btn-register:hover {
+        background-color: #047857;
+        color: #ffffff;
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(5, 150, 105, 0.2);
+    }
+
+    .brand-icon {
+        width: 48px;
+        height: 48px;
+        background-color: #ecfdf5;
+        color: #059669;
+        border-radius: 16px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.25rem;
+        margin-bottom: 1rem;
+    }
+</style>
+
+<div class="row justify-content-center align-items-center fade-in-up py-4" style="min-height: 75vh;">
+    <div class="col-sm-10 col-md-6 col-lg-5 col-xl-4">
+        <div class="pastel-card p-4 p-md-5">
+            
+            <!-- Ícone e Cabeçalho -->
             <div class="text-center mb-4">
-                <h3 class="fw-bold mb-1">Criar Conta</h3>
+                <div class="brand-icon shadow-sm">
+                    <i class="bi bi-person-plus-fill"></i>
+                </div>
+                <h3 class="fw-bold mb-1 text-dark">Criar Conta</h3>
                 <p class="text-muted small">Preencha os campos abaixo para se cadastrar</p>
             </div>
 
+            <!-- Formulário de Cadastro -->
             <form method="POST" action="{{ url_for('cadastro') }}">
                 <div class="mb-3">
-                    <label for="nome" class="form-label fw-semibold">Nome Completo</label>
-                    <input type="text" class="form-control py-2" id="nome" name="nome" placeholder="Seu Nome" required>
+                    <label for="nome" class="form-label fw-medium text-dark small">Nome Completo</label>
+                    <input type="text" class="form-control" id="nome" name="nome" placeholder="Seu Nome" required>
                 </div>
 
                 <div class="mb-3">
-                    <label for="email" class="form-label fw-semibold">E-mail</label>
-                    <input type="email" class="form-control py-2" id="email" name="email" placeholder="seu@email.com" required>
+                    <label for="email" class="form-label fw-medium text-dark small">E-mail</label>
+                    <input type="email" class="form-control" id="email" name="email" placeholder="seu@email.com" required>
                 </div>
 
                 <div class="mb-4">
-                    <label for="senha" class="form-label fw-semibold">Senha</label>
-                    <input type="password" class="form-control py-2" id="senha" name="senha" placeholder="••••••••" required>
+                    <label for="senha" class="form-label fw-medium text-dark small">Senha</label>
+                    <input type="password" class="form-control" id="senha" name="senha" placeholder="••••••••" required>
                 </div>
 
-                <button type="submit" class="btn btn-success w-100 py-2 fw-semibold">Cadastrar</button>
+                <button type="submit" class="btn btn-register w-100 mb-3">
+                    <i class="bi bi-check-circle me-1"></i> Finalizar Cadastro
+                </button>
             </form>
 
-            <div class="text-center mt-4">
+            <!-- Rodapé / Voltar ao Login -->
+            <div class="text-center pt-3 border-top border-light">
                 <span class="text-muted small">Já possui uma conta?</span>
-                <a href="{{ url_for('login') }}" class="small fw-bold text-decoration-none ms-1">Fazer Login</a>
+                <a href="{{ url_for('login') }}" class="small fw-semibold text-dark text-decoration-none ms-1">
+                    Fazer Login
+                </a>
             </div>
+
         </div>
     </div>
 </div>

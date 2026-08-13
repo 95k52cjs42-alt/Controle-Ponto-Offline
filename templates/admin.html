@@ -1,94 +1,469 @@
 <!DOCTYPE html>
-<html lang="pt-br">
+<html lang="pt-br" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Painel Admin - Ponto Web</title>
+    <title>Painel Admin | Controle de Ponto</title>
+    
+    <!-- Google Fonts: Outfit -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Bootstrap 5 & Icons -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-</head>
-<body class="bg-light">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
 
-    <nav class="navbar navbar-dark bg-dark mb-4">
-        <div class="container">
-            <span class="navbar-brand mb-0 h1">Ponto Web - Admin</span>
-            <div>
-                <a href="{{ url_for('admin_historico') }}" class="btn btn-outline-info btn-sm me-2">📋 Histórico Geral</a>
-                <a href="{{ url_for('admin_solicitacoes') }}" class="btn btn-warning btn-sm me-2">
-                    ✉️ Solicitações 
-                    {% if solicitacoes_pendentes > 0 %}
-                        <span class="badge bg-danger">{{ solicitacoes_pendentes }}</span>
+    <style>
+        /* TEMA ESCURO (Padrão) */
+        [data-theme="dark"] {
+            --bg-dark: #0b0f19;
+            --card-bg: #111827;
+            --card-border: #1f293d;
+            --text-main: #ffffff;
+            --text-muted: #94a3b8;
+            
+            --blue-accent: #2563eb;
+            --blue-hover: #1d4ed8;
+            --blue-glow: rgba(37, 99, 235, 0.25);
+            
+            --green-accent: #10b981;
+            --green-glow: rgba(16, 185, 129, 0.2);
+            
+            --orange-accent: #f59e0b;
+            --orange-glow: rgba(245, 158, 11, 0.25);
+
+            --nav-btn-bg: rgba(255, 255, 255, 0.05);
+            --nav-btn-hover: rgba(255, 255, 255, 0.12);
+        }
+
+        /* TEMA CLARO */
+        [data-theme="light"] {
+            --bg-dark: #f1f5f9;
+            --card-bg: #ffffff;
+            --card-border: #e2e8f0;
+            --text-main: #0f172a;
+            --text-muted: #64748b;
+            
+            --blue-accent: #2563eb;
+            --blue-hover: #1d4ed8;
+            --blue-glow: rgba(37, 99, 235, 0.15);
+            
+            --green-accent: #059669;
+            --green-glow: rgba(5, 150, 105, 0.15);
+            
+            --orange-accent: #d97706;
+            --orange-glow: rgba(217, 119, 6, 0.15);
+
+            --nav-btn-bg: #f8fafc;
+            --nav-btn-hover: #e2e8f0;
+        }
+
+        :root {
+            --radius-main: 20px;
+            --radius-btn: 12px;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            min-height: 100vh;
+            padding: 2rem 1rem;
+            transition: background-color 0.3s ease, color 0.3s ease;
+        }
+
+        .text-muted {
+            color: var(--text-muted) !important;
+        }
+
+        .fade-in-up {
+            animation: fadeInUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(15px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Topbar / Navbar */
+        .top-navbar {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: var(--radius-main);
+            padding: 0.85rem 1.25rem;
+            margin-bottom: 2.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 12px;
+            transition: background-color 0.3s ease, border-color 0.3s ease;
+        }
+
+        .brand-title {
+            font-weight: 700;
+            font-size: 1.1rem;
+            color: var(--text-main);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .brand-icon {
+            width: 36px;
+            height: 36px;
+            background: var(--blue-accent);
+            color: #fff;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.1rem;
+            box-shadow: 0 0 12px var(--blue-glow);
+        }
+
+        .nav-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .nav-btn {
+            background: var(--nav-btn-bg);
+            border: 1px solid var(--card-border);
+            color: var(--text-main);
+            padding: 0.45rem 0.9rem;
+            border-radius: var(--radius-btn);
+            font-size: 0.85rem;
+            font-weight: 500;
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s ease;
+            cursor: pointer;
+        }
+
+        .nav-btn:hover {
+            background: var(--nav-btn-hover);
+            color: var(--text-main);
+            border-color: rgba(148, 163, 184, 0.4);
+        }
+
+        .btn-theme {
+            padding: 0.45rem 0.75rem;
+            font-size: 1rem;
+        }
+
+        .nav-btn.active {
+            background: var(--blue-accent);
+            border-color: var(--blue-accent);
+            color: #ffffff !important;
+            box-shadow: 0 0 10px var(--blue-glow);
+        }
+
+        .nav-btn.btn-solicitacoes {
+            border-color: rgba(245, 158, 11, 0.5);
+            color: var(--orange-accent);
+            background: rgba(245, 158, 11, 0.08);
+        }
+
+        .nav-btn.btn-solicitacoes:hover {
+            background: var(--orange-accent);
+            color: #ffffff;
+            font-weight: 600;
+            box-shadow: 0 0 12px var(--orange-glow);
+        }
+
+        .user-pill {
+            background: var(--nav-btn-bg);
+            border: 1px solid var(--card-border);
+            padding: 0.35rem 0.8rem;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            color: var(--text-main);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .avatar-circle {
+            width: 24px;
+            height: 24px;
+            background: var(--blue-accent);
+            color: #ffffff;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.75rem;
+            font-weight: 700;
+        }
+
+        .btn-logout {
+            border: 1px solid rgba(239, 68, 68, 0.5);
+            color: #ef4444;
+            background: rgba(239, 68, 68, 0.1);
+        }
+
+        .btn-logout:hover {
+            background: #ef4444;
+            color: #ffffff;
+            border-color: #ef4444;
+        }
+
+        /* User Cards */
+        .user-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: var(--radius-main);
+            padding: 1.25rem 1.5rem;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 15px;
+            transition: all 0.2s ease;
+        }
+
+        .user-card:hover {
+            border-color: rgba(37, 99, 235, 0.5);
+            transform: translateY(-2px);
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .user-avatar {
+            width: 42px;
+            height: 42px;
+            background: var(--blue-accent);
+            color: #ffffff;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.1rem;
+            font-weight: 700;
+            box-shadow: 0 0 10px var(--blue-glow);
+        }
+
+        .user-id-badge {
+            color: var(--text-muted);
+            font-weight: 700;
+            font-size: 0.9rem;
+        }
+
+        .badge-role-admin {
+            background: rgba(37, 99, 235, 0.15);
+            color: var(--blue-accent);
+            border: 1px solid rgba(37, 99, 235, 0.3);
+            border-radius: 20px;
+            padding: 0.35rem 0.85rem;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
+        .badge-role-func {
+            background: var(--nav-btn-bg);
+            color: var(--text-muted);
+            border: 1px solid var(--card-border);
+            border-radius: 20px;
+            padding: 0.35rem 0.85rem;
+            font-size: 0.8rem;
+        }
+
+        .btn-action-outline {
+            background: transparent;
+            border: 1px solid var(--blue-accent);
+            color: var(--blue-accent);
+            border-radius: var(--radius-btn);
+            padding: 0.45rem 1rem;
+            font-size: 0.85rem;
+            font-weight: 500;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s;
+        }
+
+        .btn-action-outline:hover {
+            background: var(--blue-accent);
+            color: #ffffff;
+            box-shadow: 0 0 12px var(--blue-glow);
+        }
+
+        .btn-toggle-admin {
+            border-color: rgba(16, 185, 129, 0.5);
+            color: var(--green-accent);
+        }
+
+        .btn-toggle-admin:hover {
+            background: var(--green-accent);
+            color: #ffffff;
+            box-shadow: 0 0 12px var(--green-glow);
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container fade-in-up" style="max-width: 1000px;">
+        
+        <!-- Topbar Navbar -->
+        <div class="top-navbar">
+            <div class="brand-title">
+                <div class="brand-icon">
+                    <i class="bi bi-clock-history"></i>
+                </div>
+                <span>Controle de Ponto</span>
+            </div>
+
+            <div class="nav-actions">
+                <!-- BOTÃO DE ALTERNAR TEMA -->
+                <button class="nav-btn btn-theme" id="themeToggle" title="Mudar Tema">
+                    <i class="bi bi-sun" id="themeIcon"></i>
+                </button>
+
+                <a href="{{ url_for('index') }}" class="nav-btn">
+                    <i class="bi bi-house-door"></i> Início
+                </a>
+
+                <a href="{{ url_for('admin_panel') }}" class="nav-btn active">
+                    <i class="bi bi-shield-check"></i> Painel Admin
+                </a>
+
+                <!-- BOTÃO HISTÓRICO GERAL (Ajustado com url_for direto) -->
+                <a href="{{ url_for('admin_historico') }}" class="nav-btn" title="Histórico Geral de Registros">
+                    <i class="bi bi-people-fill text-primary"></i> Histórico Geral
+                </a>
+
+                <a href="{{ url_for('solicitacoes_admin') if 'solicitacoes_admin' in endpoints else url_for('solicitar_correcao') }}" class="nav-btn btn-solicitacoes" title="Ver Ajustes de Ponto">
+                    <i class="bi bi-pencil-square"></i> Solicitações
+                    {% if total_solicitacoes_pendentes and total_solicitacoes_pendentes > 0 %}
+                        <span class="badge bg-warning text-dark rounded-pill ms-1">{{ total_solicitacoes_pendentes }}</span>
                     {% endif %}
                 </a>
-                <a href="{{ url_for('index') }}" class="btn btn-outline-light btn-sm me-2">Voltar</a>
-                <a href="{{ url_for('logout') }}" class="btn btn-danger btn-sm">Sair</a>
-            </div>
-        </div>
-    </nav>
 
-    <div class="container">
-        {% with messages = get_flashed_messages() %}
-            {% if messages %}
-                {% for message in messages %}
-                    <div class="alert alert-info alert-dismissible fade show" role="alert">
-                        {{ message }}
-                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                <div class="user-pill">
+                    <div class="avatar-circle">
+                        {{ current_user.nome[0]|upper if current_user and current_user.nome else 'A' }}
                     </div>
-                {% endfor %}
-            {% endif %}
-        {% endwith %}
-
-        <div class="card shadow-sm mb-4">
-            <div class="card-header bg-primary text-white">
-                <h5 class="card-title mb-0">Usuários Cadastrados</h5>
-            </div>
-            <div class="card-body">
-                <div class="table-responsive">
-                    <table class="table table-striped align-middle">
-                        <thead>
-                            <tr>
-                                <th>ID</th>
-                                <th>Nome</th>
-                                <th>E-mail</th>
-                                <th>Nível de Acesso</th>
-                                <th>Ações</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for u in usuarios %}
-                            <tr>
-                                <td>{{ u.id }}</td>
-                                <td><strong>{{ u.nome }}</strong></td>
-                                <td>{{ u.email }}</td>
-                                <td>
-                                    {% if u.is_admin %}
-                                        <span class="badge bg-success">Administrador</span>
-                                    {% else %}
-                                        <span class="badge bg-secondary">Funcionário</span>
-                                    {% endif %}
-                                </td>
-                                <td>
-                                    <a href="{{ url_for('admin_historico', usuario_id=u.id) }}" class="btn btn-outline-primary btn-sm me-1">Ver Histórico</a>
-                                    {% if u.id != current_user.id %}
-                                        <form action="{{ url_for('toggle_admin', user_id=u.id) }}" method="POST" style="display:inline;">
-                                            {% if u.is_admin %}
-                                                <button type="submit" class="btn btn-warning btn-sm">Remover Admin</button>
-                                            {% else %}
-                                                <button type="submit" class="btn btn-outline-success btn-sm">Tornar Admin</button>
-                                            {% endif %}
-                                        </form>
-                                    {% else %}
-                                        <small class="text-muted">(Sua Conta)</small>
-                                    {% endif %}
-                                </td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
+                    <span class="d-none d-sm-inline fw-medium">
+                        {{ current_user.nome.split()[0] if current_user and current_user.nome else 'Admin' }}
+                    </span>
                 </div>
+
+                <a href="{{ url_for('logout') }}" class="nav-btn btn-logout" title="Sair">
+                    <i class="bi bi-box-arrow-right"></i>
+                </a>
             </div>
         </div>
+
+        <!-- Título e Descrição da Seção -->
+        <div class="mb-4">
+            <h3 class="fw-bold mb-1">Usuários Cadastrados</h3>
+            <p class="text-muted small m-0">Gerencie acessos e consulte o histórico de cada colaborador</p>
+        </div>
+
+        <!-- Lista de Usuários -->
+        <div class="row g-2">
+            {% if usuarios %}
+                {% for u in usuarios %}
+                <div class="col-12">
+                    <div class="user-card">
+                        
+                        <!-- ID e Info do Usuário -->
+                        <div class="user-info">
+                            <span class="user-id-badge me-2">#{{ u.id }}</span>
+                            <div class="user-avatar">
+                                {{ u.nome[0]|upper if u.nome else 'U' }}
+                            </div>
+                            <div>
+                                <h6 class="fw-bold mb-0">{{ u.nome }}</h6>
+                                <span class="text-muted small">{{ u.email }}</span>
+                            </div>
+                        </div>
+
+                        <!-- Badge Nível de Acesso -->
+                        <div>
+                            {% if u.is_admin %}
+                                <span class="badge-role-admin">
+                                    <i class="bi bi-shield-check me-1"></i> Administrador
+                                </span>
+                            {% else %}
+                                <span class="badge-role-func">
+                                    <i class="bi bi-person me-1"></i> Funcionário
+                                </span>
+                            {% endif %}
+                        </div>
+
+                        <!-- Ações Rápidas -->
+                        <div class="d-flex align-items-center gap-2">
+                            <a href="{{ url_for('ver_historico_usuario', user_id=u.id) if 'ver_historico_usuario' in endpoints else url_for('meu_historico') }}" class="btn-action-outline">
+                                <i class="bi bi-clock-history"></i> Histórico
+                            </a>
+
+                            {% if u.id != current_user.id %}
+                                <form action="{{ url_for('toggle_admin', user_id=u.id) if 'toggle_admin' in endpoints else '#' }}" method="POST" class="d-inline">
+                                    <button type="submit" class="btn-action-outline btn-toggle-admin">
+                                        <i class="bi bi-person-gear"></i>
+                                        {% if u.is_admin %} Remover Admin {% else %} Tornar Admin {% endif %}
+                                    </button>
+                                </form>
+                            {% else %}
+                                <span class="text-muted small px-2">(Sua Conta)</span>
+                            {% endif %}
+                        </div>
+
+                    </div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="col-12 text-center py-5 text-muted">
+                    <i class="bi bi-people fs-1 d-block mb-2"></i>
+                    Nenhum usuário cadastrado no momento.
+                </div>
+            {% endif %}
+        </div>
+
     </div>
 
+    <!-- Scripts JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // LÓGICA DE TROCA DE TEMA
+        const themeBtn = document.getElementById('themeToggle');
+        const themeIcon = document.getElementById('themeIcon');
+        const htmlTag = document.documentElement;
+
+        const savedTheme = localStorage.getItem('theme') || 'dark';
+        setTheme(savedTheme);
+
+        themeBtn.addEventListener('click', () => {
+            const currentTheme = htmlTag.getAttribute('data-theme');
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            setTheme(newTheme);
+        });
+
+        function setTheme(theme) {
+            htmlTag.setAttribute('data-theme', theme);
+            localStorage.setItem('theme', theme);
+
+            if (theme === 'dark') {
+                themeIcon.className = 'bi bi-sun';
+                themeBtn.setAttribute('title', 'Mudar para Tema Claro');
+            } else {
+                themeIcon.className = 'bi bi-moon-stars';
+                themeBtn.setAttribute('title', 'Mudar para Tema Escuro');
+            }
+        }
+    </script>
 </body>
 </html>

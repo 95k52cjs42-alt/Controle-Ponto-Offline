@@ -3,245 +3,401 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Registrar Ponto</title>
+    <title>Painel de Ponto | Soft Pastel</title>
+    
+    <!-- Google Fonts: Outfit -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Bootstrap 5 & Icons -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
+
     <style>
-        .notif-btn {
-            width: 42px;
-            height: 42px;
-            background: #f8fafc;
-            border: 1px solid #e2e8f0;
-            border-radius: 12px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: all 0.25s ease;
-            color: #475569;
+        :root {
+            /* MODO CLARO (Default) */
+            --pastel-bg: #f7f9fc;
+            --pastel-card: #ffffff;
+            --text-dark: #2d3748;
+            --text-muted: #718096;
+            --clock-bg: linear-gradient(135deg, #fdfbfb 0%, #ebedee 100%);
+            --border-soft: #edf2f7;
+            
+            /* Cores Temáticas Pastel (Claro) */
+            --mint-green: #e6f4ea;
+            --mint-text: #1e7e34;
+            --lavender-purple: #f3e8ff;
+            --lavender-text: #6b21a8;
+            --peach-orange: #ffedd5;
+            --peach-text: #c2410c;
+            --sky-blue: #e0f2fe;
+            --sky-text: #0369a1;
+            
+            --soft-btn-bg: #f8fafc;
+            --btn-main-bg: #1e293b;
+            --btn-main-text: #ffffff;
+
+            --radius-xl: 28px;
+            --radius-md: 18px;
         }
 
-        .notif-btn:hover {
-            background: #ffffff;
-            border-color: #cbd5e1;
-            color: #0f172a;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-            transform: translateY(-1px);
+        /* MODO ESCURO (Ativado via Classe no HTML/Body) */
+        [data-theme="dark"] {
+            --pastel-bg: #0f172a;
+            --pastel-card: #1e293b;
+            --text-dark: #f8fafc;
+            --text-muted: #94a3b8;
+            --clock-bg: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            --border-soft: #334155;
+            
+            /* Cores Escuras Adaptadas */
+            --mint-green: #064e3b;
+            --mint-text: #a7f3d0;
+            --lavender-purple: #581c87;
+            --lavender-text: #e9d5ff;
+            --peach-orange: #7c2d12;
+            --peach-text: #ffedd5;
+            --sky-blue: #075985;
+            --sky-text: #bae6fd;
+            
+            --soft-btn-bg: #334155;
+            --btn-main-bg: #38bdf8;
+            --btn-main-text: #0f172a;
         }
 
-        .notif-btn:hover i {
-            animation: bell-ring 0.5s ease-in-out;
+        body {
+            font-family: 'Outfit', sans-serif;
+            background-color: var(--pastel-bg);
+            color: var(--text-dark);
+            min-height: 100vh;
+            transition: background-color 0.3s ease, color 0.3s ease;
         }
 
-        .notif-badge-pulse {
-            position: absolute;
-            top: -4px;
-            right: -4px;
-            background-color: #ef4444;
-            color: white;
-            font-size: 0.7rem;
-            font-weight: 700;
-            min-width: 18px;
-            height: 18px;
-            border-radius: 9999px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 0 4px;
-            border: 2px solid #ffffff;
-            box-shadow: 0 2px 4px rgba(239, 68, 68, 0.3);
+        .fade-in-up {
+            animation: fadeInUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
         }
 
-        .notif-badge-pulse::after {
-            content: '';
-            position: absolute;
-            width: 100%;
-            height: 100%;
-            border-radius: 9999px;
-            background-color: #ef4444;
-            opacity: 0.6;
-            animation: ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;
-            z-index: -1;
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(20px) scale(0.98); }
+            to { opacity: 1; transform: translateY(0) scale(1); }
         }
 
-        @keyframes ping {
-            75%, 100% {
-                transform: scale(1.8);
-                opacity: 0;
-            }
+        .pastel-card {
+            background: var(--pastel-card);
+            border: 2px solid var(--border-soft);
+            border-radius: var(--radius-xl);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            transition: background 0.3s ease, border-color 0.3s ease;
         }
 
-        @keyframes bell-ring {
-            0%, 100% { transform: rotate(0); }
-            20%, 60% { transform: rotate(15deg); }
-            40%, 80% { transform: rotate(-15deg); }
-        }
-
-        .notif-menu {
-            width: 320px;
-            border: 1px solid #e2e8f0;
-            border-radius: 14px;
-            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
+        .clock-box {
+            background: var(--clock-bg);
+            border-radius: var(--radius-md);
+            padding: 1.5rem;
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.05);
+            position: relative;
             overflow: hidden;
+            transition: background 0.3s ease;
+        }
+
+        .clock-display {
+            font-size: 2.8rem;
+            font-weight: 700;
+            color: var(--text-dark);
+            letter-spacing: -1px;
+        }
+
+        /* Botões de Ação do Topo (Notificação + Tema) */
+        .btn-top-action {
+            width: 44px;
+            height: 44px;
+            background: var(--lavender-purple);
+            color: var(--lavender-text);
+            border: none;
+            border-radius: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+
+        .btn-top-action:hover {
+            transform: scale(1.08);
+            opacity: 0.9;
+        }
+
+        .pulse-badge {
+            position: absolute;
+            top: -2px;
+            right: -2px;
+            background: #f87171;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            border: 2px solid white;
+            animation: pulse 1.8s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(248, 113, 113, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 8px rgba(248, 113, 113, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(248, 113, 113, 0); }
+        }
+
+        .btn-ponto {
+            border: none;
+            border-radius: var(--radius-md);
+            padding: 1.2rem 0.5rem;
+            font-weight: 600;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            position: relative;
+            overflow: hidden;
+            cursor: pointer;
+            transition: all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
+        }
+
+        .btn-ponto i {
+            font-size: 1.7rem;
+            transition: transform 0.4s cubic-bezier(0.68, -0.6, 0.32, 1.6);
+        }
+
+        .btn-ponto:hover:not(:disabled) i {
+            transform: translateY(-4px) scale(1.25) rotate(-12deg);
+        }
+
+        .btn-ponto:hover:not(:disabled) {
+            transform: translateY(-4px);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+        }
+
+        .btn-ponto:disabled {
+            background: var(--soft-btn-bg) !important;
+            color: var(--text-muted) !important;
+            opacity: 0.4;
+            cursor: not-allowed;
+            transform: none !important;
+            box-shadow: none !important;
+        }
+
+        .btn-ponto:disabled i { color: var(--text-muted) !important; }
+
+        .btn-entrada { background: var(--mint-green); color: var(--mint-text); }
+        .btn-almoco  { background: var(--peach-orange); color: var(--peach-text); }
+        .btn-retorno { background: var(--sky-blue); color: var(--sky-text); }
+        .btn-saida   { background: var(--lavender-purple); color: var(--lavender-text); }
+
+        .btn-main {
+            background: var(--btn-main-bg);
+            color: var(--btn-main-text);
+            font-weight: 600;
+            border-radius: 16px;
+            padding: 0.9rem;
+            border: none;
+            transition: all 0.2s ease;
+        }
+
+        .btn-main:hover {
+            opacity: 0.95;
+            color: var(--btn-main-text);
+            transform: translateY(-2px);
+        }
+
+        .soft-link {
+            background: var(--soft-btn-bg);
+            border: 1px solid var(--border-soft);
+            border-radius: var(--radius-md);
+            padding: 0.8rem 1rem;
+            color: var(--text-dark);
+            font-weight: 600;
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            transition: all 0.2s ease;
+        }
+
+        .soft-link:hover {
+            color: var(--text-dark);
+            transform: translateY(-2px);
+            border-color: var(--text-muted);
+        }
+
+        .btn-admin-outline {
+            border: 1.5px solid var(--border-soft);
+            color: var(--text-dark);
+            background: transparent;
+            border-radius: 16px;
+            font-weight: 600;
+            padding: 0.6rem;
+            transition: all 0.2s;
+        }
+
+        .btn-admin-outline:hover {
+            background: var(--soft-btn-bg);
+            color: var(--text-dark);
         }
     </style>
 </head>
-<body class="bg-light">
+<body class="d-flex align-items-center justify-content-center py-5">
 
-    <!-- Container Flutuante do Toast Vermelho -->
+    <!-- Toasts de Notificação -->
     <div class="toast-container position-fixed top-0 end-0 p-3" style="z-index: 1090;">
-        {% for n in notificacoes_usuario %}
-            {% if n.tipo == 'danger' %}
-            <div class="toast align-items-center text-white bg-danger border-0 shadow-lg mb-2" role="alert" aria-live="assertive" aria-atomic="true" data-bs-delay="6000">
-                <div class="d-flex">
-                    <div class="toast-body">
-                        <strong class="d-block"><i class="bi bi-exclamation-triangle-fill me-1"></i> {{ n.titulo }}</strong>
-                        {{ n.mensagem }}
-                        <div class="mt-2 pt-2 border-top border-light">
-                            <a href="{{ n.link }}" class="btn btn-light btn-sm fw-bold text-danger">Ajustar Agora</a>
+        {% if notificacoes_usuario %}
+            {% for n in notificacoes_usuario %}
+                {% if n.tipo == 'danger' %}
+                <div class="toast align-items-center text-white bg-danger border-0 shadow-lg mb-2" role="alert" aria-live="assertive" aria-atomic="true" data-bs-delay="6000">
+                    <div class="d-flex">
+                        <div class="toast-body">
+                            <strong class="d-block"><i class="bi bi-exclamation-triangle-fill me-1"></i> {{ n.titulo }}</strong>
+                            {{ n.mensagem }}
+                            <div class="mt-2 pt-2 border-top border-light">
+                                <a href="{{ n.link if n.link else '#' }}" class="btn btn-light btn-sm fw-bold text-danger">Ver no Histórico</a>
+                            </div>
                         </div>
+                        <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
                     </div>
-                    <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
                 </div>
-            </div>
-            {% endif %}
-        {% endfor %}
+                {% endif %}
+            {% endfor %}
+        {% endif %}
     </div>
 
-    <div class="container py-4 d-flex flex-column align-items-center">
-        <div class="card shadow-sm p-4" style="max-width: 450px; width: 100%; border-radius: 15px;">
+    <div class="container fade-in-up" style="max-width: 460px;">
+        <div class="pastel-card p-4">
             
-            <!-- Topo com o Botão de Notificação Moderno -->
+            <!-- Topo com Boas-Vindas, Notificação e Botão de Tema -->
             <div class="d-flex justify-content-between align-items-center mb-4">
-                <h4 class="fw-bold m-0 text-dark" style="letter-spacing: -0.5px;">Registrar Ponto</h4>
-                
-                <div class="dropdown">
-                    <button class="notif-btn position-relative border-0" type="button" id="dropdownNotification" data-bs-toggle="dropdown" aria-expanded="false">
-                        <i class="bi bi-bell-fill fs-5"></i>
-                        {% if total_notificacoes|default(0) > 0 %}
-                            <span class="notif-badge-pulse">
-                                {{ total_notificacoes|default(0) }}
-                            </span>
+                <div>
+                    <span class="badge rounded-pill text-secondary bg-body-tertiary border px-3 py-1 mb-1 fw-normal">
+                        ✨ Bem-vindo(a) de volta
+                    </span>
+                    <h4 class="fw-bold m-0" style="color: var(--text-dark);">
+                        {% if current_user and current_user.is_authenticated and current_user.nome %}
+                            {{ current_user.nome }}
+                        {% else %}
+                            Usuário
                         {% endif %}
+                    </h4>
+                </div>
+
+                <div class="d-flex gap-2">
+                    <!-- Botão de Alternar Tema (Dark/Light) -->
+                    <button class="btn-top-action" id="themeToggleBtn" title="Alternar Modo Escuro">
+                        <i class="bi bi-moon-stars-fill fs-5" id="themeIcon"></i>
                     </button>
 
-                    <ul class="dropdown-menu dropdown-menu-end notif-menu p-2 m-0 mt-2" aria-labelledby="dropdownNotification">
-                        <li class="dropdown-header fw-bold text-dark border-bottom pb-2 mb-2 d-flex justify-content-between align-items-center">
-                            <span style="font-size: 0.9rem;">Notificações</span>
-                            <span class="badge bg-danger rounded-pill px-2 py-1" style="font-size: 0.75rem;">{{ total_notificacoes|default(0) }} pendente(s)</span>
-                        </li>
-
-                        {% if notificacoes_usuario %}
-                            {% for n in notificacoes_usuario %}
-                            <li class="mb-1">
-                                <a class="dropdown-item rounded-3 p-2 text-wrap d-flex align-items-start gap-2" href="{{ n.link }}" style="transition: background 0.2s;">
-                                    <i class="bi bi-exclamation-circle-fill text-{{ n.tipo }} fs-6 mt-1"></i>
-                                    <div>
-                                        <strong class="d-block text-dark small">{{ n.titulo }}</strong>
-                                        <span class="text-muted" style="font-size: 0.8rem;">{{ n.mensagem }}</span>
-                                    </div>
-                                </a>
-                            </li>
-                            {% endfor %}
-                        {% else %}
-                            <li class="text-center text-muted py-4 small">
-                                <div class="mb-2">
-                                    <i class="bi bi-check-circle-fill text-success fs-3"></i>
-                                </div>
-                                Tudo em dia por aqui!
-                            </li>
-                        {% endif %}
-                    </ul>
+                    <!-- Central de Notificações -->
+                    <div class="dropdown">
+                        <button class="btn-top-action position-relative" type="button" data-bs-toggle="dropdown">
+                            <i class="bi bi-bell-fill fs-5"></i>
+                            {% if total_notificacoes and total_notificacoes > 0 %}
+                                <span class="pulse-badge"></span>
+                            {% endif %}
+                        </button>
+                        
+                        <ul class="dropdown-menu dropdown-menu-end p-2 border-0 shadow-lg rounded-4 mt-2" style="width: 300px;">
+                            <li class="dropdown-header fw-bold border-bottom pb-2">Notificações</li>
+                            {% if notificacoes_usuario %}
+                                {% for n in notificacoes_usuario %}
+                                <li>
+                                    <a class="dropdown-item rounded-3 p-2 my-1 text-wrap small" href="{{ n.link if n.link else '#' }}">
+                                        <strong>{{ n.titulo }}</strong><br>
+                                        <span class="text-muted">{{ n.mensagem }}</span>
+                                    </a>
+                                </li>
+                                {% endfor %}
+                            {% else %}
+                                <li class="text-center text-muted py-3 small">Nenhuma pendência 🎉</li>
+                            {% endif %}
+                        </ul>
+                    </div>
                 </div>
             </div>
 
-            {% with messages = get_flashed_messages(with_categories=true) %}
-                {% if messages %}
-                    {% for category, message in messages %}
-                        <div class="alert alert-{{ category if category != 'message' else 'info' }} alert-dismissible fade show text-center" role="alert">
-                            {{ message }}
-                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                        </div>
-                    {% endfor %}
-                {% endif %}
-            {% endwith %}
-
-            <!-- Card de Status -->
-            <div class="card bg-light border-0 border-start border-primary border-4 p-3 mb-4">
-                <span class="text-secondary small fw-semibold">Status do Registro:</span>
-                <div class="d-flex align-items-center mt-1">
-                    <i class="bi bi-check-circle-fill text-success fs-5 me-2"></i>
-                    <span class="fw-bold text-dark">{{ ultimo_ponto }}</span>
-                </div>
+            <!-- Relógio Suave -->
+            <div class="clock-box text-center mb-4">
+                <span class="text-muted small fw-semibold text-uppercase" id="data-extenso">--</span>
+                <div class="clock-display my-1" id="clock">00:00:00</div>
+                <span class="badge bg-body-tertiary border text-secondary rounded-pill px-3 py-1 shadow-sm small">
+                    <i class="bi bi-clock-history me-1 text-primary"></i> ÚLTIMO: {{ ultimo_ponto|default('--:--') }}
+                </span>
             </div>
 
-            <!-- Botões de Batida de Ponto -->
+            <!-- Grid de Registro de Ponto -->
+            {% set pb = pontos_batidos|default([]) %}
             <div class="row g-3 mb-4">
                 <div class="col-6">
                     <form action="{{ url_for('registrar', tipo='Entrada') }}" method="POST">
-                        <button type="submit" class="btn btn-primary w-100 py-2 fw-semibold"
-                            {% if 'Entrada' in pontos_batidos %}disabled{% endif %}>
-                            <i class="bi bi-box-arrow-in-right me-1"></i> Entrada
+                        <button type="submit" class="btn-ponto btn-entrada" {% if 'Entrada' in pb %}disabled{% endif %}>
+                            <i class="bi bi-sun-fill"></i>
+                            <span>Entrada</span>
                         </button>
                     </form>
                 </div>
 
                 <div class="col-6">
                     <form action="{{ url_for('registrar', tipo='Almoço') }}" method="POST">
-                        <button type="submit" class="btn btn-primary w-100 py-2 fw-semibold"
-                            {% if 'Entrada' not in pontos_batidos or 'Almoço' in pontos_batidos %}disabled{% endif %}>
-                            <i class="bi bi-cup-hot me-1"></i> Almoço
+                        <button type="submit" class="btn-ponto btn-almoco" {% if 'Entrada' not in pb or 'Almoço' in pb %}disabled{% endif %}>
+                            <i class="bi bi-cup-hot-fill"></i>
+                            <span>Almoço</span>
                         </button>
                     </form>
                 </div>
 
                 <div class="col-6">
                     <form action="{{ url_for('registrar', tipo='Retorno') }}" method="POST">
-                        <button type="submit" class="btn btn-primary w-100 py-2 fw-semibold"
-                            {% if 'Almoço' not in pontos_batidos or 'Retorno' in pontos_batidos %}disabled{% endif %}>
-                            <i class="bi bi-arrow-return-left me-1"></i> Retorno
+                        <button type="submit" class="btn-ponto btn-retorno" {% if 'Almoço' not in pb or 'Retorno' in pb %}disabled{% endif %}>
+                            <i class="bi bi-briefcase-fill"></i>
+                            <span>Retorno</span>
                         </button>
                     </form>
                 </div>
 
                 <div class="col-6">
                     <form action="{{ url_for('registrar', tipo='Saída') }}" method="POST">
-                        <button type="submit" class="btn btn-primary w-100 py-2 fw-semibold"
-                            {% if 'Retorno' not in pontos_batidos or 'Saída' in pontos_batidos %}disabled{% endif %}>
-                            <i class="bi bi-box-arrow-right me-1"></i> Saída
+                        <button type="submit" class="btn-ponto btn-saida" {% if 'Retorno' not in pb or 'Saída' in pb %}disabled{% endif %}>
+                            <i class="bi bi-moon-stars-fill"></i>
+                            <span>Saída</span>
                         </button>
                     </form>
                 </div>
             </div>
 
-            <hr class="my-3">
-
-            <!-- Ações -->
-            <div class="d-grid gap-2">
-                <a href="{{ url_for('meu_historico') }}" class="btn btn-primary py-2 fw-semibold">
-                    <i class="bi bi-card-checklist me-1"></i> Meu Histórico de Pontos
+            <!-- Botões Secundários -->
+            <div class="d-flex flex-column gap-2">
+                <a href="{{ url_for('meu_historico') }}" class="btn btn-main py-3 shadow-sm text-center text-decoration-none">
+                    <i class="bi bi-calendar-event me-2"></i> Ver Histórico
                 </a>
-                
+
                 <div class="row g-2">
                     <div class="col-6">
-                        <a href="{{ url_for('solicitar_correcao') }}" class="btn btn-outline-secondary w-100 py-2">
-                            <i class="bi bi-pencil-square me-1"></i> Solicitar Ajuste
+                        <a href="{{ url_for('solicitar_correcao') }}" class="soft-link">
+                            <i class="bi bi-pencil-square text-warning"></i> Ajustar
                         </a>
                     </div>
                     <div class="col-6">
-                        <a href="{{ url_for('exportar_pdf') }}" class="btn btn-outline-secondary w-100 py-2">
-                            <i class="bi bi-file-earmark-pdf me-1"></i> Exportar PDF
+                        <a href="{{ url_for('exportar_pdf') }}" class="soft-link">
+                            <i class="bi bi-file-earmark-pdf text-danger"></i> Baixar PDF
                         </a>
                     </div>
                 </div>
 
-                {% if current_user.is_admin %}
-                    <a href="{{ url_for('admin_panel') }}" class="btn btn-dark mt-2 py-2">
-                        <i class="bi bi-shield-lock me-1"></i> Painel Admin
+                {% if current_user and current_user.is_authenticated and current_user.is_admin %}
+                    <a href="{{ url_for('admin_panel') }}" class="btn btn-admin-outline text-decoration-none text-center mt-1 small">
+                        <i class="bi bi-shield-lock me-1"></i> Painel Administrativo
                     </a>
                 {% endif %}
 
-                <a href="{{ url_for('logout') }}" class="btn btn-link text-danger text-decoration-none text-center mt-1 small">
-                    Sair da conta
+                <a href="{{ url_for('logout') }}" class="text-muted text-decoration-none text-center mt-3 small">
+                    Encerrar Sessão
                 </a>
             </div>
 
@@ -250,6 +406,57 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
+        // 1. LÓGICA DO RELÓGIO
+        function updateClock() {
+            const now = new Date();
+            const hours = String(now.getHours()).padStart(2, '0');
+            const minutes = String(now.getMinutes()).padStart(2, '0');
+            const seconds = String(now.getSeconds()).padStart(2, '0');
+            
+            const clockEl = document.getElementById('clock');
+            if (clockEl) {
+                clockEl.textContent = `${hours}:${minutes}:${seconds}`;
+            }
+
+            const options = { weekday: 'short', day: '2-digit', month: 'short' };
+            const dataEl = document.getElementById('data-extenso');
+            if (dataEl) {
+                dataEl.textContent = now.toLocaleDateString('pt-BR', options);
+            }
+        }
+        setInterval(updateClock, 1000);
+        updateClock();
+
+        // 2. LÓGICA DE ALTERNAR MODO ESCURO / MODO CLARO
+        const themeToggleBtn = document.getElementById('themeToggleBtn');
+        const themeIcon = document.getElementById('themeIcon');
+        const htmlElement = document.documentElement;
+
+        // Recupera o tema salvo no navegador
+        const savedTheme = localStorage.getItem('theme') || 'light';
+        applyTheme(savedTheme);
+
+        themeToggleBtn.addEventListener('click', () => {
+            const currentTheme = htmlElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            applyTheme(newTheme);
+        });
+
+        function applyTheme(theme) {
+            if (theme === 'dark') {
+                htmlElement.setAttribute('data-theme', 'dark');
+                themeIcon.classList.remove('bi-moon-stars-fill');
+                themeIcon.classList.add('bi-sun-fill');
+                localStorage.setItem('theme', 'dark');
+            } else {
+                htmlElement.removeAttribute('data-theme');
+                themeIcon.classList.remove('bi-sun-fill');
+                themeIcon.classList.add('bi-moon-stars-fill');
+                localStorage.setItem('theme', 'light');
+            }
+        }
+
+        // 3. ATIVAÇÃO DOS TOASTS
         document.addEventListener("DOMContentLoaded", function () {
             var toastElList = [].slice.call(document.querySelectorAll('.toast'));
             toastElList.map(function (toastEl) {
