@@ -414,7 +414,11 @@ def meu_historico():
         data_str = d_obj.strftime("%d/%m/%Y")
         registros_do_dia = dias_registrados.get(d_obj, [])
         
-        # Identifica quais pontos faltaram (mesmo que seja falta total)
+        # Se for fim de semana (sábado=5, domingo=6) e NÃO houver registros, pula o dia
+        is_fim_de_semana = d_obj.weekday() >= 5
+        if is_fim_de_semana and not registros_do_dia:
+            continue
+
         faltantes = identificar_pontos_faltantes(registros_do_dia)
         
         historico_analisado.append({
