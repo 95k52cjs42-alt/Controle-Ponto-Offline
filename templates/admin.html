@@ -344,7 +344,7 @@
                     <i class="bi bi-people-fill text-primary"></i> Histórico Geral
                 </a>
 
-                <a href="{{ url_for('solicitacoes_admin') if 'solicitacoes_admin' in endpoints else url_for('solicitar_correcao') }}" class="nav-btn btn-solicitacoes" title="Ver Ajustes de Ponto">
+                <a href="{{ url_for('admin_solicitacoes') if 'solicitacoes_admin' in endpoints else url_for('admin_solicitacoes') }}" class="nav-btn btn-solicitacoes" title="Ver Ajustes de Ponto">
                     <i class="bi bi-pencil-square"></i> Solicitações
                     {% if total_solicitacoes_pendentes and total_solicitacoes_pendentes > 0 %}
                         <span class="badge bg-warning text-dark rounded-pill ms-1">{{ total_solicitacoes_pendentes }}</span>
