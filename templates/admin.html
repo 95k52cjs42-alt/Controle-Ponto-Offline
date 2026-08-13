@@ -412,16 +412,16 @@
                         </div>
 
                             {% if u.id != current_user.id %}
-                                <form action="{{ url_for('toggle_admin', user_id=u.id) if 'toggle_admin' in endpoints else '#' }}" method="POST" class="d-inline">
-                                    <button type="submit" class="btn-action-outline btn-toggle-admin">
-                                        <i class="bi bi-person-gear"></i>
-                                        {% if u.is_admin %} Remover Admin {% else %} Tornar Admin {% endif %}
-                                    </button>
-                                </form>
-                            {% else %}
-                                <span class="text-muted small px-2">(Sua Conta)</span>
-                            {% endif %}
-                        </div>
+    <form action="{{ url_for('toggle_admin', user_id=u.id) }}" method="POST" class="d-inline">
+        <button type="submit" class="btn-action-outline btn-toggle-admin">
+            <i class="bi bi-person-gear"></i>
+            {% if u.is_admin %} Remover Admin {% else %} Tornar Admin {% endif %}
+        </button>
+    </form>
+{% else %}
+    <span class="text-muted small px-2">(Sua Conta)</span>
+{% endif %}
+</div>
 
                     </div>
                 </div>
