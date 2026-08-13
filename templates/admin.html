@@ -406,9 +406,10 @@
 
                         <!-- Ações Rápidas -->
                         <div class="d-flex align-items-center gap-2">
-                            <a href="{{ url_for('ver_historico_usuario', user_id=u.id) if 'ver_historico_usuario' in endpoints else url_for('meu_historico') }}" class="btn-action-outline">
-                                <i class="bi bi-clock-history"></i> Histórico
+                            <a href="{{ url_for('admin_historico', usuario_id=u.id) }}" class="btn-action-outline">
+                            <i class="bi bi-clock-history"></i> Histórico
                             </a>
+                        </div>
 
                             {% if u.id != current_user.id %}
                                 <form action="{{ url_for('toggle_admin', user_id=u.id) if 'toggle_admin' in endpoints else '#' }}" method="POST" class="d-inline">
