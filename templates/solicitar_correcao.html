@@ -1,24 +1,207 @@
 <!DOCTYPE html>
-<html lang="pt-br">
+<html lang="pt-br" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Solicitar Correção de Ponto</title>
+    <title>Solicitar Ajuste de Ponto</title>
+    
+    <!-- Google Fonts: Outfit -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Bootstrap 5 & Icons -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-</head>
-<body class="bg-light">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
 
-    <div class="container py-4" style="max-width: 700px;">
+    <style>
+        /* TEMA ESCURO (Padrão) */
+        [data-theme="dark"] {
+            --bg-dark: #0b0f19;
+            --card-bg: #111827;
+            --card-border: #1f293d;
+            --text-main: #ffffff;
+            --text-muted: #94a3b8;
+            
+            --input-bg: #1a2332;
+            --input-border: #2d3d54;
+            --input-text: #ffffff;
+            
+            --blue-accent: #2563eb;
+            --blue-hover: #1d4ed8;
+            --blue-glow: rgba(37, 99, 235, 0.25);
+
+            --nav-btn-bg: rgba(255, 255, 255, 0.05);
+            --nav-btn-hover: rgba(255, 255, 255, 0.12);
+            --btn-submit-bg: #2563eb;
+            --btn-submit-hover: #1d4ed8;
+            --btn-submit-text: #ffffff;
+        }
+
+        /* TEMA CLARO */
+        [data-theme="light"] {
+            --bg-dark: #f1f5f9;
+            --card-bg: #ffffff;
+            --card-border: #e2e8f0;
+            --text-main: #0f172a;
+            --text-muted: #64748b;
+            
+            --input-bg: #f8fafc;
+            --input-border: #cbd5e1;
+            --input-text: #0f172a;
+            
+            --blue-accent: #2563eb;
+            --blue-hover: #1d4ed8;
+            --blue-glow: rgba(37, 99, 235, 0.15);
+
+            --nav-btn-bg: #ffffff;
+            --nav-btn-hover: #e2e8f0;
+            --btn-submit-bg: #0f172a;
+            --btn-submit-hover: #1e293b;
+            --btn-submit-text: #ffffff;
+        }
+
+        :root {
+            --radius-main: 24px;
+            --radius-btn: 12px;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            min-height: 100vh;
+            padding: 2rem 1rem;
+            transition: background-color 0.3s ease, color 0.3s ease;
+        }
+
+        .text-muted {
+            color: var(--text-muted) !important;
+        }
+
+        .fade-in-up {
+            animation: fadeInUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(15px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Header / Buttons */
+        .nav-btn {
+            background: var(--nav-btn-bg);
+            border: 1px solid var(--card-border);
+            color: var(--text-main);
+            padding: 0.5rem 1rem;
+            border-radius: var(--radius-btn);
+            font-size: 0.9rem;
+            font-weight: 500;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s ease;
+            cursor: pointer;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        }
+
+        .nav-btn:hover {
+            background: var(--nav-btn-hover);
+            color: var(--text-main);
+            border-color: rgba(148, 163, 184, 0.4);
+        }
+
+        .btn-theme {
+            padding: 0.5rem 0.8rem;
+            font-size: 1rem;
+        }
+
+        /* Cards */
+        .custom-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: var(--radius-main);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
+            transition: background-color 0.3s ease, border-color 0.3s ease;
+        }
+
+        /* Form Elements */
+        .form-control, .form-select {
+            border-radius: 12px;
+            border: 1px solid var(--input-border);
+            background-color: var(--input-bg);
+            color: var(--input-text);
+            padding: 0.75rem 1rem;
+            transition: all 0.2s ease;
+        }
+
+        .form-control:focus, .form-select:focus {
+            background-color: var(--input-bg);
+            color: var(--input-text);
+            border-color: var(--blue-accent);
+            box-shadow: 0 0 0 4px var(--blue-glow);
+        }
+
+        /* Ajuste do ícone do calendário/hora no modo escuro */
+        [data-theme="dark"] input[type="date"]::-webkit-calendar-picker-indicator,
+        [data-theme="dark"] input[type="time"]::-webkit-calendar-picker-indicator {
+            filter: invert(1);
+        }
+
+        .btn-submit {
+            background-color: var(--btn-submit-bg);
+            color: var(--btn-submit-text);
+            border: none;
+            transition: all 0.2s ease;
+        }
+
+        .btn-submit:hover {
+            background-color: var(--btn-submit-hover);
+            color: #ffffff;
+            box-shadow: 0 4px 12px var(--blue-glow);
+        }
+
+        /* Table adaptável */
+        .table {
+            color: var(--text-main);
+        }
+
+        .table > :not(caption) > * > * {
+            padding: 1rem 0.75rem;
+            background-color: transparent;
+            color: var(--text-main);
+            border-bottom-color: var(--card-border);
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container fade-in-up" style="max-width: 650px;">
         
-        <div class="d-flex justify-content-between align-items-center mb-3">
-            <h4>Solicitar Correção de Ponto</h4>
-            <a href="{{ url_for('index') }}" class="btn btn-outline-secondary btn-sm">Voltar ao Início</a>
+        <!-- Header / Ações -->
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <div>
+                <h4 class="fw-bold m-0">Solicitar Ajuste</h4>
+                <span class="text-muted small">Envie os ajustes da sua jornada de trabalho</span>
+            </div>
+            <div class="d-flex align-items-center gap-2">
+                <!-- BOTÃO DE ALTERNAR TEMA -->
+                <button class="nav-btn btn-theme" id="themeToggle" title="Mudar Tema">
+                    <i class="bi bi-sun" id="themeIcon"></i>
+                </button>
+
+                <a href="{{ url_for('index') }}" class="nav-btn">
+                    <i class="bi bi-arrow-left"></i> Voltar
+                </a>
+            </div>
         </div>
 
+        <!-- Mensagens Flutuantes (Flashed Messages) -->
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
                 {% for category, message in messages %}
-                    <div class="alert alert-{{ category if category != 'message' else 'info' }} alert-dismissible fade show" role="alert">
+                    <div class="alert alert-{{ category if category != 'message' else 'info' }} alert-dismissible fade show border-0 shadow-sm rounded-4 mb-4" role="alert">
                         {{ message }}
                         <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
                     </div>
@@ -27,86 +210,128 @@
         {% endwith %}
 
         <!-- Formulário de Solicitação -->
-        <div class="card shadow-sm mb-4">
-            <div class="card-header bg-primary text-white">
-                <h6 class="mb-0">Nova Solicitação</h6>
-            </div>
-            <div class="card-body">
-                <form action="{{ url_for('solicitar_correcao') }}" method="POST">
-                    <div class="row g-3">
-                        <div class="col-md-6">
-                            <label class="form-label font-weight-bold">Data do Ponto:</label>
-                            <!-- Adicionado max="{{ data_hoje }}" para bloquear dias futuros no calendário -->
-                            <input type="date" name="data_ponto" class="form-control" max="{{ data_hoje }}" required>
-                        </div>
-                        <div class="col-md-6">
-                            <label class="form-label font-weight-bold">Tipo de Ponto:</label>
-                            <select name="tipo_ponto" class="form-select" required>
-                                <option value="Entrada">Entrada</option>
-                                <option value="Almoço">Almoço</option>
-                                <option value="Retorno">Retorno do Almoço</option>
-                                <option value="Saída">Saída</option>
-                            </select>
-                        </div>
-                        <div class="col-md-6">
-                            <label class="form-label font-weight-bold">Horário Correto:</label>
-                            <input type="time" name="hora_correta" class="form-control" required>
-                        </div>
-                        <div class="col-md-12">
-                            <label class="form-label font-weight-bold">Justificativa:</label>
-                            <textarea name="justificativa" class="form-control" rows="3" placeholder="Explique o motivo do ajuste..." required></textarea>
-                        </div>
+        <div class="custom-card p-4 p-md-5 mb-4">
+            <h6 class="fw-bold mb-4 text-primary">
+                <i class="bi bi-pencil-square me-1"></i> Nova Solicitação
+            </h6>
+
+            <form action="{{ url_for('solicitar_correcao') }}" method="POST">
+                
+                <div class="row g-3">
+                    <!-- Data do Ponto -->
+                    <div class="col-md-6 mb-2">
+                        <label class="form-label fw-semibold small text-muted">Data do Ponto</label>
+                        <input type="date" 
+                               name="data_ponto" 
+                               class="form-control" 
+                               value="{{ request.args.get('data', '') }}" 
+                               max="{{ data_hoje }}" 
+                               required>
                     </div>
-                    <button type="submit" class="btn btn-success mt-3 w-100">Enviar Solicitação</button>
-                </form>
-            </div>
+
+                    <!-- Tipo de Ponto -->
+                    <div class="col-md-6 mb-2">
+                        <label class="form-label fw-semibold small text-muted">Tipo de Ponto</label>
+                        <select name="tipo_ponto" class="form-select" required>
+                            <option value="Entrada">Entrada</option>
+                            <option value="Almoço">Almoço</option>
+                            <option value="Retorno">Retorno do Almoço</option>
+                            <option value="Saída">Saída</option>
+                        </select>
+                    </div>
+
+                    <!-- Horário Correto -->
+                    <div class="col-md-12 mb-2">
+                        <label class="form-label fw-semibold small text-muted">Horário Correto</label>
+                        <input type="time" name="hora_correta" class="form-control" required>
+                    </div>
+
+                    <!-- Justificativa -->
+                    <div class="col-md-12 mb-3">
+                        <label class="form-label fw-semibold small text-muted">Justificativa</label>
+                        <textarea name="justificativa" class="form-control" rows="3" placeholder="Explique o motivo do ajuste..." required></textarea>
+                    </div>
+                </div>
+
+                <button type="submit" class="btn btn-submit w-100 py-3 rounded-4 fw-semibold shadow-sm mt-2">
+                    <i class="bi bi-send me-1"></i> Enviar Solicitação
+                </button>
+            </form>
         </div>
 
         <!-- Minhas Solicitações Recentes -->
-        <div class="card shadow-sm">
-            <div class="card-header bg-secondary text-white">
-                <h6 class="mb-0">Minhas Solicitações Enviadas</h6>
-            </div>
-            <div class="card-body p-0">
-                <div class="table-responsive">
-                    <table class="table table-striped align-middle mb-0">
-                        <thead>
-                            <tr>
-                                <th>Data</th>
-                                <th>Ponto</th>
-                                <th>Hora</th>
-                                <th>Status</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for s in solicitacoes %}
-                            <tr>
-                                <td>{{ s.data_ponto }}</td>
-                                <td>{{ s.tipo_ponto }}</td>
-                                <td>{{ s.hora_correta }}</td>
-                                <td>
-                                    {% if s.status == 'Pendente' %}
-                                        <span class="badge bg-warning text-dark">Pendente</span>
-                                    {% elif s.status == 'Aprovada' %}
-                                        <span class="badge bg-success">Aprovada</span>
-                                    {% else %}
-                                        <span class="badge bg-danger">Recusada</span>
-                                    {% endif %}
-                                </td>
-                            </tr>
-                            {% else %}
-                            <tr>
-                                <td colspan="4" class="text-center text-muted py-3">Nenhuma solicitação enviada ainda.</td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
+        <div class="custom-card p-4">
+            <h6 class="fw-bold mb-3 text-secondary">
+                <i class="bi bi-clock-history me-1"></i> Minhas Solicitações Enviadas
+            </h6>
+
+            <div class="table-responsive">
+                <table class="table align-middle mb-0">
+                    <thead class="text-muted small">
+                        <tr>
+                            <th class="border-0">Data</th>
+                            <th class="border-0">Ponto</th>
+                            <th class="border-0">Hora</th>
+                            <th class="border-0">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for s in solicitacoes %}
+                        <tr>
+                            <td class="fw-medium">{{ s.data_ponto }}</td>
+                            <td>{{ s.tipo_ponto }}</td>
+                            <td>{{ s.hora_correta }}</td>
+                            <td>
+                                {% if s.status == 'Pendente' %}
+                                    <span class="badge bg-warning-subtle text-warning-emphasis rounded-pill px-3 py-2 fw-semibold">Pendente</span>
+                                {% elif s.status == 'Aprovada' %}
+                                    <span class="badge bg-success-subtle text-success-emphasis rounded-pill px-3 py-2 fw-semibold">Aprovada</span>
+                                {% else %}
+                                    <span class="badge bg-danger-subtle text-danger-emphasis rounded-pill px-3 py-2 fw-semibold">Recusada</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="4" class="text-center text-muted py-4">Nenhuma solicitação enviada ainda.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
             </div>
         </div>
 
     </div>
 
+    <!-- Scripts JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // LÓGICA DE TROCA DE TEMA (DARK / LIGHT)
+        const themeBtn = document.getElementById('themeToggle');
+        const themeIcon = document.getElementById('themeIcon');
+        const htmlTag = document.documentElement;
+
+        const savedTheme = localStorage.getItem('theme') || 'dark';
+        setTheme(savedTheme);
+
+        themeBtn.addEventListener('click', () => {
+            const currentTheme = htmlTag.getAttribute('data-theme');
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            setTheme(newTheme);
+        });
+
+        function setTheme(theme) {
+            htmlTag.setAttribute('data-theme', theme);
+            localStorage.setItem('theme', theme);
+
+            if (theme === 'dark') {
+                themeIcon.className = 'bi bi-sun';
+                themeBtn.setAttribute('title', 'Mudar para Tema Claro');
+            } else {
+                themeIcon.className = 'bi bi-moon-stars';
+                themeBtn.setAttribute('title', 'Mudar para Tema Escuro');
+            }
+        }
+    </script>
 </body>
 </html>
