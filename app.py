@@ -1,7 +1,7 @@
 import io
 import os
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from functools import wraps
 from zoneinfo import ZoneInfo
 
@@ -54,6 +54,11 @@ login_manager.login_view = "login"
 CARGA_HORARIA_DIARIA = timedelta(hours=8)
 
 
+# Função auxiliar para verificar se a data cai em dia útil (Segunda a Sexta)
+def eh_dia_util(data_obj):
+    return data_obj.weekday() < 5
+
+
 # ==========================================
 #          MODELOS DO BANCO DE DADOS
 # ==========================================
@@ -79,10 +84,10 @@ class RegistroPonto(db.Model):
 class SolicitacaoCorrecao(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     data_ponto = db.Column(db.String(10), nullable=False)  # DD/MM/YYYY
-    tipo_ponto = db.Column(db.String(20), nullable=False) # Entrada, Almoço, Retorno, Saída
-    hora_correta = db.Column(db.String(8), nullable=False) # HH:MM:SS
+    tipo_ponto = db.Column(db.String(20), nullable=False)
+    hora_correta = db.Column(db.String(8), nullable=False)
     justificativa = db.Column(db.Text, nullable=False)
-    status = db.Column(db.String(20), default="Pendente") # Pendente, Aprovada, Recusada
+    status = db.Column(db.String(20), default="Pendente")
     data_solicitacao = db.Column(db.DateTime, default=lambda: datetime.now(ZoneInfo("America/Sao_Paulo")))
     usuario_id = db.Column(db.Integer, db.ForeignKey("usuario.id"), nullable=False)
 
@@ -102,32 +107,97 @@ def admin_required(f):
     return decorated_function
 
 
-# Auto-migração e inicialização do banco
+# Auto-migração do banco de dados
 with app.app_context():
     db.create_all()
     try:
         from sqlalchemy import inspect, text
-
         inspector = inspect(db.engine)
 
-        # Migração da coluna is_admin em usuario
         colunas_usuario = [c["name"] for c in inspector.get_columns("usuario")]
         if "is_admin" not in colunas_usuario:
-            db.session.execute(
-                text("ALTER TABLE usuario ADD COLUMN is_admin BOOLEAN DEFAULT FALSE;")
-            )
+            db.session.execute(text("ALTER TABLE usuario ADD COLUMN is_admin BOOLEAN DEFAULT FALSE;"))
 
-        # Migração da coluna foi_ajustado em registro_ponto
         colunas_ponto = [c["name"] for c in inspector.get_columns("registro_ponto")]
         if "foi_ajustado" not in colunas_ponto:
-            db.session.execute(
-                text("ALTER TABLE registro_ponto ADD COLUMN foi_ajustado BOOLEAN DEFAULT FALSE;")
-            )
+            db.session.execute(text("ALTER TABLE registro_ponto ADD COLUMN foi_ajustado BOOLEAN DEFAULT FALSE;"))
 
         db.session.commit()
     except Exception as e:
         db.session.rollback()
-        print(f"Erro na migração: {e}")
+
+
+# ==========================================
+# SISTEMA DE NOTIFICAÇÕES
+# ==========================================
+def obter_notificacoes_usuario(user_id):
+    if not user_id:
+        return []
+
+    hoje = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
+    notificacoes = []
+
+    try:
+        registros = RegistroPonto.query.filter_by(usuario_id=user_id).all()
+        dias_com_ponto = set()
+        primeiro_registro_data = hoje
+
+        for r in registros:
+            try:
+                d_obj = datetime.strptime(r.data, "%d/%m/%Y").date()
+                dias_com_ponto.add(d_obj)
+                if d_obj < primeiro_registro_data:
+                    primeiro_registro_data = d_obj
+            except ValueError:
+                pass
+
+        limite_busca = primeiro_registro_data if registros else (hoje - timedelta(days=30))
+        curr = hoje - timedelta(days=1)
+        faltas_count = 0
+
+        while curr >= limite_busca:
+            if eh_dia_util(curr) and curr not in dias_com_ponto:
+                faltas_count += 1
+            curr -= timedelta(days=1)
+
+        if faltas_count > 0:
+            notificacoes.append({
+                "id": "faltas_passadas",
+                "tipo": "danger",
+                "titulo": "Pontos Pendentes!",
+                "mensagem": f"Você possui {faltas_count} dia(s) útil(eis) com registro de ponto ausente.",
+                "link": url_for("meu_historico")
+            })
+
+        if eh_dia_util(hoje):
+            data_hoje_str = hoje.strftime("%d/%m/%Y")
+            pontos_hoje = [p.tipo for p in RegistroPonto.query.filter_by(usuario_id=user_id, data=data_hoje_str).all()]
+
+            if "Entrada" not in pontos_hoje:
+                notificacoes.append({
+                    "id": "ponto_hoje",
+                    "tipo": "warning",
+                    "titulo": "Atenção ao Ponto",
+                    "mensagem": "Você ainda não registrou o ponto de Entrada hoje!",
+                    "link": url_for("index")
+                })
+
+    except Exception as e:
+        print(f"Erro ao gerar notificações: {e}")
+        return []
+
+    return notificacoes
+
+
+@app.context_processor
+def inject_notifications():
+    try:
+        if current_user and current_user.is_authenticated:
+            notifs = obter_notificacoes_usuario(current_user.id)
+            return dict(notificacoes_usuario=notifs, total_notificacoes=len(notifs))
+    except Exception:
+        pass
+    return dict(notificacoes_usuario=[], total_notificacoes=0)
 
 
 # ==========================================
@@ -147,7 +217,7 @@ def login():
             login_user(user)
             return redirect(url_for("index"))
         else:
-            flash("E-mail ou senha incorretos. Tente novamente.", "danger")
+            flash("E-mail ou senha incorretos.", "danger")
 
     return render_template("login.html")
 
@@ -191,64 +261,19 @@ def logout():
 
 
 # ==========================================
-# ROTAS DO FUNCIONÁRIO (HISTÓRICO PRÓPRIO)
-# ==========================================
-@app.route("/meu-historico")
-@login_required
-def meu_historico():
-    data_inicio = request.args.get("data_inicio", "").strip()
-    data_fim = request.args.get("data_fim", "").strip()
-    tipo_ponto = request.args.get("tipo_ponto", "").strip()
-
-    query = RegistroPonto.query.filter_by(usuario_id=current_user.id)
-
-    if tipo_ponto:
-        query = query.filter_by(tipo=tipo_ponto)
-
-    registros = query.order_by(RegistroPonto.id.desc()).all()
-
-    if data_inicio or data_fim:
-        registros_filtrados = []
-        d_inicio = datetime.strptime(data_inicio, "%Y-%m-%d").date() if data_inicio else None
-        d_fim = datetime.strptime(data_fim, "%Y-%m-%d").date() if data_fim else None
-
-        for r in registros:
-            try:
-                data_reg = datetime.strptime(r.data, "%d/%m/%Y").date()
-                if d_inicio and data_reg < d_inicio:
-                    continue
-                if d_fim and data_reg > d_fim:
-                    continue
-                registros_filtrados.append(r)
-            except ValueError:
-                registros_filtrados.append(r)
-        registros = registros_filtrados
-
-    return render_template(
-        "meu_historico.html",
-        registros=registros,
-        data_inicio=data_inicio,
-        data_fim=data_fim,
-        tipo_ponto=tipo_ponto,
-    )
-
-
-# ==========================================
-#               ROTAS DO PONTO
+# ROTAS DO FUNCIONÁRIO & PONTO
 # ==========================================
 @app.route("/")
 @login_required
 def index():
     data_hoje = datetime.now(ZoneInfo("America/Sao_Paulo")).strftime("%d/%m/%Y")
 
-    # 1. Filtra APENAS os registros feitos HOJE para controlar os botões
     pontos_hoje_objs = RegistroPonto.query.filter_by(
         usuario_id=current_user.id, data=data_hoje
     ).order_by(RegistroPonto.id.asc()).all()
     
     pontos_batidos = [p.tipo for p in pontos_hoje_objs]
 
-    # 2. Busca o último registro geral apenas para exibir no card informativo de Status
     ultimo_ponto_obj = (
         RegistroPonto.query.filter_by(usuario_id=current_user.id)
         .order_by(RegistroPonto.id.desc())
@@ -290,12 +315,70 @@ def registrar(tipo):
     return redirect(url_for("index"))
 
 
-# ==========================================
-# ROTAS DE SOLICITAÇÃO DE CORREÇÃO
-# ==========================================
-# ==========================================
-# ROTAS DE SOLICITAÇÃO DE CORREÇÃO
-# ==========================================
+@app.route("/meu-historico")
+@login_required
+def meu_historico():
+    data_inicio_str = request.args.get("data_inicio", "").strip()
+    data_fim_str = request.args.get("data_fim", "").strip()
+    tipo_ponto = request.args.get("tipo_ponto", "").strip()
+
+    hoje = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
+
+    registros_query = RegistroPonto.query.filter_by(usuario_id=current_user.id).all()
+
+    pontos_por_data = defaultdict(list)
+    primeira_data_banco = hoje
+
+    for r in registros_query:
+        try:
+            d_obj = datetime.strptime(r.data, "%d/%m/%Y").date()
+            pontos_por_data[d_obj].append(r)
+            if d_obj < primeira_data_banco:
+                primeira_data_banco = d_obj
+        except ValueError:
+            pass
+
+    d_inicio = datetime.strptime(data_inicio_str, "%Y-%m-%d").date() if data_inicio_str else primeira_data_banco
+    d_fim = datetime.strptime(data_fim_str, "%Y-%m-%d").date() if data_fim_str else hoje
+
+    lista_historico = []
+    curr = d_fim
+
+    while curr >= d_inicio:
+        registros_dia = pontos_por_data.get(curr, [])
+
+        if tipo_ponto:
+            registros_dia = [r for r in registros_dia if r.tipo == tipo_ponto]
+
+        if registros_dia:
+            for r in registros_dia:
+                lista_historico.append({
+                    "data": r.data,
+                    "tipo": r.tipo,
+                    "hora": r.hora,
+                    "status": "Ajustado" if r.foi_ajustado else "Normal",
+                    "is_falta": False
+                })
+        elif eh_dia_util(curr) and not tipo_ponto:
+            lista_historico.append({
+                "data": curr.strftime("%d/%m/%Y"),
+                "tipo": "Sem Registro",
+                "hora": "--:--:--",
+                "status": "FALTA",
+                "is_falta": True
+            })
+
+        curr -= timedelta(days=1)
+
+    return render_template(
+        "meu_historico.html",
+        registros=lista_historico,
+        data_inicio=data_inicio_str,
+        data_fim=data_fim_str,
+        tipo_ponto=tipo_ponto,
+    )
+
+
 @app.route("/solicitar-correcao", methods=["GET", "POST"])
 @login_required
 def solicitar_correcao():
@@ -311,7 +394,6 @@ def solicitar_correcao():
             flash("Preencha todos os campos para solicitar a correção.", "warning")
             return redirect(url_for("solicitar_correcao"))
 
-        # Validação no servidor (Back-end) contra datas futuras
         data_obj = datetime.strptime(data_raw, "%Y-%m-%d").date()
         if data_obj > hoje:
             flash("Não é permitido solicitar ajuste para datas futuras.", "danger")
@@ -332,134 +414,127 @@ def solicitar_correcao():
         db.session.add(solicitacao)
         db.session.commit()
 
-        flash("Solicitação de correção enviada com sucesso ao Administrador!", "info")
+        flash("Solicitação de correção enviada com sucesso!", "info")
         return redirect(url_for("solicitar_correcao"))
 
     minhas_solicitacoes = SolicitacaoCorrecao.query.filter_by(
         usuario_id=current_user.id
     ).order_by(SolicitacaoCorrecao.id.desc()).all()
 
-    # Formata a data de hoje como YYYY-MM-DD para o atributo max do input
-    data_hoje_str = hoje.strftime("%Y-%m-%d")
-
     return render_template(
         "solicitar_correcao.html", 
         solicitacoes=minhas_solicitacoes,
-        data_hoje=data_hoje_str
+        data_hoje=hoje.strftime("%Y-%m-%d")
     )
+
 
 @app.route("/exportar-pdf")
 @login_required
 def exportar_pdf():
-    registros = (
-        RegistroPonto.query.filter_by(usuario_id=current_user.id)
-        .order_by(RegistroPonto.id.asc())
-        .all()
-    )
+    hoje = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
+    registros = RegistroPonto.query.filter_by(usuario_id=current_user.id).all()
 
-    if not registros:
-        flash("Nenhum registro encontrado para exportar em PDF.", "warning")
-        return redirect(url_for("index"))
+    dias_registrados = defaultdict(dict)
+    primeira_data = hoje
 
-    dias = defaultdict(dict)
     for r in registros:
-        dias[r.data][r.tipo] = r.hora
+        try:
+            d_obj = datetime.strptime(r.data, "%d/%m/%Y").date()
+            dias_registrados[d_obj][r.tipo] = r.hora
+            if d_obj < primeira_data:
+                primeira_data = d_obj
+        except ValueError:
+            pass
 
-    tabela_linhas = [["Dia", "Entrada", "Almoço", "Retorno", "Saída", "Total Horas"]]
+    tabela_linhas = [["Dia", "Entrada", "Almoço", "Retorno", "Saída", "Total / Status"]]
     total_segundos_trabalhados = 0
     total_segundos_extras = 0
+    total_faltas = 0
     FMT = "%H:%M:%S"
 
-    for dia, reg in dias.items():
-        e = reg.get("Entrada", "--:--")
-        a = reg.get("Almoço", "--:--")
-        r = reg.get("Retorno", "--:--")
-        s = reg.get("Saída", "--:--")
+    curr = primeira_data
+    while curr <= hoje:
+        dia_str = curr.strftime("%d/%m/%Y")
+        reg = dias_registrados.get(curr, {})
 
-        tempo_trabalhado = timedelta()
+        if reg:
+            e = reg.get("Entrada", "--:--")
+            a = reg.get("Almoço", "--:--")
+            r = reg.get("Retorno", "--:--")
+            s = reg.get("Saída", "--:--")
 
-        if e != "--:--" and a != "--:--":
-            t1, t2 = datetime.strptime(e, FMT), datetime.strptime(a, FMT)
-            if t2 > t1:
-                tempo_trabalhado += t2 - t1
+            tempo_trabalhado = timedelta()
 
-        if r != "--:--" and s != "--:--":
-            t3, t4 = datetime.strptime(r, FMT), datetime.strptime(s, FMT)
-            if t4 > t3:
-                tempo_trabalhado += t4 - t3
+            if e != "--:--" and a != "--:--":
+                t1, t2 = datetime.strptime(e, FMT), datetime.strptime(a, FMT)
+                if t2 > t1:
+                    tempo_trabalhado += t2 - t1
 
-        tot = int(tempo_trabalhado.total_seconds())
-        total_segundos_trabalhados += tot
+            if r != "--:--" and s != "--:--":
+                t3, t4 = datetime.strptime(r, FMT), datetime.strptime(s, FMT)
+                if t4 > t3:
+                    tempo_trabalhado += t4 - t3
 
-        if tempo_trabalhado > CARGA_HORARIA_DIARIA:
-            extra = tempo_trabalhado - CARGA_HORARIA_DIARIA
-            total_segundos_extras += int(extra.total_seconds())
+            tot = int(tempo_trabalhado.total_seconds())
+            total_segundos_trabalhados += tot
 
-        hrs, mins = divmod(tot // 60, 60)
-        tabela_linhas.append([dia, e, a, r, s, f"{hrs:02d}:{mins:02d}h"])
+            if tempo_trabalhado > CARGA_HORARIA_DIARIA:
+                extra = tempo_trabalhado - CARGA_HORARIA_DIARIA
+                total_segundos_extras += int(extra.total_seconds())
+
+            hrs, mins = divmod(tot // 60, 60)
+            tabela_linhas.append([dia_str, e, a, r, s, f"{hrs:02d}:{mins:02d}h"])
+
+        elif eh_dia_util(curr):
+            total_faltas += 1
+            tabela_linhas.append([dia_str, "--:--", "--:--", "--:--", "--:--", "FALTA"])
+
+        curr += timedelta(days=1)
 
     hrs_t, mins_t = divmod(total_segundos_trabalhados // 60, 60)
     hrs_e, mins_e = divmod(total_segundos_extras // 60, 60)
 
     buffer = io.BytesIO()
-    pdf = SimpleDocTemplate(
-        buffer,
-        pagesize=letter,
-        rightMargin=30,
-        leftMargin=30,
-        topMargin=30,
-        bottomMargin=30,
-    )
+    pdf = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
     elementos = []
     estilos = getSampleStyleSheet()
 
-    titulo_estilo = ParagraphStyle(
-        "T", parent=estilos["Heading1"], fontSize=18, alignment=1, spaceAfter=15
-    )
-    elementos.append(
-        Paragraph(f"<b>Folha de Ponto - {current_user.nome}</b>", titulo_estilo)
-    )
-    elementos.append(
-        Paragraph(
-            f"<b>E-mail:</b> {current_user.email} | <b>Emissão:</b>"
-            f" {datetime.now(ZoneInfo('America/Sao_Paulo')).strftime('%d/%m/%Y às %H:%M')}",
-            estilos["Normal"],
-        )
-    )
+    titulo_estilo = ParagraphStyle("T", parent=estilos["Heading1"], fontSize=18, alignment=1, spaceAfter=15)
+    elementos.append(Paragraph(f"<b>Folha de Ponto - {current_user.nome}</b>", titulo_estilo))
+    elementos.append(Paragraph(f"<b>E-mail:</b> {current_user.email} | <b>Emissão:</b> {datetime.now(ZoneInfo('America/Sao_Paulo')).strftime('%d/%m/%Y às %H:%M')}", estilos["Normal"]))
     elementos.append(Spacer(1, 15))
 
     tabela = Table(tabela_linhas, colWidths=[80, 85, 85, 85, 85, 90])
-    tabela.setStyle(
-        TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2c3e50")),
-            ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
-            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cccccc")),
-            (
-                "ROWBACKGROUNDS",
-                (0, 1),
-                (-1, -1),
-                [colors.white, colors.HexColor("#f8f9fa")],
-            ),
-        ])
-    )
+    
+    estilo_tabela = [
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2c3e50")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cccccc")),
+    ]
+
+    for i, linha in enumerate(tabela_linhas[1:], start=1):
+        if linha[5] == "FALTA":
+            estilo_tabela.append(("TEXTCOLOR", (0, i), (-1, i), colors.HexColor("#d32f2f")))
+            estilo_tabela.append(("FONTNAME", (0, i), (-1, i), "Helvetica-Bold"))
+            estilo_tabela.append(("BACKGROUND", (0, i), (-1, i), colors.HexColor("#ffebee")))
+
+    tabela.setStyle(TableStyle(estilo_tabela))
     elementos.append(tabela)
     elementos.append(Spacer(1, 20))
 
     dados_resumo = [
         ["Horas Totais Trabalhadas:", f"{hrs_t:02d}:{mins_t:02d}h"],
-        [
-            "Total de Horas Extras (Excedente 8h/dia):",
-            f"{hrs_e:02d}:{mins_e:02d}h",
-        ],
+        ["Total de Horas Extras:", f"{hrs_e:02d}:{mins_e:02d}h"],
+        ["Total de Faltas (Dias Úteis):", f"{total_faltas} dia(s)"],
     ]
     tabela_resumo = Table(dados_resumo, colWidths=[300, 210])
     tabela_resumo.setStyle(
         TableStyle([
             ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"),
             ("ALIGN", (0, 0), (0, -1), "RIGHT"),
-            ("TEXTCOLOR", (1, 1), (1, 1), colors.HexColor("#2e7d32")),
+            ("TEXTCOLOR", (1, 2), (1, 2), colors.HexColor("#d32f2f")),
         ])
     )
     elementos.append(tabela_resumo)
@@ -468,14 +543,10 @@ def exportar_pdf():
     buffer.seek(0)
 
     agora_br = datetime.now(ZoneInfo("America/Sao_Paulo"))
-    nome_arquivo_pdf = (
-        f"Folha_Ponto_{current_user.nome.replace(' ', '_')}_{agora_br.strftime('%m_%Y')}.pdf"
-    )
-
     return send_file(
         buffer,
         as_attachment=True,
-        download_name=nome_arquivo_pdf,
+        download_name=f"Folha_Ponto_{current_user.nome.replace(' ', '_')}_{agora_br.strftime('%m_%Y')}.pdf",
         mimetype="application/pdf",
     )
 
@@ -508,9 +579,7 @@ def admin_historico():
         query = query.filter(RegistroPonto.usuario_id == usuario_id)
 
     if busca_nome:
-        query = query.filter(
-            (Usuario.nome.ilike(f"%{busca_nome}%")) | (Usuario.email.ilike(f"%{busca_nome}%"))
-        )
+        query = query.filter((Usuario.nome.ilike(f"%{busca_nome}%")) | (Usuario.email.ilike(f"%{busca_nome}%")))
 
     if tipo_ponto:
         query = query.filter(RegistroPonto.tipo == tipo_ponto)
@@ -584,11 +653,11 @@ def responder_solicitacao(id, acao):
             )
             db.session.add(novo_ponto)
 
-        flash("Solicitação APROVADA e histórico de ponto atualizado!", "success")
+        flash("Solicitação APROVADA e registro atualizado!", "success")
 
     elif acao == "recusar":
         solicitacao.status = "Recusada"
-        flash("Solicitação RECUSADA com sucesso.", "warning")
+        flash("Solicitação RECUSADA.", "warning")
 
     db.session.commit()
     return redirect(url_for("admin_solicitacoes"))
@@ -606,8 +675,7 @@ def toggle_admin(user_id):
     usuario.is_admin = not usuario.is_admin
     db.session.commit()
 
-    status = "promovido a" if usuario.is_admin else "removido de"
-    flash(f"Usuário {usuario.nome} foi {status} Administrador com sucesso!", "success")
+    flash(f"Status do usuário {usuario.nome} atualizado!", "success")
     return redirect(url_for("admin_panel"))
 
 

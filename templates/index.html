@@ -6,18 +6,154 @@
     <title>Registrar Ponto</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        .notif-btn {
+            width: 42px;
+            height: 42px;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.25s ease;
+            color: #475569;
+        }
+
+        .notif-btn:hover {
+            background: #ffffff;
+            border-color: #cbd5e1;
+            color: #0f172a;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+            transform: translateY(-1px);
+        }
+
+        .notif-btn:hover i {
+            animation: bell-ring 0.5s ease-in-out;
+        }
+
+        .notif-badge-pulse {
+            position: absolute;
+            top: -4px;
+            right: -4px;
+            background-color: #ef4444;
+            color: white;
+            font-size: 0.7rem;
+            font-weight: 700;
+            min-width: 18px;
+            height: 18px;
+            border-radius: 9999px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0 4px;
+            border: 2px solid #ffffff;
+            box-shadow: 0 2px 4px rgba(239, 68, 68, 0.3);
+        }
+
+        .notif-badge-pulse::after {
+            content: '';
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            border-radius: 9999px;
+            background-color: #ef4444;
+            opacity: 0.6;
+            animation: ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;
+            z-index: -1;
+        }
+
+        @keyframes ping {
+            75%, 100% {
+                transform: scale(1.8);
+                opacity: 0;
+            }
+        }
+
+        @keyframes bell-ring {
+            0%, 100% { transform: rotate(0); }
+            20%, 60% { transform: rotate(15deg); }
+            40%, 80% { transform: rotate(-15deg); }
+        }
+
+        .notif-menu {
+            width: 320px;
+            border: 1px solid #e2e8f0;
+            border-radius: 14px;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
+            overflow: hidden;
+        }
+    </style>
 </head>
 <body class="bg-light">
 
-    <div class="container py-5 d-flex justify-content-center">
+    <!-- Container Flutuante do Toast Vermelho -->
+    <div class="toast-container position-fixed top-0 end-0 p-3" style="z-index: 1090;">
+        {% for n in notificacoes_usuario %}
+            {% if n.tipo == 'danger' %}
+            <div class="toast align-items-center text-white bg-danger border-0 shadow-lg mb-2" role="alert" aria-live="assertive" aria-atomic="true" data-bs-delay="6000">
+                <div class="d-flex">
+                    <div class="toast-body">
+                        <strong class="d-block"><i class="bi bi-exclamation-triangle-fill me-1"></i> {{ n.titulo }}</strong>
+                        {{ n.mensagem }}
+                        <div class="mt-2 pt-2 border-top border-light">
+                            <a href="{{ n.link }}" class="btn btn-light btn-sm fw-bold text-danger">Ajustar Agora</a>
+                        </div>
+                    </div>
+                    <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+                </div>
+            </div>
+            {% endif %}
+        {% endfor %}
+    </div>
+
+    <div class="container py-4 d-flex flex-column align-items-center">
         <div class="card shadow-sm p-4" style="max-width: 450px; width: 100%; border-radius: 15px;">
             
-            <div class="text-center mb-4">
-                <h3 class="fw-bold mb-1">Registrar Ponto</h3>
-                <p class="text-muted small">Selecione uma das opções abaixo para registrar seu horário</p>
+            <!-- Topo com o Botão de Notificação Moderno -->
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h4 class="fw-bold m-0 text-dark" style="letter-spacing: -0.5px;">Registrar Ponto</h4>
+                
+                <div class="dropdown">
+                    <button class="notif-btn position-relative border-0" type="button" id="dropdownNotification" data-bs-toggle="dropdown" aria-expanded="false">
+                        <i class="bi bi-bell-fill fs-5"></i>
+                        {% if total_notificacoes|default(0) > 0 %}
+                            <span class="notif-badge-pulse">
+                                {{ total_notificacoes|default(0) }}
+                            </span>
+                        {% endif %}
+                    </button>
+
+                    <ul class="dropdown-menu dropdown-menu-end notif-menu p-2 m-0 mt-2" aria-labelledby="dropdownNotification">
+                        <li class="dropdown-header fw-bold text-dark border-bottom pb-2 mb-2 d-flex justify-content-between align-items-center">
+                            <span style="font-size: 0.9rem;">Notificações</span>
+                            <span class="badge bg-danger rounded-pill px-2 py-1" style="font-size: 0.75rem;">{{ total_notificacoes|default(0) }} pendente(s)</span>
+                        </li>
+
+                        {% if notificacoes_usuario %}
+                            {% for n in notificacoes_usuario %}
+                            <li class="mb-1">
+                                <a class="dropdown-item rounded-3 p-2 text-wrap d-flex align-items-start gap-2" href="{{ n.link }}" style="transition: background 0.2s;">
+                                    <i class="bi bi-exclamation-circle-fill text-{{ n.tipo }} fs-6 mt-1"></i>
+                                    <div>
+                                        <strong class="d-block text-dark small">{{ n.titulo }}</strong>
+                                        <span class="text-muted" style="font-size: 0.8rem;">{{ n.mensagem }}</span>
+                                    </div>
+                                </a>
+                            </li>
+                            {% endfor %}
+                        {% else %}
+                            <li class="text-center text-muted py-4 small">
+                                <div class="mb-2">
+                                    <i class="bi bi-check-circle-fill text-success fs-3"></i>
+                                </div>
+                                Tudo em dia por aqui!
+                            </li>
+                        {% endif %}
+                    </ul>
+                </div>
             </div>
 
-            <!-- Exibição de Mensagens Flash -->
             {% with messages = get_flashed_messages(with_categories=true) %}
                 {% if messages %}
                     {% for category, message in messages %}
@@ -40,7 +176,6 @@
 
             <!-- Botões de Batida de Ponto -->
             <div class="row g-3 mb-4">
-                <!-- ENTRADA: Liberada se 'Entrada' NÃO foi batida hoje -->
                 <div class="col-6">
                     <form action="{{ url_for('registrar', tipo='Entrada') }}" method="POST">
                         <button type="submit" class="btn btn-primary w-100 py-2 fw-semibold"
@@ -50,7 +185,6 @@
                     </form>
                 </div>
 
-                <!-- ALMOÇO: Liberado se 'Entrada' foi batida E 'Almoço' NÃO foi batido hoje -->
                 <div class="col-6">
                     <form action="{{ url_for('registrar', tipo='Almoço') }}" method="POST">
                         <button type="submit" class="btn btn-primary w-100 py-2 fw-semibold"
@@ -60,7 +194,6 @@
                     </form>
                 </div>
 
-                <!-- RETORNO: Liberado se 'Almoço' foi batido E 'Retorno' NÃO foi batido hoje -->
                 <div class="col-6">
                     <form action="{{ url_for('registrar', tipo='Retorno') }}" method="POST">
                         <button type="submit" class="btn btn-primary w-100 py-2 fw-semibold"
@@ -70,7 +203,6 @@
                     </form>
                 </div>
 
-                <!-- SAÍDA: Liberada se 'Retorno' foi batido E 'Saída' NÃO foi batida hoje -->
                 <div class="col-6">
                     <form action="{{ url_for('registrar', tipo='Saída') }}" method="POST">
                         <button type="submit" class="btn btn-primary w-100 py-2 fw-semibold"
@@ -83,7 +215,7 @@
 
             <hr class="my-3">
 
-            <!-- Ações Secundárias -->
+            <!-- Ações -->
             <div class="d-grid gap-2">
                 <a href="{{ url_for('meu_historico') }}" class="btn btn-primary py-2 fw-semibold">
                     <i class="bi bi-card-checklist me-1"></i> Meu Histórico de Pontos
@@ -117,5 +249,14 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        document.addEventListener("DOMContentLoaded", function () {
+            var toastElList = [].slice.call(document.querySelectorAll('.toast'));
+            toastElList.map(function (toastEl) {
+                var toast = new bootstrap.Toast(toastEl);
+                toast.show();
+            });
+        });
+    </script>
 </body>
 </html>
