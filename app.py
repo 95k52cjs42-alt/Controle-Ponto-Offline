@@ -447,10 +447,14 @@ def exportar_pdf():
             pass
 
     tabela_linhas = [["Dia", "Entrada", "Almoço", "Retorno", "Saída", "Total / Status"]]
+    
     total_segundos_trabalhados = 0
     total_segundos_extras = 0
-    total_faltas = 0
+    total_segundos_faltantes = 0
+    total_faltas_dias = 0
+    
     FMT = "%H:%M:%S"
+    segundos_carga_diaria = int(CARGA_HORARIA_DIARIA.total_seconds())  # 8h = 28800s
 
     curr = primeira_data
     while curr <= hoje:
@@ -478,22 +482,50 @@ def exportar_pdf():
             tot = int(tempo_trabalhado.total_seconds())
             total_segundos_trabalhados += tot
 
-            if tempo_trabalhado > CARGA_HORARIA_DIARIA:
-                extra = tempo_trabalhado - CARGA_HORARIA_DIARIA
-                total_segundos_extras += int(extra.total_seconds())
+            # CÁLCULO DE HORAS EXTRAS / FALTANTES
+            # Só contabiliza débito/crédito se for um dia passado OU se o dia de hoje já tiver sido finalizado (Saída registrada)
+            if curr < hoje or s != "--:--":
+                if tot > segundos_carga_diaria:
+                    total_segundos_extras += (tot - segundos_carga_diaria)
+                elif eh_dia_util(curr) and tot < segundos_carga_diaria:
+                    total_segundos_faltantes += (segundos_carga_diaria - tot)
 
             hrs, mins = divmod(tot // 60, 60)
             tabela_linhas.append([dia_str, e, a, r, s, f"{hrs:02d}:{mins:02d}h"])
 
         elif eh_dia_util(curr):
-            total_faltas += 1
-            tabela_linhas.append([dia_str, "--:--", "--:--", "--:--", "--:--", "FALTA"])
+            # Se for um dia útil no passado e sem nenhum registro -> É FALTA
+            if curr < hoje:
+                total_faltas_dias += 1
+                total_segundos_faltantes += segundos_carga_diaria
+                tabela_linhas.append([dia_str, "--:--", "--:--", "--:--", "--:--", "FALTA"])
+            else:
+                # Dia de hoje ainda em andamento sem registros
+                tabela_linhas.append([dia_str, "--:--", "--:--", "--:--", "--:--", "Em Aberto"])
 
         curr += timedelta(days=1)
 
+    # -------------------------------------------------------------
+    # CÁLCULO DO BALANÇO FINAL
+    # -------------------------------------------------------------
+    balanco_segundos = total_segundos_extras - total_segundos_faltantes
+
     hrs_t, mins_t = divmod(total_segundos_trabalhados // 60, 60)
     hrs_e, mins_e = divmod(total_segundos_extras // 60, 60)
+    hrs_f, mins_f = divmod(total_segundos_faltantes // 60, 60)
+    
+    hrs_b, mins_b = divmod(abs(balanco_segundos) // 60, 60)
+    
+    if balanco_segundos >= 0:
+        texto_balanco = f"+{hrs_b:02d}:{mins_b:02d}h (Crédito)"
+        cor_balanco = colors.HexColor("#2e7d32")
+    else:
+        texto_balanco = f"-{hrs_b:02d}:{mins_b:02d}h (A Repor)"
+        cor_balanco = colors.HexColor("#c62828")
 
+    # -------------------------------------------------------------
+    # GERANDO O PDF (REPORTLAB)
+    # -------------------------------------------------------------
     buffer = io.BytesIO()
     pdf = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
     elementos = []
@@ -526,15 +558,21 @@ def exportar_pdf():
 
     dados_resumo = [
         ["Horas Totais Trabalhadas:", f"{hrs_t:02d}:{mins_t:02d}h"],
-        ["Total de Horas Extras:", f"{hrs_e:02d}:{mins_e:02d}h"],
-        ["Total de Faltas (Dias Úteis):", f"{total_faltas} dia(s)"],
+        ["(+) Total Horas Extras:", f"{hrs_e:02d}:{mins_e:02d}h"],
+        ["(-) Total Horas Faltantes:", f"{hrs_f:02d}:{mins_f:02d}h ({total_faltas_dias} dia(s) ausente)"],
+        ["BALANÇO FINAL (BANCO DE HORAS):", texto_balanco],
     ]
-    tabela_resumo = Table(dados_resumo, colWidths=[300, 210])
+    
+    tabela_resumo = Table(dados_resumo, colWidths=[310, 200])
     tabela_resumo.setStyle(
         TableStyle([
             ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"),
             ("ALIGN", (0, 0), (0, -1), "RIGHT"),
-            ("TEXTCOLOR", (1, 2), (1, 2), colors.HexColor("#d32f2f")),
+            ("ALIGN", (1, 0), (1, -1), "LEFT"),
+            ("TEXTCOLOR", (1, 1), (1, 1), colors.HexColor("#2e7d32")),
+            ("TEXTCOLOR", (1, 2), (1, 2), colors.HexColor("#c62828")),
+            ("TEXTCOLOR", (1, 3), (1, 3), cor_balanco),
+            ("LINEABOVE", (0, 3), (-1, 3), 1, colors.HexColor("#000000")),
         ])
     )
     elementos.append(tabela_resumo)
@@ -549,8 +587,6 @@ def exportar_pdf():
         download_name=f"Folha_Ponto_{current_user.nome.replace(' ', '_')}_{agora_br.strftime('%m_%Y')}.pdf",
         mimetype="application/pdf",
     )
-
-
 # ==========================================
 #          ROTAS DE ADMINISTRAÇÃO
 # ==========================================
