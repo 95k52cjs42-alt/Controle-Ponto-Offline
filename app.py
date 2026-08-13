@@ -377,24 +377,46 @@ def registrar(tipo):
 @app.route("/meu_historico")
 @login_required
 def meu_historico():
+    hoje = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
     registros = (
         RegistroPonto.query.filter_by(usuario_id=current_user.id)
         .order_by(RegistroPonto.id.desc())
         .all()
     )
 
-    # 1. Agrupa os pontos batidos por data ('DD/MM/AAAA')
-    pontos_por_data = {}
-    for r in registros:
-        data_str = r.data
-        if data_str not in pontos_por_data:
-            pontos_por_data[data_str] = []
-        pontos_por_data[data_str].append(r)
+    dias_registrados = {}
+    primeira_data = hoje
 
-    # 2. Analisa os pontos faltantes para cada dia
+    for r in registros:
+        try:
+            d_obj = datetime.strptime(r.data, "%d/%m/%Y").date()
+            if d_obj not in dias_registrados:
+                dias_registrados[d_obj] = []
+            dias_registrados[d_obj].append(r)
+            
+            if d_obj < primeira_data:
+                primeira_data = d_obj
+        except ValueError:
+            pass
+
     historico_analisado = []
-    for data_str, registros_do_dia in pontos_por_data.items():
+    curr = primeira_data if registros else (hoje - timedelta(days=30))
+    
+    datas_intervalo = []
+    temp_date = curr
+    while temp_date <= hoje:
+        datas_intervalo.append(temp_date)
+        temp_date += timedelta(days=1)
+    
+    datas_intervalo.sort(reverse=True)
+
+    for d_obj in datas_intervalo:
+        data_str = d_obj.strftime("%d/%m/%Y")
+        registros_do_dia = dias_registrados.get(d_obj, [])
+        
+        # Identifica quais pontos faltaram (mesmo que seja falta total)
         faltantes = identificar_pontos_faltantes(registros_do_dia)
+        
         historico_analisado.append({
             "data": data_str,
             "registros": registros_do_dia,
