@@ -1,98 +1,103 @@
-{% extends 'base.html' %}
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meu Histórico de Pontos</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
+</head>
+<body class="bg-light py-4">
 
-{% block content %}
-<div class="row justify-content-center">
-    <div class="col-md-7 col-lg-6">
-        <div class="card main-card p-4 p-md-5">
-            <h3 class="fw-bold mb-4 text-center">Meu Histórico de Marcações</h3>
+    <div class="container">
+        <!-- Cabeçalho -->
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h3 class="fw-bold text-dark m-0">Meu Histórico de Pontos</h3>
+            <a href="{{ url_for('index') }}" class="btn btn-outline-secondary btn-sm">
+                <i class="bi bi-arrow-left"></i> Voltar ao Início
+            </a>
+        </div>
 
-            <!-- Formulário de Filtros -->
-            <form method="GET" action="{{ url_for('meu_historico') }}" class="mb-4">
-                <div class="mb-3">
-                    <label for="data_inicio" class="form-label text-muted small fw-semibold">Data Inicial</label>
-                    <input type="date" class="form-control py-2" id="data_inicio" name="data_inicio" value="{{ request.args.get('data_inicio', '') }}">
-                </div>
+        <!-- Filtros -->
+        <div class="card border-0 shadow-sm mb-4">
+            <div class="card-body">
+                <form method="GET" action="{{ url_for('meu_historico') }}" class="row g-3 align-items-end">
+                    <div class="col-md-4">
+                        <label class="form-label fw-semibold small">Data Início:</label>
+                        <input type="date" name="data_inicio" class="form-control" value="{{ data_inicio }}">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label fw-semibold small">Data Fim:</label>
+                        <input type="date" name="data_fim" class="form-control" value="{{ data_fim }}">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label fw-semibold small">Tipo:</label>
+                        <select name="tipo_ponto" class="form-select">
+                            <option value="">Todos</option>
+                            <option value="Entrada" {% if tipo_ponto == 'Entrada' %}selected{% endif %}>Entrada</option>
+                            <option value="Almoço" {% if tipo_ponto == 'Almoço' %}selected{% endif %}>Almoço</option>
+                            <option value="Retorno" {% if tipo_ponto == 'Retorno' %}selected{% endif %}>Retorno</option>
+                            <option value="Saída" {% if tipo_ponto == 'Saída' %}selected{% endif %}>Saída</option>
+                        </select>
+                    </div>
+                    <div class="col-12 d-flex justify-content-end gap-2">
+                        <a href="{{ url_for('meu_historico') }}" class="btn btn-light border">Limpar</a>
+                        <button type="submit" class="btn btn-primary"><i class="bi bi-funnel"></i> Filtrar</button>
+                    </div>
+                </form>
+            </div>
+        </div>
 
-                <div class="mb-3">
-                    <label for="data_fim" class="form-label text-muted small fw-semibold">Data Final</label>
-                    <input type="date" class="form-control py-2" id="data_fim" name="data_fim" value="{{ request.args.get('data_fim', '') }}">
-                </div>
-
-                <div class="mb-4">
-                    <label for="tipo" class="form-label text-muted small fw-semibold">Tipo de Registro</label>
-                    <select class="form-select py-2" id="tipo" name="tipo">
-                        <option value="">Todos os tipos</option>
-                        <option value="Entrada" {% if request.args.get('tipo') == 'Entrada' %}selected{% endif %}>Entrada</option>
-                        <option value="Almoço" {% if request.args.get('tipo') == 'Almoço' %}selected{% endif %}>Almoço</option>
-                        <option value="Retorno" {% if request.args.get('tipo') == 'Retorno' %}selected{% endif %}>Retorno</option>
-                        <option value="Saída" {% if request.args.get('tipo') == 'Saída' %}selected{% endif %}>Saída</option>
-                    </select>
-                </div>
-
-                <button type="submit" class="btn btn-primary w-100 py-2 fw-semibold">Filtrar</button>
-            </form>
-
-            <!-- Tabela de Registros -->
+        <!-- Tabela de Histórico com Ação de Ajuste -->
+        <div class="card border-0 shadow-sm overflow-hidden">
             <div class="table-responsive">
-                <table class="table align-middle mb-0">
+                <table class="table table-hover align-middle mb-0">
                     <thead class="table-dark">
                         <tr>
-                            <th scope="col">Data</th>
-                            <th scope="col" class="text-center">Tipo</th>
-                            <th scope="col" class="text-center">Horário</th>
-                            <th scope="col" class="text-end">Status</th>
+                            <th>Data</th>
+                            <th>Tipo de Ponto</th>
+                            <th>Horário</th>
+                            <th>Status</th>
+                            <th class="text-end">Ações</th>
                         </tr>
                     </thead>
                     <tbody>
-                        {% for reg in registros %}
-                        <tr>
-                            <td>
-                                {% if reg.data is defined %}{{ reg.data }}{% elif reg.data_hora is defined %}{{ reg.data_hora.strftime('%d/%m/%Y') }}{% endif %}
-                            </td>
-                            <td class="text-center">
-                                {% set t = reg.tipo if reg.tipo is defined else reg['tipo'] %}
-                                {% if t == 'Entrada' %}
-                                    <span class="badge bg-success px-3 py-1">Entrada</span>
-                                {% elif t == 'Almoço' %}
-                                    <span class="badge bg-warning text-dark px-3 py-1">Almoço</span>
-                                {% elif t == 'Retorno' %}
-                                    <span class="badge bg-info px-3 py-1">Retorno</span>
-                                {% elif t == 'Saída' %}
-                                    <span class="badge bg-danger px-3 py-1">Saída</span>
-                                {% else %}
-                                    <span class="badge bg-secondary px-3 py-1">{{ t }}</span>
-                                {% endif %}
-                            </td>
-                            <td class="fw-bold text-center">
-                                {% if reg.hora is defined %}{{ reg.hora }}{% elif reg.data_hora is defined %}{{ reg.data_hora.strftime('%H:%M:%S') }}{% endif %}
-                            </td>
-                            <td class="text-end">
-                                {% set e_ajustado = reg.foi_ajustado or reg.ajustado or reg.is_adjusted or reg.editado or (reg['foi_ajustado'] is defined and reg['foi_ajustado']) or (reg['ajustado'] is defined and reg['ajustado']) or (reg['status'] is defined and reg['status'] == 'Ajustado') %}
-                                {% if e_ajustado %}
-                                    <span class="badge bg-primary text-white px-2 py-1" data-bs-toggle="tooltip" title="Ponto editado/ajustado">
-                                        <i class="bi bi-pencil-fill me-1"></i>Ajustado
-                                    </span>
-                                {% else %}
-                                    <span class="text-muted small">-</span>
-                                {% endif %}
-                            </td>
-                        </tr>
+                        {% if registros %}
+                            {% for r in registros %}
+                            <tr class="{% if r.is_falta %}table-danger{% endif %}">
+                                <td class="fw-semibold">{{ r.data }}</td>
+                                <td>{{ r.tipo }}</td>
+                                <td>{{ r.hora }}</td>
+                                <td>
+                                    {% if r.is_falta %}
+                                        <span class="badge bg-danger">FALTA</span>
+                                    {% elif r.status == 'Ajustado' %}
+                                        <span class="badge bg-warning text-dark">Ajustado</span>
+                                    {% else %}
+                                        <span class="badge bg-success">Normal</span>
+                                    {% endif %}
+                                </td>
+                                <td class="text-end">
+                                    <!-- Botão que envia a data no formato ISO para preencher o formulário de ajuste -->
+                                    {% set dia, mes, ano = r.data.split('/') %}
+                                    <a href="{{ url_for('solicitar_correcao', data=ano + '-' + mes + '-' + dia) }}" 
+                                       class="btn btn-sm {% if r.is_falta %}btn-danger{% else %}btn-outline-primary{% endif %} fw-semibold">
+                                        <i class="bi bi-pencil-square"></i> Ajustar
+                                    </a>
+                                </td>
+                            </tr>
+                            {% endfor %}
                         {% else %}
-                        <tr>
-                            <td colspan="4" class="text-center text-muted py-3">Nenhum registro encontrado.</td>
-                        </tr>
-                        {% endfor %}
+                            <tr>
+                                <td colspan="5" class="text-center py-4 text-muted">Nenhum registro encontrado.</td>
+                            </tr>
+                        {% endif %}
                     </tbody>
                 </table>
             </div>
-
-            <div class="mt-4 text-center">
-                <a href="{{ url_for('index') }}" class="btn btn-outline-secondary btn-sm fw-semibold">
-                    <i class="bi bi-arrow-left me-1"></i> Voltar ao Inicio
-                </a>
-            </div>
-
         </div>
     </div>
-</div>
-{% endblock %}
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
