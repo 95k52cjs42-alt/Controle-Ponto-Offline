@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="pt-br" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gerenciar Usuários | 4Lab Orbit</title>
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
+
+    <style>
+        [data-theme="dark"] {
+            --bg-dark: #0b0f19; --card-bg: #111827; --card-border: #1f293d;
+            --text-main: #ffffff; --text-muted: #94a3b8; --blue-accent: #2563eb;
+            --green-accent: #10b981; --orange-accent: #f59e0b;
+            --nav-btn-bg: rgba(255, 255, 255, 0.05); --nav-btn-hover: rgba(255, 255, 255, 0.12);
+        }
+        [data-theme="light"] {
+            --bg-dark: #f1f5f9; --card-bg: #ffffff; --card-border: #e2e8f0;
+            --text-main: #0f172a; --text-muted: #64748b; --blue-accent: #2563eb;
+            --green-accent: #059669; --orange-accent: #d97706;
+            --nav-btn-bg: #f8fafc; --nav-btn-hover: #e2e8f0;
+        }
+        :root { --radius-main: 20px; --radius-btn: 12px; }
+        body { font-family: 'Outfit', sans-serif; background-color: var(--bg-dark); color: var(--text-main); min-height: 100vh; padding: 2rem 1rem; }
+        .text-muted { color: var(--text-muted) !important; }
+        
+        /* Estilos da Busca */
+        .search-container { position: relative; margin-bottom: 2rem; }
+        .search-input { 
+            width: 100%; background: var(--card-bg); border: 1px solid var(--card-border); 
+            padding: 1rem 1.5rem 1rem 3rem; border-radius: var(--radius-main); 
+            color: var(--text-main); font-size: 1rem;
+        }
+        .search-input:focus { outline: none; border-color: var(--blue-accent); box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2); }
+        .search-icon { position: absolute; left: 1.25rem; top: 50%; transform: translateY(-50%); color: var(--text-muted); }
+
+        .top-navbar { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: var(--radius-main); padding: 0.85rem 1.25rem; margin-bottom: 2.5rem; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+        .brand-title { font-weight: 700; font-size: 1.1rem; display: flex; align-items: center; gap: 10px; }
+        .brand-icon { width: 36px; height: 36px; background: var(--blue-accent); color: #fff; border-radius: 10px; display: flex; align-items: center; justify-content: center; }
+        .nav-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        .nav-btn { background: var(--nav-btn-bg); border: 1px solid var(--card-border); color: var(--text-main); padding: 0.45rem 0.9rem; border-radius: var(--radius-btn); font-size: 0.85rem; font-weight: 500; text-decoration: none; display: flex; align-items: center; gap: 6px; }
+        .nav-btn.active { background: var(--blue-accent); border-color: var(--blue-accent); color: #fff !important; }
+        .nav-btn.btn-solicitacoes { border-color: rgba(245, 158, 11, 0.5); color: var(--orange-accent); background: rgba(245, 158, 11, 0.08); }
+        .user-pill { background: var(--nav-btn-bg); border: 1px solid var(--card-border); padding: 0.35rem 0.8rem; border-radius: 20px; font-size: 0.85rem; display: flex; align-items: center; gap: 8px; }
+        .avatar-circle { width: 24px; height: 24px; background: var(--blue-accent); color: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 700; }
+        .user-card { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: var(--radius-main); padding: 1.25rem 1.5rem; margin-bottom: 1rem; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 15px; }
+        .user-info { display: flex; align-items: center; gap: 14px; }
+        .user-avatar { width: 42px; height: 42px; background: var(--blue-accent); color: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; }
+        .badge-role-admin { background: rgba(37, 99, 235, 0.15); color: var(--blue-accent); border: 1px solid rgba(37, 99, 235, 0.3); border-radius: 20px; padding: 0.35rem 0.85rem; font-size: 0.8rem; font-weight: 600; }
+        .badge-role-func { background: var(--nav-btn-bg); color: var(--text-muted); border: 1px solid var(--card-border); border-radius: 20px; padding: 0.35rem 0.85rem; font-size: 0.8rem; }
+        .btn-action-outline { background: transparent; border: 1px solid var(--blue-accent); color: var(--blue-accent); border-radius: var(--radius-btn); padding: 0.45rem 1rem; font-size: 0.85rem; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
+        .btn-action-outline:hover { background: var(--blue-accent); color: #fff; }
+        .btn-toggle-admin { border-color: rgba(16, 185, 129, 0.5); color: var(--green-accent); }
+        .btn-toggle-admin:hover { background: var(--green-accent); color: #fff; }
+    </style>
+</head>
+<body>
+
+    <div class="container" style="max-width: 1000px;">
+        
+        <!-- Navbar -->
+        <div class="top-navbar">
+            <div class="brand-title">
+                <div class="brand-icon"><i class="bi bi-people"></i></div>
+                <span>4Lab Orbit | Usuários</span>
+            </div>
+
+            <div class="nav-actions">
+                <a href="{{ url_for('index') }}" class="nav-btn"><i class="bi bi-house-door"></i> Início</a>
+                <a href="{{ url_for('admin_panel') }}" class="nav-btn"><i class="bi bi-shield-check"></i> Painel Admin</a>
+                <a href="{{ url_for('admin_usuarios') }}" class="nav-btn active"><i class="bi bi-people"></i> Usuários</a>
+                <a href="{{ url_for('admin_historico') }}" class="nav-btn"><i class="bi bi-clock-history text-primary"></i> Histórico Geral</a>
+                <a href="{{ url_for('admin_solicitacoes') }}" class="nav-btn btn-solicitacoes">
+                    <i class="bi bi-pencil-square"></i> Solicitações
+                    {% if total_solicitacoes_pendentes and total_solicitacoes_pendentes > 0 %}
+                        <span class="badge bg-warning text-dark rounded-pill ms-1">{{ total_solicitacoes_pendentes }}</span>
+                    {% endif %}
+                </a>
+                <div class="user-pill">
+                    <div class="avatar-circle">{{ current_user.nome[0]|upper if current_user else 'A' }}</div>
+                    <span>{{ current_user.nome.split()[0] if current_user else 'Admin' }}</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="mb-4">
+            <h3 class="fw-bold mb-1">Usuários Cadastrados</h3>
+            <p class="text-muted small mb-3">Gerencie acessos e consulte o histórico individual de cada colaborador</p>
+            
+            <!-- Barra de Pesquisa -->
+            <div class="search-container">
+                <i class="bi bi-search search-icon"></i>
+                <input type="text" id="userSearch" class="search-input" placeholder="Pesquisar por nome ou e-mail...">
+            </div>
+        </div>
+
+        <!-- Lista de Usuários -->
+        <div class="row g-2" id="userList">
+            {% if usuarios %}
+                {% for u in usuarios %}
+                <div class="col-12 user-item">
+                    <div class="user-card">
+                        <div class="user-info">
+                            <span class="text-muted fw-bold me-2">#{{ u.id }}</span>
+                            <div class="user-avatar">{{ u.nome[0]|upper if u.nome else 'U' }}</div>
+                            <div>
+                                <h6 class="fw-bold mb-0 user-name">{{ u.nome }}</h6>
+                                <span class="text-muted small user-email">{{ u.email }}</span>
+                            </div>
+                        </div>
+
+                        <div>
+                            {% if u.is_admin %}
+                                <span class="badge-role-admin"><i class="bi bi-shield-check me-1"></i> Administrador</span>
+                            {% else %}
+                                <span class="badge-role-func"><i class="bi bi-person me-1"></i> Funcionário</span>
+                            {% endif %}
+                        </div>
+
+                        <div class="d-flex align-items-center gap-2">
+                            <a href="{{ url_for('admin_historico', usuario_id=u.id) }}" class="btn-action-outline">
+                                <i class="bi bi-clock-history"></i> Histórico
+                            </a>
+
+                            {% if u.id != current_user.id %}
+                                <form action="{{ url_for('toggle_admin', user_id=u.id) }}" method="POST" class="d-inline">
+                                    <button type="submit" class="btn-action-outline btn-toggle-admin">
+                                        <i class="bi bi-person-gear"></i>
+                                        {% if u.is_admin %} Remover Admin {% else %} Tornar Admin {% endif %}
+                                    </button>
+                                </form>
+                            {% else %}
+                                <span class="text-muted small px-2">(Sua Conta)</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="col-12 text-center py-5 text-muted">
+                    <i class="bi bi-people fs-1 d-block mb-2"></i>
+                    Nenhum usuário cadastrado no momento.
+                </div>
+            {% endif %}
+        </div>
+
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Lógica de Filtragem em Tempo Real
+        document.getElementById('userSearch').addEventListener('keyup', function() {
+            let filter = this.value.toLowerCase();
+            let items = document.querySelectorAll('.user-item');
+
+            items.forEach(item => {
+                let name = item.querySelector('.user-name').innerText.toLowerCase();
+                let email = item.querySelector('.user-email').innerText.toLowerCase();
+
+                if (name.includes(filter) || email.includes(filter)) {
+                    item.style.display = "";
+                } else {
+                    item.style.display = "none";
+                }
+            });
+        });
+    </script>
+</body>
+</html>
