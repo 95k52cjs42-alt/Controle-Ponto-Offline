@@ -1,0 +1,58 @@
+<div class="mb-4">
+    <h3 class="fw-bold mb-1">Usuários Cadastrados</h3>
+    <p class="text-muted small mb-3">Gerencie acessos e consulte o histórico individual de cada colaborador</p>
+
+    <div class="search-container">
+        <i class="bi bi-search search-icon"></i>
+        <input type="text" id="userSearch" class="search-input" placeholder="Pesquisar por nome ou e-mail...">
+    </div>
+</div>
+
+<div class="row g-2" id="userList">
+    {% if usuarios %}
+        {% for u in usuarios %}
+        <div class="col-12 user-item">
+            <div class="user-card">
+                <div class="user-info">
+                    <span class="text-muted fw-bold me-2">#{{ u.id }}</span>
+                    <div class="user-avatar">{{ u.nome[0]|upper if u.nome else 'U' }}</div>
+                    <div>
+                        <h6 class="fw-bold mb-0 user-name">{{ u.nome }}</h6>
+                        <span class="text-muted small user-email">{{ u.email }}</span>
+                    </div>
+                </div>
+
+                <div>
+                    {% if u.is_admin %}
+                        <span class="badge-role-admin"><i class="bi bi-shield-check me-1"></i> Administrador</span>
+                    {% else %}
+                        <span class="badge-role-func"><i class="bi bi-person me-1"></i> Funcionário</span>
+                    {% endif %}
+                </div>
+
+                <div class="d-flex align-items-center gap-2">
+                    <a href="{{ url_for('admin_historico', usuario_id=u.id) }}" class="btn-action-outline">
+                        <i class="bi bi-clock-history"></i> Histórico
+                    </a>
+
+                    {% if current_user and u.id != current_user.id %}
+                        <form action="{{ url_for('toggle_admin', user_id=u.id) }}" method="POST" class="d-inline">
+                            <button type="submit" class="btn-action-outline btn-toggle-admin">
+                                <i class="bi bi-person-gear"></i>
+                                {% if u.is_admin %} Remover Admin {% else %} Tornar Admin {% endif %}
+                            </button>
+                        </form>
+                    {% else %}
+                        <span class="text-muted small px-2">(Sua Conta)</span>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    {% else %}
+        <div class="col-12 text-center py-5 text-muted">
+            <i class="bi bi-people fs-1 d-block mb-2"></i>
+            Nenhum usuário cadastrado no momento.
+        </div>
+    {% endif %}
+</div>

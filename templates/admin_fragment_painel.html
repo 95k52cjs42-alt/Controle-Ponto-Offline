@@ -1,0 +1,120 @@
+<div class="mb-4">
+    <h3 class="fw-bold mb-1">Visão Geral & Indicadores</h3>
+    <p class="text-muted small m-0">Acompanhe a conformidade dos registros de ponto e o desempenho da equipe</p>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-md-4">
+        <div class="metric-card">
+            <div class="metric-icon" style="background: rgba(37, 99, 235, 0.15); color: var(--blue-accent);">
+                <i class="bi bi-people-fill"></i>
+            </div>
+            <div>
+                <span class="text-muted small d-block">Colaboradores</span>
+                <h4 class="fw-bold mb-0">{{ usuarios|length if usuarios else 0 }}</h4>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="metric-card">
+            <div class="metric-icon" style="background: rgba(16, 185, 129, 0.15); color: var(--green-accent);">
+                <i class="bi bi-check-circle-fill"></i>
+            </div>
+            <div>
+                <span class="text-muted small d-block">Horas Certas (Conformes)</span>
+                <h4 class="fw-bold mb-0 text-success">--</h4>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="metric-card">
+            <div class="metric-icon" style="background: rgba(239, 68, 68, 0.15); color: #ef4444;">
+                <i class="bi bi-exclamation-triangle-fill"></i>
+            </div>
+            <div>
+                <span class="text-muted small d-block">Incompletas / Erros</span>
+                <h4 class="fw-bold mb-0 text-danger">--</h4>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="d-flex flex-wrap gap-3">
+            <button class="quick-action-btn" data-bs-toggle="modal" data-bs-target="#modalExportarPonto">
+                <i class="bi bi-file-earmark-spreadsheet"></i>
+                Exportar Relatório
+            </button>
+
+            <button class="quick-action-btn" data-bs-toggle="modal" data-bs-target="#modalLembrete">
+                <i class="bi bi-megaphone"></i>
+                Enviar Lembrete
+            </button>
+
+            <a href="{{ url_for('admin_usuarios_novo') }}" class="quick-action-btn">
+                <i class="bi bi-person-plus"></i>
+                Novo Colaborador
+            </a>
+
+            <button class="quick-action-btn" onclick="location.reload()">
+                <i class="bi bi-arrow-clockwise"></i>
+                Sincronizar
+            </button>
+        </div>
+    </div>
+</div>
+
+<div class="row g-4 mb-4">
+    <div class="col-lg-8">
+        <div class="dashboard-card h-100">
+            <h5 class="fw-bold mb-3">Fluxo de Registros da Semana</h5>
+            <div style="height: 280px; position: relative;">
+                <canvas id="weeklyChart"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-4">
+        <div class="dashboard-card h-100">
+            <h5 class="fw-bold mb-3">Conformidade de Pontos</h5>
+            <div style="height: 280px; position: relative; display: flex; align-items: center; justify-content: center;">
+                <canvas id="complianceChart"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-12">
+        <div class="dashboard-card">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5 class="fw-bold m-0">Atividades Recentes</h5>
+                <a href="{{ url_for('admin_historico') }}" class="text-primary small text-decoration-none">Ver histórico geral</a>
+            </div>
+
+            <div class="activity-list">
+                {% if logs_recentes %}
+                    {% for log in logs_recentes %}
+                    <div class="activity-item">
+                        <div class="activity-icon {{ log.tipo }}">
+                            <i class="bi {{ log.icone }}"></i>
+                        </div>
+                        <div class="activity-content">
+                            <div class="d-flex justify-content-between">
+                                <span class="fw-bold">{{ log.nome }}</span>
+                                <span class="text-muted small">{{ log.horario }}</span>
+                            </div>
+                            <span class="text-muted small">{{ log.descricao }}</span>
+                        </div>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="text-center py-4 text-muted">
+                        <i class="bi bi-clock-history fs-3 d-block mb-1"></i>
+                        Nenhuma atividade recente registrada.
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>

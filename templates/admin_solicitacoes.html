@@ -1,223 +1,484 @@
-{% extends 'base.html' %}
+<!DOCTYPE html>
+<html lang="pt-br" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Solicitações | 4Lab Orbit</title>
+    
+    <!-- Script anti-flicker (padrão escuro) -->
+    <script>
+        (function() {
+            const savedTheme = localStorage.getItem('theme') || 'dark';
+            document.documentElement.setAttribute('data-theme', savedTheme);
+        })();
+    </script>
+    
+    <!-- Google Fonts: Outfit -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Bootstrap 5 & Icons -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
 
-{% block title %}Painel Admin | 4Lab Orbit{% endblock %}
+    <style>
+        [data-theme="dark"] {
+            --bg-dark: #0b0f19;
+            --card-bg: #111827;
+            --card-border: #1f293d;
+            --text-main: #ffffff;
+            --text-muted: #94a3b8;
+            --blue-accent: #2563eb;
+            --blue-hover: #1d4ed8;
+            --blue-glow: rgba(37, 99, 235, 0.25);
+            --green-accent: #10b981;
+            --orange-accent: #f59e0b;
+            --nav-btn-bg: rgba(255, 255, 255, 0.05);
+            --nav-btn-hover: rgba(255, 255, 255, 0.12);
+        }
 
-{% block content %}
-<style>
-    .fade-in-up {
-        animation: fadeInUp 0.5s ease-out forwards;
-    }
+        [data-theme="light"] {
+            --bg-dark: #f1f5f9;
+            --card-bg: #ffffff;
+            --card-border: #e2e8f0;
+            --text-main: #0f172a;
+            --text-muted: #64748b;
+            --blue-accent: #2563eb;
+            --blue-hover: #1d4ed8;
+            --blue-glow: rgba(37, 99, 235, 0.15);
+            --green-accent: #059669;
+            --orange-accent: #d97706;
+            --nav-btn-bg: #f8fafc;
+            --nav-btn-hover: #e2e8f0;
+        }
 
-    @keyframes fadeInUp {
-        from { opacity: 0; transform: translateY(15px); }
-        to { opacity: 1; transform: translateY(0); }
-    }
+        :root {
+            --radius-main: 20px;
+            --radius-btn: 12px;
+        }
 
-    /* --- TABELA CUSTOMIZADA FIXA --- */
-    .table-custom {
-        border-collapse: separate !important;
-        border-spacing: 0 10px !important;
-        background-color: transparent !important;
-    }
+        body {
+            font-family: 'Outfit', sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            min-height: 100vh;
+            padding: 2rem 1rem;
+            transition: background-color 0.3s ease, color 0.3s ease;
+        }
 
-    /* Cabeçalho da tabela visível */
-    .table-custom thead th {
-        color: var(--text-muted) !important;
-        font-weight: 600;
-        border: none !important;
-        background: transparent !important;
-    }
+        .text-muted { color: var(--text-muted) !important; }
+        .fade-in-up { animation: fadeInUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
 
-    /* Cada linha vira um Card Escuro com texto Claro */
-    .table-custom tbody tr {
-        background-color: var(--bg-card) !important;
-        box-shadow: var(--shadow-sm);
-        border-radius: var(--radius-md);
-        transition: transform 0.2s ease;
-    }
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(15px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
 
-    .table-custom tbody tr:hover {
-        transform: translateY(-2px);
-    }
+        .top-navbar {
+            position: sticky;
+            top: 16px;
+            z-index: 1000;
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: var(--radius-main);
+            padding: 0.85rem 1.25rem;
+            margin-bottom: 2.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
 
-    /* Células da Tabela */
-    .table-custom tbody td {
-        padding: 1rem !important;
-        vertical-align: middle !important;
-        border: none !important;
-        background-color: transparent !important;
-        color: var(--text-main) !important; /* Força o texto a ficar claro */
-    }
+        .brand-title {
+            font-weight: 700;
+            font-size: 1.1rem;
+            color: var(--text-main);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
 
-    /* Arredondamento das pontas das linhas */
-    .table-custom tbody td:first-child { 
-        border-top-left-radius: var(--radius-md); 
-        border-bottom-left-radius: var(--radius-md); 
-    }
-    .table-custom tbody td:last-child { 
-        border-top-right-radius: var(--radius-md); 
-        border-bottom-right-radius: var(--radius-md); 
-    }
+        .brand-icon {
+            width: 36px;
+            height: 36px;
+            background: var(--blue-accent);
+            color: #fff;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.1rem;
+            box-shadow: 0 0 12px var(--blue-glow);
+        }
 
-    /* --- BADGES COM CONTRASTE CORRETO --- */
-    .badge-pendente { 
-        background-color: rgba(245, 158, 11, 0.2) !important; 
-        color: #fbbf24 !important; 
-        border: 1px solid rgba(245, 158, 11, 0.4); 
-    }
-    .badge-aprovada { 
-        background-color: rgba(16, 185, 129, 0.2) !important; 
-        color: #34d399 !important; 
-        border: 1px solid rgba(16, 185, 129, 0.4); 
-    }
-    .badge-recusada { 
-        background-color: rgba(239, 68, 68, 0.2) !important; 
-        color: #f87171 !important; 
-        border: 1px solid rgba(239, 68, 68, 0.4); 
-    }
-    .badge-tipo { 
-        background-color: var(--bg-input) !important; 
-        color: var(--text-main) !important; 
-        border: 1px solid var(--border-color);
-    }
+        .nav-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
 
-    .btn-action {
-        border-radius: 10px;
-        font-weight: 600;
-        padding: 0.35rem 0.75rem;
-    }
-</style>
+        .nav-btn {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(148, 163, 184, 0.25);
+            color: #e2e8f0;
+            padding: 0.45rem 0.9rem;
+            border-radius: var(--radius-btn);
+            font-size: 0.85rem;
+            font-weight: 500;
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s ease;
+            cursor: pointer;
+        }
 
-<!-- Topo da página (Sub-cabeçalho) -->
-<div class="mb-4">
-    <div class="d-flex justify-content-between align-items-center p-3 px-4 rounded-4 shadow-sm" style="background-color: var(--bg-card); border: 1px solid var(--border-color);">
-        <div class="d-flex align-items-center gap-2">
-            <div class="bg-warning text-dark rounded-3 p-2 d-flex align-items-center justify-content-center" style="width: 38px; height: 38px;">
-                <i class="bi bi-envelope-exclamation-fill"></i>
-            </div>
-            <span class="fw-bold fs-5">Solicitações de Ajuste</span>
-        </div>
-        
-        <a href="{{ url_for('admin_panel') }}" class="btn btn-outline-secondary rounded-3 btn-sm px-3 py-2 fw-semibold">
-            <i class="bi bi-arrow-left me-1"></i> Voltar ao Painel
-        </a>
-    </div>
-</div>
+        [data-theme="light"] .nav-btn {
+            background: var(--nav-btn-bg);
+            border-color: var(--card-border);
+            color: var(--text-main);
+        }
 
-<!-- Conteúdo Principal -->
-<div class="fade-in-up" style="max-width: 1100px; margin: 0 auto;">
+        .nav-btn:hover {
+            background: rgba(255, 255, 255, 0.08);
+            color: #ffffff;
+            border-color: rgba(148, 163, 184, 0.4);
+        }
 
-    <!-- Mensagens Flash -->
-    {% with messages = get_flashed_messages() %}
-        {% if messages %}
-            {% for message in messages %}
-                <div class="alert alert-info border-0 shadow-sm rounded-4 d-flex justify-content-between align-items-center mb-4" role="alert">
-                    <div class="d-flex align-items-center gap-2">
-                        <i class="bi bi-info-circle-fill fs-5"></i>
-                        <div>{{ message }}</div>
-                    </div>
-                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        [data-theme="light"] .nav-btn:hover {
+            background: var(--nav-btn-hover);
+            color: var(--text-main);
+        }
+
+        .nav-btn.active {
+            background: var(--blue-accent);
+            border-color: var(--blue-accent);
+            color: #ffffff !important;
+            box-shadow: 0 0 10px var(--blue-glow);
+        }
+
+        .nav-btn.btn-solicitacoes {
+            background: rgba(15, 23, 42, 0.7);
+            border-color: rgba(148, 163, 184, 0.25);
+            color: #e2e8f0;
+        }
+
+        [data-theme="light"] .nav-btn.btn-solicitacoes {
+            background: var(--nav-btn-bg);
+            color: var(--text-main);
+        }
+
+        .nav-btn.btn-solicitacoes.active {
+            background: var(--blue-accent);
+            border-color: var(--blue-accent);
+            color: #ffffff !important;
+            box-shadow: 0 0 10px var(--blue-glow);
+        }
+
+        .user-pill {
+            background: var(--nav-btn-bg);
+            border: 1px solid var(--card-border);
+            padding: 0.35rem 0.8rem;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            color: var(--text-main);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .avatar-circle {
+            width: 24px;
+            height: 24px;
+            background: var(--blue-accent);
+            color: #ffffff;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.75rem;
+            font-weight: 700;
+        }
+
+        .btn-theme { padding: 0.45rem 0.75rem; font-size: 1rem; }
+
+        .btn-logout {
+            border: 1px solid rgba(239, 68, 68, 0.5);
+            color: #ef4444;
+            background: rgba(239, 68, 68, 0.1);
+        }
+
+        .btn-logout:hover {
+            background: #ef4444;
+            color: #ffffff;
+            border-color: #ef4444;
+        }
+
+        .dashboard-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: var(--radius-main);
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .table {
+            --bs-table-bg: transparent !important;
+            --bs-table-hover-bg: rgba(148, 163, 184, 0.04);
+            --bs-table-accent-bg: transparent !important;
+            --bs-table-striped-bg: transparent !important;
+            color: var(--text-main);
+            border-collapse: separate;
+            border-spacing: 0;
+            background: transparent;
+        }
+
+        .table > :not(caption) > * > * {
+            background-color: transparent !important;
+            color: var(--text-main) !important;
+            border-color: var(--card-border) !important;
+        }
+
+        .table thead th {
+            color: var(--text-muted);
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            font-weight: 600;
+            border-bottom: 1px solid var(--card-border);
+            padding-bottom: 0.9rem;
+            background: rgba(15, 23, 42, 0.35) !important;
+        }
+
+        .table tbody tr {
+            border-bottom: 1px solid var(--card-border);
+            background: transparent !important;
+        }
+
+        .table tbody td {
+            border-top: 1px solid var(--card-border);
+            vertical-align: middle;
+            padding: 1rem 0.75rem;
+            color: var(--text-main) !important;
+            background: transparent !important;
+        }
+
+        .table tbody tr:hover {
+            background: rgba(148, 163, 184, 0.03) !important;
+        }
+
+        .status-badge {
+            padding: 0.42rem 0.8rem;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .action-btn {
+            border: 1px solid transparent;
+            border-radius: 10px;
+            width: 38px;
+            height: 38px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1rem;
+            transition: all 0.2s ease;
+            margin-left: 0.35rem;
+        }
+
+        .action-btn.aprovar {
+            background: rgba(16, 185, 129, 0.12);
+            color: var(--green-accent);
+            border-color: rgba(16, 185, 129, 0.2);
+        }
+
+        .action-btn.aprovar:hover {
+            background: var(--green-accent);
+            color: #ffffff;
+            box-shadow: 0 6px 18px rgba(16, 185, 129, 0.22);
+        }
+
+        .action-btn.reprovar {
+            background: rgba(239, 68, 68, 0.1);
+            color: #ef4444;
+            border-color: rgba(239, 68, 68, 0.2);
+        }
+
+        .action-btn.reprovar:hover {
+            background: #ef4444;
+            color: #ffffff;
+            box-shadow: 0 6px 18px rgba(239, 68, 68, 0.22);
+        }
+
+        .empty-state {
+            text-align: center;
+            color: var(--text-muted);
+            padding: 2.5rem 1rem;
+        }
+
+        .empty-state i {
+            font-size: 2rem;
+            display: block;
+            margin-bottom: 0.75rem;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container fade-in-up" style="max-width: 1100px;">
+
+        <div class="top-navbar">
+            <div class="brand-title">
+                <div class="brand-icon">
+                    <i class="bi bi-speedometer2"></i>
                 </div>
-            {% endfor %}
-        {% endif %}
-    {% endwith %}
+                <span>4Lab Orbit | Painel Admin</span>
+            </div>
 
-    <!-- Título / Subtítulo -->
-    <div class="mb-3 px-2">
-        <h4 class="fw-bold m-0">Pendências e Pedidos de Correção</h4>
-        <span class="text-muted small">Análise e responda aos pedidos de ajuste de ponto enviados pelos colaboradores</span>
+            <div class="nav-actions">
+                <button class="nav-btn btn-theme" id="themeToggle" title="Mudar Tema">
+                    <i class="bi bi-sun" id="themeIcon"></i>
+                </button>
+
+                <a href="{{ url_for('index') }}" class="nav-btn">
+                    <i class="bi bi-house-door"></i> Início
+                </a>
+
+                <a href="{{ url_for('admin_panel') }}" class="nav-btn">
+                    <i class="bi bi-shield-check"></i> Painel Admin
+                </a>
+
+                <a href="{{ url_for('admin_usuarios') }}" class="nav-btn">
+                    <i class="bi bi-people"></i> Usuários
+                </a>
+
+                <a href="{{ url_for('admin_historico') }}" class="nav-btn" title="Histórico Geral">
+                    <i class="bi bi-clock-history"></i> Histórico Geral
+                </a>
+
+                <a href="{{ url_for('admin_solicitacoes') }}" class="nav-btn btn-solicitacoes active" title="Ver Ajustes">
+                    <i class="bi bi-pencil-square"></i> Solicitações
+                    {% if total_solicitacoes_pendentes and total_solicitacoes_pendentes > 0 %}
+                        <span class="badge bg-warning text-dark rounded-pill ms-1">{{ total_solicitacoes_pendentes }}</span>
+                    {% endif %}
+                </a>
+
+                <div class="user-pill">
+                    <div class="avatar-circle">
+                        {{ current_user.nome[0]|upper if current_user and current_user.nome else 'A' }}
+                    </div>
+                    <span class="d-none d-sm-inline fw-medium">
+                        {{ current_user.nome.split()[0] if current_user and current_user.nome else 'Admin' }}
+                    </span>
+                </div>
+
+                <a href="{{ url_for('logout') }}" class="nav-btn btn-logout" title="Sair">
+                    <i class="bi bi-box-arrow-right"></i>
+                </a>
+            </div>
+        </div>
+
+        <div class="mb-4">
+            <h3 class="fw-bold mb-1">Solicitações de Ajuste</h3>
+            <p class="text-muted small m-0">Revise e aprove os pedidos de correção de ponto enviados pelos colaboradores.</p>
+        </div>
+
+        <div class="dashboard-card">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle">
+                    <thead>
+                        <tr>
+                            <th>Colaborador</th>
+                            <th>Data</th>
+                            <th>Motivo</th>
+                            <th>Status</th>
+                            <th class="text-end">Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% if solicitacoes %}
+                            {% for sol in solicitacoes %}
+                            <tr>
+                                <td>
+                                    <div class="fw-bold">{{ sol.usuario.nome }}</div>
+                                    <small class="text-muted">{{ sol.usuario.email }}</small>
+                                </td>
+                                <td>{{ sol.data_ponto }}</td>
+                                <td>{{ sol.justificativa }}</td>
+                                <td>
+                                    {% set status_normalizado = (sol.status or '') | lower %}
+                                    {% if status_normalizado == 'pendente' %}
+                                        <span class="status-badge bg-warning text-dark">Pendente</span>
+                                    {% elif status_normalizado == 'aprovada' %}
+                                        <span class="status-badge bg-success">Aprovada</span>
+                                    {% elif status_normalizado == 'recusada' %}
+                                        <span class="status-badge bg-danger">Recusada</span>
+                                    {% else %}
+                                        <span class="status-badge bg-secondary">{{ sol.status }}</span>
+                                    {% endif %}
+                                </td>
+                                <td class="text-end">
+                                    {% set status_normalizado = (sol.status or '') | lower %}
+                                    {% if status_normalizado == 'pendente' %}
+                                        <form method="POST" action="{{ url_for('responder_solicitacao', id=sol.id, acao='aprovar') }}" class="d-inline">
+                                            <button type="submit" class="action-btn aprovar" title="Aprovar">
+                                                <i class="bi bi-check-lg"></i>
+                                            </button>
+                                        </form>
+                                        <form method="POST" action="{{ url_for('responder_solicitacao', id=sol.id, acao='recusar') }}" class="d-inline">
+                                            <button type="submit" class="action-btn reprovar" title="Recusar">
+                                                <i class="bi bi-x-lg"></i>
+                                            </button>
+                                        </form>
+                                    {% else %}
+                                        <span class="text-muted small">Finalizado</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        {% else %}
+                            <tr>
+                                <td colspan="5">
+                                    <div class="empty-state">
+                                        <i class="bi bi-inbox"></i>
+                                        Nenhuma solicitação pendente no momento.
+                                    </div>
+                                </td>
+                            </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
     </div>
 
-    <!-- Tabela de Solicitações -->
-    <div class="table-responsive">
-        <table class="table table-custom align-middle">
-            <thead>
-                <tr class="text-muted small text-uppercase">
-                    <th class="ps-3">Funcionário</th>
-                    <th class="text-center">Data</th>
-                    <th class="text-center">Tipo</th>
-                    <th class="text-center">Horário Solicitado</th>
-                    <th>Justificativa</th>
-                    <th class="text-center">Status</th>
-                    <th class="text-end pe-3">Ações</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for s in solicitacoes %}
-                <tr>
-                    <td class="ps-3">
-                        <div class="d-flex align-items-center gap-2">
-                            <div class="rounded-circle d-flex align-items-center justify-content-center fw-bold" style="width: 35px; height: 35px; flex-shrink: 0; background-color: var(--bg-input);">
-                                {{ s.usuario.nome[0] | upper }}
-                            </div>
-                            <span class="fw-semibold">{{ s.usuario.nome }}</span>
-                        </div>
-                    </td>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Lógica de Tema (Mesma do dashboard para sincronizar)
+        const themeBtn = document.getElementById('themeToggle');
+        const themeIcon = document.getElementById('themeIcon');
+        const htmlTag = document.documentElement;
 
-                    <td class="text-center fw-semibold text-muted" style="white-space: nowrap;">
-                        <i class="bi bi-calendar3 me-1"></i>{{ s.data_ponto }}
-                    </td>
+        const savedTheme = localStorage.getItem('theme') || 'dark';
+        setTheme(savedTheme);
 
-                    <td class="text-center">
-                        <span class="badge badge-tipo px-3 py-2 rounded-pill fw-medium">{{ s.tipo_ponto }}</span>
-                    </td>
+        themeBtn.addEventListener('click', () => {
+            const currentTheme = htmlTag.getAttribute('data-theme');
+            setTheme(currentTheme === 'dark' ? 'light' : 'dark');
+        });
 
-                    <td class="text-center fw-bold" style="white-space: nowrap;">
-                        <i class="bi bi-clock me-1 text-muted"></i>{{ s.hora_correta }}
-                    </td>
-
-                    <td style="max-width: 250px;">
-                        <span class="text-muted small d-inline-block text-truncate w-100" title="{{ s.justificativa }}">
-                            {{ s.justificativa }}
-                        </span>
-                    </td>
-
-                    <td class="text-center">
-                        {% if s.status == 'Pendente' %}
-                            <span class="badge badge-pendente px-3 py-2 rounded-pill fw-semibold">
-                                <i class="bi bi-hourglass-split me-1"></i>Pendente
-                            </span>
-                        {% elif s.status == 'Aprovada' %}
-                            <span class="badge badge-aprovada px-3 py-2 rounded-pill fw-semibold">
-                                <i class="bi bi-check-circle me-1"></i>Aprovada
-                            </span>
-                        {% else %}
-                            <span class="badge badge-recusada px-3 py-2 rounded-pill fw-semibold">
-                                <i class="bi bi-x-circle me-1"></i>Recusada
-                            </span>
-                        {% endif %}
-                    </td>
-
-                    <td class="text-end pe-3">
-                        {% if s.status == 'Pendente' %}
-                            <div class="d-inline-flex align-items-center gap-1">
-                                <form action="{{ url_for('responder_solicitacao', id=s.id, acao='aprovar') }}" method="POST" class="d-inline">
-                                    <button type="submit" class="btn btn-sm btn-action btn-success">
-                                        <i class="bi bi-check-lg me-1"></i>Aprovar
-                                    </button>
-                                </form>
-                                <form action="{{ url_for('responder_solicitacao', id=s.id, acao='recusar') }}" method="POST" class="d-inline">
-                                    <button type="submit" class="btn btn-sm btn-action btn-outline-danger">
-                                        <i class="bi bi-x-lg me-1"></i>Recusar
-                                    </button>
-                                </form>
-                            </div>
-                        {% else %}
-                            <span class="badge text-muted border px-2 py-1 rounded-3 small me-1" style="border-color: var(--border-color) !important;">Finalizado</span>
-                        {% endif %}
-                    </td>
-                </tr>
-                {% else %}
-                <tr>
-                    <td colspan="7" class="text-center py-5 text-muted rounded-4" style="background-color: var(--bg-card);">
-                        <i class="bi bi-check2-all fs-2 d-block mb-2 text-success"></i>
-                        Nenhuma solicitação pendente ou cadastrada até o momento.
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-
-</div>
-{% endblock %}
+        function setTheme(theme) {
+            htmlTag.setAttribute('data-theme', theme);
+            localStorage.setItem('theme', theme);
+            themeIcon.className = theme === 'dark' ? 'bi bi-sun' : 'bi bi-moon-stars';
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,72 @@
+<div class="mb-4">
+    <h3 class="fw-bold mb-1">Solicitações de Ajuste</h3>
+    <p class="text-muted small m-0">Revise e aprove os pedidos de correção de ponto enviados pelos colaboradores.</p>
+</div>
+
+<div class="dashboard-card">
+    <div class="table-responsive">
+        <table class="table table-custom table-hover align-middle">
+            <thead>
+                <tr>
+                    <th>Colaborador</th>
+                    <th>Data</th>
+                    <th>Motivo</th>
+                    <th>Status</th>
+                    <th class="text-end">Ações</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% if solicitacoes %}
+                    {% for sol in solicitacoes %}
+                    <tr>
+                        <td>
+                            <div class="fw-bold">{{ sol.usuario.nome }}</div>
+                            <small class="text-muted">{{ sol.usuario.email }}</small>
+                        </td>
+                        <td style="white-space: nowrap;">{{ sol.data_ponto }}</td>
+                        <td>{{ sol.justificativa }}</td>
+                        <td>
+                            {% set status_normalizado = (sol.status or '') | lower %}
+                            {% if status_normalizado == 'pendente' %}
+                                <span class="status-badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3);">Pendente</span>
+                            {% elif status_normalizado == 'aprovada' %}
+                                <span class="status-badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3);">Aprovada</span>
+                            {% elif status_normalizado == 'recusada' %}
+                                <span class="status-badge" style="background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3);">Recusada</span>
+                            {% else %}
+                                <span class="status-badge" style="background: rgba(148, 163, 184, 0.1); color: var(--text-muted); border: 1px solid var(--card-border);">{{ sol.status }}</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-end">
+                            {% set status_normalizado = (sol.status or '') | lower %}
+                            {% if status_normalizado == 'pendente' %}
+                                <form method="POST" action="{{ url_for('responder_solicitacao', id=sol.id, acao='aprovar') }}" class="d-inline">
+                                    <button type="submit" class="action-btn aprovar" title="Aprovar">
+                                        <i class="bi bi-check-lg"></i>
+                                    </button>
+                                </form>
+                                <form method="POST" action="{{ url_for('responder_solicitacao', id=sol.id, acao='recusar') }}" class="d-inline">
+                                    <button type="submit" class="action-btn reprovar" title="Recusar">
+                                        <i class="bi bi-x-lg"></i>
+                                    </button>
+                                </form>
+                            {% else %}
+                                <span class="text-muted small">Finalizado</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                {% else %}
+                    <tr>
+                        <td colspan="5">
+                            <div class="empty-state">
+                                <i class="bi bi-inbox"></i>
+                                Nenhuma solicitação pendente no momento.
+                            </div>
+                        </td>
+                    </tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</div>
