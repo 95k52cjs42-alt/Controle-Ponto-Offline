@@ -1,110 +1,338 @@
-{% extends 'base.html' %}
+<!DOCTYPE html>
+<html lang="pt-br" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Histórico Geral | 4Lab Orbit</title>
+    
+    <!-- Script anti-flicker (padrão escuro) -->
+    <script>
+        (function() {
+            const savedTheme = localStorage.getItem('theme') || 'dark';
+            document.documentElement.setAttribute('data-theme', savedTheme);
+        })();
+    </script>
+    
+    <!-- Google Fonts: Outfit -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Bootstrap 5 & Icons -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
 
-{% block title %}Painel Admin | 4Lab Orbit{% endblock %}
+    <style>
+        [data-theme="dark"] {
+            --bg-dark: #0b0f19;
+            --card-bg: #111827;
+            --card-border: #1f293d;
+            --text-main: #ffffff;
+            --text-muted: #94a3b8;
+            --blue-accent: #2563eb;
+            --blue-hover: #1d4ed8;
+            --blue-glow: rgba(37, 99, 235, 0.25);
+            --green-accent: #10b981;
+            --orange-accent: #f59e0b;
+            --nav-btn-bg: rgba(255, 255, 255, 0.05);
+            --nav-btn-hover: rgba(255, 255, 255, 0.12);
+        }
 
-{% block content %}
-<style>
-    .fade-in-up {
-        animation: fadeInUp 0.5s ease-out forwards;
-    }
+        [data-theme="light"] {
+            --bg-dark: #f1f5f9;
+            --card-bg: #ffffff;
+            --card-border: #e2e8f0;
+            --text-main: #0f172a;
+            --text-muted: #64748b;
+            --blue-accent: #2563eb;
+            --blue-hover: #1d4ed8;
+            --blue-glow: rgba(37, 99, 235, 0.15);
+            --green-accent: #059669;
+            --orange-accent: #d97706;
+            --nav-btn-bg: #f8fafc;
+            --nav-btn-hover: #e2e8f0;
+        }
 
-    @keyframes fadeInUp {
-        from { opacity: 0; transform: translateY(15px); }
-        to { opacity: 1; transform: translateY(0); }
-    }
+        :root {
+            --radius-main: 20px;
+            --radius-btn: 12px;
+        }
 
-    /* Card dos Filtros Adaptável */
-    .pastel-card {
-        background: var(--bg-card) !important;
-        border: 1px solid var(--border-color);
-        border-radius: var(--radius-xl);
-        box-shadow: var(--shadow-sm);
-    }
+        body {
+            font-family: 'Outfit', sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            min-height: 100vh;
+            padding: 2rem 1rem;
+            transition: background-color 0.3s ease, color 0.3s ease;
+        }
 
-    /* Inputs e Selects Adaptáveis */
-    .form-control, .form-select {
-        border-radius: 12px;
-        border: 1px solid var(--border-color) !important;
-        background-color: var(--bg-input) !important;
-        color: var(--text-main) !important;
-        padding: 0.6rem 1rem;
-    }
+        .text-muted { color: var(--text-muted) !important; }
+        .fade-in-up { animation: fadeInUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
 
-    .form-control:focus, .form-select:focus {
-        background-color: var(--bg-card) !important;
-        border-color: var(--text-muted) !important;
-        box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.1);
-    }
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(15px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
 
-    /* --- TABELA CUSTOMIZADA FIXA PARA MODO ESCURO/CLARO --- */
-    .table-custom {
-        border-collapse: separate !important;
-        border-spacing: 0 10px !important;
-        background-color: transparent !important;
-    }
+        .top-navbar {
+            position: sticky;
+            top: 16px;
+            z-index: 1000;
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: var(--radius-main);
+            padding: 0.85rem 1.25rem;
+            margin-bottom: 2.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
 
-    /* Cabeçalho da tabela visível */
-    .table-custom thead th {
-        color: var(--text-muted) !important;
-        font-weight: 600;
-        border: none !important;
-        background: transparent !important;
-    }
+        .brand-title {
+            font-weight: 700;
+            font-size: 1.1rem;
+            color: var(--text-main);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
 
-    /* Linhas da Tabela como Cards */
-    .table-custom tbody tr {
-        background-color: var(--bg-card) !important;
-        box-shadow: var(--shadow-sm);
-        border-radius: var(--radius-md);
-        transition: transform 0.2s ease;
-    }
+        .brand-icon {
+            width: 36px;
+            height: 36px;
+            background: var(--blue-accent);
+            color: #fff;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.1rem;
+            box-shadow: 0 0 12px var(--blue-glow);
+        }
 
-    .table-custom tbody tr:hover {
-        transform: translateY(-2px);
-    }
+        .nav-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
 
-    /* Células da Tabela */
-    .table-custom tbody td {
-        padding: 1rem !important;
-        vertical-align: middle !important;
-        border: none !important;
-        background-color: transparent !important;
-        color: var(--text-main) !important;
-    }
+        .nav-btn {
+            background: var(--nav-btn-bg);
+            border: 1px solid var(--card-border);
+            color: var(--text-main);
+            padding: 0.45rem 0.9rem;
+            border-radius: var(--radius-btn);
+            font-size: 0.85rem;
+            font-weight: 500;
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s ease;
+            cursor: pointer;
+        }
 
-    .table-custom tbody td:first-child { 
-        border-top-left-radius: var(--radius-md); 
-        border-bottom-left-radius: var(--radius-md); 
-    }
-    .table-custom tbody td:last-child { 
-        border-top-right-radius: var(--radius-md); 
-        border-bottom-right-radius: var(--radius-md); 
-    }
+        .nav-btn:hover {
+            background: var(--nav-btn-hover);
+            color: var(--text-main);
+            border-color: rgba(148, 163, 184, 0.4);
+        }
 
-    /* Badges Adaptáveis */
-    .badge-entrada { background: rgba(16, 185, 129, 0.2) !important; color: #34d399 !important; border: 1px solid rgba(16, 185, 129, 0.3); }
-    .badge-almoco { background: rgba(245, 158, 11, 0.2) !important; color: #fbbf24 !important; border: 1px solid rgba(245, 158, 11, 0.3); }
-    .badge-retorno { background: rgba(14, 165, 233, 0.2) !important; color: #38bdf8 !important; border: 1px solid rgba(14, 165, 233, 0.3); }
-    .badge-saida { background: rgba(239, 68, 68, 0.2) !important; color: #f87171 !important; border: 1px solid rgba(239, 68, 68, 0.3); }
-    .badge-ajustado { background: var(--bg-input) !important; color: var(--text-muted) !important; border: 1px solid var(--border-color); }
-</style>
+        .btn-theme { padding: 0.45rem 0.75rem; font-size: 1rem; }
 
-<div class="row justify-content-center fade-in-up">
-    <div class="col-lg-10 col-xl-9">
+        .nav-btn.active {
+            background: var(--blue-accent);
+            border-color: var(--blue-accent);
+            color: #ffffff !important;
+            box-shadow: 0 0 10px var(--blue-glow);
+        }
 
-        <!-- Cabeçalho -->
-        <div class="d-flex justify-content-between align-items-center mb-4">
-            <div>
-                <h3 class="fw-bold m-0" style="color: var(--text-main);">Histórico Geral de Pontos</h3>
-                <span class="small" style="color: var(--text-muted);">Consulte os pontos registrados por todos os colaboradores</span>
+        .nav-btn.btn-solicitacoes {
+            border-color: rgba(148, 163, 184, 0.35);
+            color: var(--text-main);
+            background: var(--nav-btn-bg);
+        }
+
+        .nav-btn.btn-solicitacoes.active {
+            background: var(--blue-accent);
+            border-color: var(--blue-accent);
+            color: #ffffff !important;
+            box-shadow: 0 0 10px var(--blue-glow);
+        }
+
+        .user-pill {
+            background: var(--nav-btn-bg);
+            border: 1px solid var(--card-border);
+            padding: 0.35rem 0.8rem;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            color: var(--text-main);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .avatar-circle {
+            width: 24px;
+            height: 24px;
+            background: var(--blue-accent);
+            color: #ffffff;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.75rem;
+            font-weight: 700;
+        }
+
+        .btn-logout {
+            border: 1px solid rgba(239, 68, 68, 0.5);
+            color: #ef4444;
+            background: rgba(239, 68, 68, 0.1);
+        }
+        .btn-logout:hover { background: #ef4444; color: #ffffff; border-color: #ef4444; }
+
+        .pastel-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: var(--radius-main);
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .form-control, .form-select {
+            border-radius: 12px;
+            border: 1px solid var(--card-border) !important;
+            background-color: rgba(15, 23, 42, 0.45) !important;
+            color: var(--text-main) !important;
+            padding: 0.6rem 1rem;
+        }
+
+        [data-theme="light"] .form-control,
+        [data-theme="light"] .form-select {
+            background-color: var(--nav-btn-bg) !important;
+        }
+
+        .form-control:focus, .form-select:focus {
+            background-color: rgba(15, 23, 42, 0.55) !important;
+            border-color: var(--blue-accent) !important;
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+        }
+
+        .table-custom {
+            --bs-table-bg: transparent !important;
+            --bs-table-hover-bg: rgba(148, 163, 184, 0.04);
+            --bs-table-accent-bg: transparent !important;
+            --bs-table-striped-bg: transparent !important;
+            border-collapse: separate !important;
+            border-spacing: 0;
+            background: transparent !important;
+            color: var(--text-main) !important;
+        }
+
+        .table-custom > :not(caption) > * > * {
+            background-color: transparent !important;
+            color: var(--text-main) !important;
+            border-color: var(--card-border) !important;
+        }
+
+        .table-custom thead th {
+            color: var(--text-muted) !important;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            font-weight: 600;
+            border-bottom: 1px solid var(--card-border);
+            padding-bottom: 0.9rem;
+            background: rgba(15, 23, 42, 0.35) !important;
+        }
+
+        .table-custom tbody tr {
+            border-bottom: 1px solid var(--card-border);
+            background: transparent !important;
+        }
+
+        .table-custom tbody td {
+            padding: 1rem !important;
+            vertical-align: middle !important;
+            border-top: 1px solid var(--card-border);
+            background: transparent !important;
+            color: var(--text-main) !important;
+        }
+
+        .table-custom tbody tr:hover {
+            background: rgba(148, 163, 184, 0.03) !important;
+        }
+
+        .badge-entrada { background: rgba(16, 185, 129, 0.2) !important; color: #34d399 !important; border: 1px solid rgba(16, 185, 129, 0.3); }
+        .badge-almoco { background: rgba(245, 158, 11, 0.2) !important; color: #fbbf24 !important; border: 1px solid rgba(245, 158, 11, 0.3); }
+        .badge-retorno { background: rgba(14, 165, 233, 0.2) !important; color: #38bdf8 !important; border: 1px solid rgba(14, 165, 233, 0.3); }
+        .badge-saida { background: rgba(239, 68, 68, 0.2) !important; color: #f87171 !important; border: 1px solid rgba(239, 68, 68, 0.3); }
+        .badge-ajustado { background: rgba(148, 163, 184, 0.08) !important; color: var(--text-muted) !important; border: 1px solid var(--card-border); }
+    </style>
+</head>
+<body>
+
+    <div class="container fade-in-up" style="max-width: 1100px;">
+        
+        <!-- Topbar Navbar -->
+        <div class="top-navbar">
+            <div class="brand-title">
+                <div class="brand-icon">
+                    <i class="bi bi-clock-history"></i>
+                </div>
+                <span>4Lab Orbit | Histórico Geral</span>
             </div>
-            <a href="{{ url_for('index') }}" class="btn btn-outline-secondary rounded-4 px-3 py-2 fw-semibold">
-                <i class="bi bi-arrow-left me-1"></i> Voltar
-            </a>
+
+            <div class="nav-actions">
+                <button class="nav-btn btn-theme" id="themeToggle" title="Mudar Tema">
+                    <i class="bi bi-sun" id="themeIcon"></i>
+                </button>
+
+                <a href="{{ url_for('index') }}" class="nav-btn">
+                    <i class="bi bi-house-door"></i> Início
+                </a>
+
+                <a href="{{ url_for('admin_panel') }}" class="nav-btn">
+                    <i class="bi bi-shield-check"></i> Painel Admin
+                </a>
+
+                <a href="{{ url_for('admin_usuarios') }}" class="nav-btn">
+                    <i class="bi bi-people"></i> Usuários
+                </a>
+
+                <a href="{{ url_for('admin_historico') }}" class="nav-btn active">
+                    <i class="bi bi-clock-history"></i> Histórico Geral
+                </a>
+
+                <a href="{{ url_for('admin_solicitacoes') }}" class="nav-btn btn-solicitacoes" title="Ver Ajustes">
+                    <i class="bi bi-pencil-square"></i> Solicitações
+                    {% if total_solicitacoes_pendentes and total_solicitacoes_pendentes > 0 %}
+                        <span class="badge bg-warning text-dark rounded-pill ms-1">{{ total_solicitacoes_pendentes }}</span>
+                    {% endif %}
+                </a>
+
+                <div class="user-pill">
+                    <div class="avatar-circle">
+                        {{ current_user.nome[0]|upper if current_user and current_user.nome else 'A' }}
+                    </div>
+                    <span class="d-none d-sm-inline fw-medium">
+                        {{ current_user.nome.split()[0] if current_user and current_user.nome else 'Admin' }}
+                    </span>
+                </div>
+
+                <a href="{{ url_for('logout') }}" class="nav-btn btn-logout" title="Sair">
+                    <i class="bi bi-box-arrow-right"></i>
+                </a>
+            </div>
         </div>
 
         <!-- Filtros Admin -->
-        <div class="pastel-card p-4 mb-4">
+        <div class="pastel-card">
             <form method="GET" action="{{ url_for('admin_historico') }}">
                 <div class="row g-3">
                     <div class="col-md-6 col-lg-3">
@@ -170,7 +398,7 @@
                         <td class="ps-3">
                             <div class="d-flex align-items-center gap-2">
                                 <div class="rounded-circle d-flex align-items-center justify-content-center fw-bold" 
-                                     style="width: 35px; height: 35px; flex-shrink: 0; background-color: var(--bg-input); color: var(--text-main);">
+                                     style="width: 35px; height: 35px; flex-shrink: 0; background: rgba(37, 99, 235, 0.2); color: var(--blue-accent);">
                                     {{ (reg.usuario.nome if reg.usuario is defined else (reg.nome if reg.nome is defined else 'U'))[0] | upper }}
                                 </div>
                                 <div>
@@ -217,7 +445,7 @@
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="5" class="text-center py-5 rounded-4" style="background-color: var(--bg-card); color: var(--text-muted);">
+                        <td colspan="5" class="text-center py-5 rounded-4" style="background-color: var(--card-bg); color: var(--text-muted);">
                             <i class="bi bi-inbox fs-2 d-block mb-2"></i>
                             Nenhum registro encontrado para estes filtros.
                         </td>
@@ -228,5 +456,34 @@
         </div>
 
     </div>
-</div>
-{% endblock %}
+
+    <!-- Bootstrap JS e Lógica do Tema -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        const themeToggleBtn = document.getElementById('themeToggle');
+        const themeIcon = document.getElementById('themeIcon');
+        const htmlElement = document.documentElement;
+
+        function updateIcon(theme) {
+            if (theme === 'dark') {
+                themeIcon.className = 'bi bi-sun-fill text-warning';
+            } else {
+                themeIcon.className = 'bi bi-moon-stars-fill text-dark';
+            }
+        }
+
+        // Define o ícone correto ao carregar a página
+        updateIcon(htmlElement.getAttribute('data-theme'));
+
+        // Evento de clique para trocar o tema
+        themeToggleBtn.addEventListener('click', () => {
+            const currentTheme = htmlElement.getAttribute('data-theme');
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+
+            htmlElement.setAttribute('data-theme', newTheme);
+            localStorage.setItem('theme', newTheme);
+            updateIcon(newTheme);
+        });
+    </script>
+</body>
+</html>

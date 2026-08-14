@@ -656,26 +656,175 @@ def exportar_pdf():
 # ==========================================
 #          ROTAS DE ADMINISTRAÇÃO
 # ==========================================
+def build_admin_logs_recentes(limit=8):
+    logs = []
+
+    registros = RegistroPonto.query.join(Usuario).order_by(RegistroPonto.id.desc()).all()
+    for reg in registros:
+        if not reg.usuario:
+            continue
+
+        nome = reg.usuario.nome
+        horario = reg.hora[:5] if reg.hora else "--:--"
+        data_obj = None
+        try:
+            data_obj = datetime.strptime(f"{reg.data} {reg.hora}", "%d/%m/%Y %H:%M:%S")
+        except ValueError:
+            try:
+                data_obj = datetime.strptime(f"{reg.data} {reg.hora}", "%d/%m/%Y %H:%M")
+            except ValueError:
+                data_obj = datetime.now()
+
+        tipo = reg.tipo.lower()
+        if tipo == "entrada":
+            icon = "bi-door-open"
+            tipo_key = "entrada"
+        elif tipo == "saída":
+            icon = "bi-door-closed"
+            tipo_key = "saida"
+        elif tipo == "almoço":
+            icon = "bi-cup-hot"
+            tipo_key = "alerta"
+        elif tipo == "retorno":
+            icon = "bi-arrow-repeat"
+            tipo_key = "entrada"
+        else:
+            icon = "bi-clock-history"
+            tipo_key = "alerta"
+
+        logs.append({
+            "nome": nome,
+            "horario": horario,
+            "descricao": f"Registrou {reg.tipo}",
+            "tipo": tipo_key,
+            "icone": icon,
+            "_timestamp": data_obj,
+        })
+
+    solicitacoes = SolicitacaoCorrecao.query.join(Usuario).order_by(SolicitacaoCorrecao.id.desc()).all()
+    for sol in solicitacoes:
+        if not sol.usuario:
+            continue
+
+        horario = sol.data_solicitacao.strftime("%H:%M") if sol.data_solicitacao else "--:--"
+        status = (sol.status or "").strip()
+        descricao = "Solicitou ajuste de ponto" if status.lower() == "pendente" else f"Solicitação {status.lower()}"
+        logs.append({
+            "nome": sol.usuario.nome,
+            "horario": horario,
+            "descricao": descricao,
+            "tipo": "alerta",
+            "icone": "bi-pencil-square",
+            "_timestamp": sol.data_solicitacao or datetime.now(),
+        })
+
+    logs = sorted(logs, key=lambda item: item["_timestamp"], reverse=True)
+    for log in logs:
+        log.pop("_timestamp", None)
+
+    return logs[:5]
+
+
+def render_admin_shell(initial_view="painel", **context):
+    return render_template("admin.html", initial_view=initial_view, **context)
+
+
 @app.route("/admin")
 @login_required
 @admin_required
 def admin_panel():
     usuarios = Usuario.query.all()
     solicitacoes_pendentes = SolicitacaoCorrecao.query.filter_by(status="Pendente").count()
-    return render_template("admin.html", usuarios=usuarios, solicitacoes_pendentes=solicitacoes_pendentes)
+    return render_admin_shell(
+        initial_view="painel",
+        usuarios=usuarios,
+        solicitacoes_pendentes=solicitacoes_pendentes,
+        logs_recentes=build_admin_logs_recentes(),
+    )
 
-def admin_panel():
-    # Isso seria uma query no seu banco de dados, ex:
-    # logs = RegistroPonto.query.order_by(RegistroPonto.data.desc()).limit(5).all()
-    
-    # Exemplo de como formatar os dados para o template:
-    logs_recentes = [
-        {"nome": "João Silva", "horario": "10:15", "descricao": "Registrou entrada", "tipo": "entrada", "icone": "bi-door-open"},
-        {"nome": "Maria Souza", "horario": "09:30", "descricao": "Ajuste de ponto solicitado", "tipo": "alerta", "icone": "bi-pencil-square"},
-        {"nome": "Pedro Santos", "horario": "08:00", "descricao": "Registrou entrada", "tipo": "entrada", "icone": "bi-door-open"}
-    ]
-    
-    return render_template('admin_panel.html', logs_recentes=logs_recentes,  )
+
+@app.route("/admin/fragment/<string:view_name>")
+@login_required
+@admin_required
+def admin_fragment(view_name):
+    if view_name == "painel":
+        usuarios = Usuario.query.all()
+        solicitacoes_pendentes = SolicitacaoCorrecao.query.filter_by(status="Pendente").count()
+        return render_template(
+            "admin_fragment_painel.html",
+            usuarios=usuarios,
+            solicitacoes_pendentes=solicitacoes_pendentes,
+            logs_recentes=build_admin_logs_recentes(),
+        )
+
+    if view_name == "usuarios":
+        usuarios = Usuario.query.all()
+        total_solicitacoes_pendentes = SolicitacaoCorrecao.query.filter_by(status="Pendente").count()
+        return render_template("admin_fragment_usuarios.html", usuarios=usuarios, total_solicitacoes_pendentes=total_solicitacoes_pendentes)
+
+    if view_name == "historico":
+        usuario_id = request.args.get("usuario_id", type=int)
+        busca_nome = request.args.get("busca_nome", "").strip()
+        data_inicio = request.args.get("data_inicio", "").strip()
+        data_fim = request.args.get("data_fim", "").strip()
+        tipo_ponto = request.args.get("tipo_ponto", "").strip()
+
+        query = RegistroPonto.query.join(Usuario)
+
+        if usuario_id:
+            query = query.filter(RegistroPonto.usuario_id == usuario_id)
+
+        if busca_nome:
+            query = query.filter((Usuario.nome.ilike(f"%{busca_nome}%")) | (Usuario.email.ilike(f"%{busca_nome}%")))
+
+        if tipo_ponto:
+            query = query.filter(RegistroPonto.tipo == tipo_ponto)
+
+        registros = query.order_by(RegistroPonto.id.desc()).all()
+
+        if data_inicio or data_fim:
+            registros_filtrados = []
+            d_inicio = datetime.strptime(data_inicio, "%Y-%m-%d").date() if data_inicio else None
+            d_fim = datetime.strptime(data_fim, "%Y-%m-%d").date() if data_fim else None
+
+            for r in registros:
+                try:
+                    data_reg = datetime.strptime(r.data, "%d/%m/%Y").date()
+                    if d_inicio and data_reg < d_inicio:
+                        continue
+                    if d_fim and data_reg > d_fim:
+                        continue
+                    registros_filtrados.append(r)
+                except ValueError:
+                    registros_filtrados.append(r)
+            registros = registros_filtrados
+
+        usuarios = Usuario.query.order_by(Usuario.nome.asc()).all()
+        total_solicitacoes_pendentes = SolicitacaoCorrecao.query.filter_by(status="Pendente").count()
+        return render_template(
+            "admin_fragment_historico.html",
+            registros=registros,
+            usuarios=usuarios,
+            usuario_id_selecionado=usuario_id,
+            busca_nome=busca_nome,
+            data_inicio=data_inicio,
+            data_fim=data_fim,
+            tipo_ponto=tipo_ponto,
+            total_solicitacoes_pendentes=total_solicitacoes_pendentes,
+        )
+
+    if view_name == "solicitacoes":
+        solicitacoes = SolicitacaoCorrecao.query.order_by(SolicitacaoCorrecao.id.desc()).all()
+        total_solicitacoes_pendentes = SolicitacaoCorrecao.query.filter(
+            db.func.lower(SolicitacaoCorrecao.status) == "pendente"
+        ).count()
+        return render_template(
+            "admin_fragment_solicitacoes.html",
+            solicitacoes=solicitacoes,
+            total_solicitacoes_pendentes=total_solicitacoes_pendentes,
+        )
+
+    return redirect(url_for("admin_panel"))
 
 @app.route("/admin/historico")
 @login_required
@@ -718,9 +867,10 @@ def admin_historico():
         registros = registros_filtrados
 
     usuarios = Usuario.query.order_by(Usuario.nome.asc()).all()
+    total_solicitacoes_pendentes = SolicitacaoCorrecao.query.filter_by(status="Pendente").count()
 
-    return render_template(
-        "admin_historico.html",
+    return render_admin_shell(
+        initial_view="historico",
         registros=registros,
         usuarios=usuarios,
         usuario_id_selecionado=usuario_id,
@@ -728,6 +878,7 @@ def admin_historico():
         data_inicio=data_inicio,
         data_fim=data_fim,
         tipo_ponto=tipo_ponto,
+        total_solicitacoes_pendentes=total_solicitacoes_pendentes,
     )
 
 
@@ -736,7 +887,14 @@ def admin_historico():
 @admin_required
 def admin_solicitacoes():
     solicitacoes = SolicitacaoCorrecao.query.order_by(SolicitacaoCorrecao.id.desc()).all()
-    return render_template("admin_solicitacoes.html", solicitacoes=solicitacoes)
+    total_solicitacoes_pendentes = SolicitacaoCorrecao.query.filter(
+        db.func.lower(SolicitacaoCorrecao.status) == "pendente"
+    ).count()
+    return render_admin_shell(
+        initial_view="solicitacoes",
+        solicitacoes=solicitacoes,
+        total_solicitacoes_pendentes=total_solicitacoes_pendentes,
+    )
 
 
 @app.route("/admin/solicitacoes/<int:id>/<acao>", methods=["POST"])
@@ -779,25 +937,23 @@ def responder_solicitacao(id, acao):
 
 @app.route("/admin/usuarios")
 @login_required
+@admin_required
 def admin_usuarios():
-    # Garante que apenas administradores acessem
     if not current_user.is_admin:
         flash("Acesso negado.", "danger")
         return redirect(url_for("index"))
-        
+
     usuarios = Usuario.query.all()
-    
-    # Calcula solicitações pendentes para o badge do menu superior
     total_solicitacoes_pendentes = 0
     try:
         total_solicitacoes_pendentes = SolicitacaoCorrecao.query.filter_by(status="Pendente").count()
     except Exception:
         pass
-    
-    return render_template(
-        "admin_usuarios.html", 
-        usuarios=usuarios, 
-        total_solicitacoes_pendentes=total_solicitacoes_pendentes
+
+    return render_admin_shell(
+        initial_view="usuarios",
+        usuarios=usuarios,
+        total_solicitacoes_pendentes=total_solicitacoes_pendentes,
     )
 
 @app.route("/admin/toggle-admin/<int:user_id>", methods=["POST"])

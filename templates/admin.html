@@ -5,6 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Painel Admin | 4Lab Orbit</title>
     
+    <!-- Script anti-flicker (padrão escuro) -->
+    <script>
+        (function() {
+            const savedTheme = localStorage.getItem('theme') || 'dark';
+            document.documentElement.setAttribute('data-theme', savedTheme);
+        })();
+    </script>
+    
     <!-- Google Fonts: Outfit -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -78,6 +86,9 @@
 
         /* Topbar / Navbar */
         .top-navbar {
+            position: sticky;
+            top: 16px;
+            z-index: 1000;
             background: var(--card-bg);
             border: 1px solid var(--card-border);
             border-radius: var(--radius-main);
@@ -133,12 +144,20 @@
             gap: 6px;
             transition: all 0.2s ease;
             cursor: pointer;
+            box-shadow: inset 0 0 0 rgba(0,0,0,0);
+            appearance: none;
+            -webkit-appearance: none;
         }
 
         .nav-btn:hover {
             background: var(--nav-btn-hover);
             color: var(--text-main);
             border-color: rgba(148, 163, 184, 0.4);
+            transform: translateY(-1px);
+        }
+
+        .js-admin-nav {
+            border: 1px solid transparent;
         }
 
         .btn-theme { padding: 0.45rem 0.75rem; font-size: 1rem; }
@@ -151,9 +170,33 @@
         }
 
         .nav-btn.btn-solicitacoes {
-            border-color: rgba(245, 158, 11, 0.5);
-            color: var(--orange-accent);
-            background: rgba(245, 158, 11, 0.08);
+            background: rgba(15, 23, 42, 0.72);
+            border-color: rgba(148, 163, 184, 0.25);
+            color: #f8fafc;
+        }
+
+        .nav-btn.btn-solicitacoes:hover {
+            background: rgba(30, 41, 59, 0.9);
+            color: #ffffff;
+            border-color: rgba(148, 163, 184, 0.45);
+        }
+
+        .nav-btn.btn-solicitacoes.active {
+            background: var(--blue-accent);
+            border-color: var(--blue-accent);
+            color: #ffffff !important;
+            box-shadow: 0 0 10px var(--blue-glow);
+        }
+
+        [data-theme="light"] .nav-btn.btn-solicitacoes {
+            background: var(--nav-btn-bg);
+            color: var(--text-main);
+            border-color: var(--card-border);
+        }
+
+        [data-theme="light"] .nav-btn.btn-solicitacoes:hover {
+            background: var(--nav-btn-hover);
+            color: var(--text-main);
         }
 
         .user-pill {
@@ -269,6 +312,173 @@
 
         .quick-action-btn i { font-size: 1.2rem; }
 
+        #adminContent {
+            transition: opacity 0.25s ease, transform 0.25s ease;
+            min-height: 240px;
+        }
+
+        #adminContent.loading {
+            opacity: 0.55;
+            transform: translateY(4px);
+        }
+
+        .pastel-card,
+        .dashboard-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: var(--radius-main);
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .table-custom {
+            --bs-table-bg: transparent !important;
+            --bs-table-hover-bg: rgba(148, 163, 184, 0.04);
+            --bs-table-accent-bg: transparent !important;
+            --bs-table-striped-bg: transparent !important;
+            border-collapse: separate !important;
+            border-spacing: 0;
+            background: transparent !important;
+            color: var(--text-main) !important;
+        }
+
+        .table-custom > :not(caption) > * > * {
+            background-color: transparent !important;
+            color: var(--text-main) !important;
+            border-color: var(--card-border) !important;
+        }
+
+        .table-custom thead th {
+            color: var(--text-muted) !important;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            font-weight: 600;
+            border-bottom: 1px solid var(--card-border);
+            padding-bottom: 0.9rem;
+            background: rgba(15, 23, 42, 0.35) !important;
+        }
+
+        .table-custom tbody tr {
+            border-bottom: 1px solid var(--card-border);
+            background: transparent !important;
+        }
+
+        .table-custom tbody td {
+            padding: 1rem !important;
+            vertical-align: middle !important;
+            border-top: 1px solid var(--card-border);
+            background: transparent !important;
+            color: var(--text-main) !important;
+        }
+
+        .table-custom tbody tr:hover {
+            background: rgba(148, 163, 184, 0.03) !important;
+        }
+
+        .badge-entrada { background: rgba(16, 185, 129, 0.2) !important; color: #34d399 !important; border: 1px solid rgba(16, 185, 129, 0.3); }
+        .badge-almoco { background: rgba(245, 158, 11, 0.2) !important; color: #fbbf24 !important; border: 1px solid rgba(245, 158, 11, 0.3); }
+        .badge-retorno { background: rgba(14, 165, 233, 0.2) !important; color: #38bdf8 !important; border: 1px solid rgba(14, 165, 233, 0.3); }
+        .badge-saida { background: rgba(239, 68, 68, 0.2) !important; color: #f87171 !important; border: 1px solid rgba(239, 68, 68, 0.3); }
+        .badge-ajustado { background: rgba(148, 163, 184, 0.08) !important; color: var(--text-muted) !important; border: 1px solid var(--card-border); }
+
+        .search-container { position: relative; margin-bottom: 2rem; }
+        .search-input {
+            width: 100%;
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            padding: 1rem 1.5rem 1rem 3rem;
+            border-radius: var(--radius-main);
+            color: var(--text-main);
+            font-size: 1rem;
+        }
+        .search-input:focus {
+            outline: none;
+            border-color: var(--blue-accent);
+            box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+        }
+        .search-icon {
+            position: absolute;
+            left: 1.25rem;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text-muted);
+        }
+
+        .user-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: var(--radius-main);
+            padding: 1.25rem 1.5rem;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+        .user-info { display: flex; align-items: center; gap: 14px; }
+        .user-avatar {
+            width: 42px; height: 42px; background: var(--blue-accent); color: #fff;
+            border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700;
+        }
+        .badge-role-admin {
+            background: rgba(37, 99, 235, 0.15); color: var(--blue-accent); border: 1px solid rgba(37, 99, 235, 0.3);
+            border-radius: 20px; padding: 0.35rem 0.85rem; font-size: 0.8rem; font-weight: 600;
+        }
+        .badge-role-func {
+            background: var(--nav-btn-bg); color: var(--text-muted); border: 1px solid var(--card-border);
+            border-radius: 20px; padding: 0.35rem 0.85rem; font-size: 0.8rem;
+        }
+        .btn-action-outline {
+            background: transparent; border: 1px solid var(--blue-accent); color: var(--blue-accent);
+            border-radius: var(--radius-btn); padding: 0.45rem 1rem; font-size: 0.85rem; text-decoration: none; display: inline-flex; align-items: center; gap: 6px;
+        }
+        .btn-action-outline:hover { background: var(--blue-accent); color: #fff; }
+        .btn-toggle-admin { border-color: rgba(16, 185, 129, 0.5); color: var(--green-accent); }
+        .btn-toggle-admin:hover { background: var(--green-accent); color: #fff; }
+
+        .status-badge {
+            padding: 0.42rem 0.8rem;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .action-btn {
+            border: 1px solid transparent;
+            border-radius: 10px;
+            width: 38px;
+            height: 38px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1rem;
+            transition: all 0.2s ease;
+            margin-left: 0.35rem;
+        }
+        .action-btn.aprovar {
+            background: rgba(16, 185, 129, 0.12); color: var(--green-accent); border-color: rgba(16, 185, 129, 0.2);
+        }
+        .action-btn.aprovar:hover {
+            background: var(--green-accent); color: #ffffff; box-shadow: 0 6px 18px rgba(16, 185, 129, 0.22);
+        }
+        .action-btn.reprovar {
+            background: rgba(239, 68, 68, 0.1); color: #ef4444; border-color: rgba(239, 68, 68, 0.2);
+        }
+        .action-btn.reprovar:hover {
+            background: #ef4444; color: #ffffff; box-shadow: 0 6px 18px rgba(239, 68, 68, 0.22);
+        }
+        .empty-state {
+            text-align: center; color: var(--text-muted); padding: 2.5rem 1rem;
+        }
+        .empty-state i {
+            font-size: 2rem; display: block; margin-bottom: 0.75rem;
+        }
+
         .modal-user-item { 
             cursor: pointer; 
             transition: all 0.2s ease; 
@@ -301,24 +511,24 @@
                     <i class="bi bi-house-door"></i> Início
                 </a>
 
-                <a href="{{ url_for('admin_panel') }}" class="nav-btn active">
+                <button type="button" class="nav-btn active js-admin-nav" data-admin-view="painel" data-target-url="{{ url_for('admin_panel') }}">
                     <i class="bi bi-shield-check"></i> Painel Admin
-                </a>
+                </button>
 
-                <a href="{{ url_for('admin_usuarios') }}" class="nav-btn">
+                <button type="button" class="nav-btn js-admin-nav" data-admin-view="usuarios" data-target-url="{{ url_for('admin_usuarios') }}">
                     <i class="bi bi-people"></i> Usuários
-                </a>
+                </button>
 
-                <a href="{{ url_for('admin_historico') }}" class="nav-btn" title="Histórico Geral">
+                <button type="button" class="nav-btn js-admin-nav" data-admin-view="historico" data-target-url="{{ url_for('admin_historico') }}" title="Histórico Geral">
                     <i class="bi bi-clock-history text-primary"></i> Histórico Geral
-                </a>
+                </button>
 
-                <a href="{{ url_for('admin_solicitacoes') }}" class="nav-btn btn-solicitacoes" title="Ver Ajustes">
+                <button type="button" class="nav-btn btn-solicitacoes js-admin-nav" data-admin-view="solicitacoes" data-target-url="{{ url_for('admin_solicitacoes') }}" title="Ver Ajustes">
                     <i class="bi bi-pencil-square"></i> Solicitações
                     {% if total_solicitacoes_pendentes and total_solicitacoes_pendentes > 0 %}
                         <span class="badge bg-warning text-dark rounded-pill ms-1">{{ total_solicitacoes_pendentes }}</span>
                     {% endif %}
-                </a>
+                </button>
 
                 <div class="user-pill">
                     <div class="avatar-circle">
@@ -335,11 +545,12 @@
             </div>
         </div>
 
-        <!-- Cabeçalho do Dashboard -->
-        <div class="mb-4">
-            <h3 class="fw-bold mb-1">Visão Geral & Indicadores</h3>
-            <p class="text-muted small m-0">Acompanhe a conformidade dos registros de ponto e o desempenho da equipe</p>
-        </div>
+        <div id="adminContent">
+            <!-- Cabeçalho do Dashboard -->
+            <div class="mb-4">
+                <h3 class="fw-bold mb-1">Visão Geral & Indicadores</h3>
+                <p class="text-muted small m-0">Acompanhe a conformidade dos registros de ponto e o desempenho da equipe</p>
+            </div>
 
         <!-- Cards de Métricas Rápidas -->
         <div class="row g-3 mb-4">
@@ -459,6 +670,7 @@
                     </div>
                 </div>
             </div>
+        </div>
         </div>
 
     </div>
@@ -593,7 +805,6 @@
     <!-- Scripts JS e Gráficos -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        // Lógica de Tema
         const themeBtn = document.getElementById('themeToggle');
         const themeIcon = document.getElementById('themeIcon');
         const htmlTag = document.documentElement;
@@ -610,6 +821,77 @@
             htmlTag.setAttribute('data-theme', theme);
             localStorage.setItem('theme', theme);
             themeIcon.className = theme === 'dark' ? 'bi bi-sun' : 'bi bi-moon-stars';
+        }
+
+        function setActiveNav(viewName) {
+            document.querySelectorAll('.js-admin-nav').forEach(button => {
+                const isActive = button.dataset.adminView === viewName;
+                button.classList.toggle('active', isActive);
+
+                if (button.dataset.adminView === 'solicitacoes') {
+                    button.classList.toggle('btn-solicitacoes', true);
+                    button.classList.toggle('active', isActive);
+                }
+            });
+        }
+
+        function bindAdminSearch() {
+            const searchInput = document.getElementById('userSearch');
+            if (!searchInput) return;
+
+            searchInput.oninput = function() {
+                const filter = this.value.toLowerCase();
+                const items = document.querySelectorAll('.user-item');
+                items.forEach(item => {
+                    const name = item.querySelector('.user-name')?.innerText.toLowerCase() || '';
+                    const email = item.querySelector('.user-email')?.innerText.toLowerCase() || '';
+                    item.style.display = (name.includes(filter) || email.includes(filter)) ? '' : 'none';
+                });
+            };
+        }
+
+        async function loadAdminView(viewName, url) {
+            const contentWrap = document.getElementById('adminContent');
+            if (!contentWrap) return;
+
+            contentWrap.classList.add('loading');
+
+            try {
+                const response = await fetch(`/admin/fragment/${viewName}`);
+                if (!response.ok) {
+                    window.location.href = url;
+                    return;
+                }
+
+                const html = await response.text();
+                contentWrap.innerHTML = html;
+                history.pushState({}, '', url);
+                setActiveNav(viewName);
+                if (typeof window.bindAdminSearch === 'function') window.bindAdminSearch();
+            } finally {
+                contentWrap.classList.remove('loading');
+            }
+        }
+
+        document.querySelectorAll('.js-admin-nav').forEach(button => {
+            button.addEventListener('click', async () => {
+                const viewName = button.dataset.adminView;
+                const targetUrl = button.dataset.targetUrl;
+                await loadAdminView(viewName, targetUrl);
+            });
+        });
+
+        bindAdminSearch();
+
+        const initialView = '{{ initial_view|default("painel") }}';
+        if (initialView !== 'painel') {
+            window.addEventListener('DOMContentLoaded', () => {
+                const target = document.querySelector(`.js-admin-nav[data-admin-view="${initialView}"]`);
+                if (target) {
+                    const url = target.dataset.targetUrl || '/admin';
+                    loadAdminView(initialView, url);
+                }
+            });
         }
 
         // Gráfico de Linha (Fluxo Semanal)

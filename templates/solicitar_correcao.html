@@ -164,14 +164,64 @@
 
         /* Table adaptável */
         .table {
+            --bs-table-bg: transparent;
+            --bs-table-striped-bg: transparent;
+            --bs-table-hover-bg: rgba(148, 163, 184, 0.05);
+            --bs-table-accent-bg: transparent;
             color: var(--text-main);
+            border-collapse: separate;
+            border-spacing: 0;
         }
 
         .table > :not(caption) > * > * {
             padding: 1rem 0.75rem;
-            background-color: transparent;
+            background-color: transparent !important;
             color: var(--text-main);
             border-bottom-color: var(--card-border);
+        }
+
+        .table thead th {
+            color: var(--text-muted) !important;
+            background: rgba(15, 23, 42, 0.35) !important;
+            border-bottom: 1px solid var(--card-border);
+            font-size: 0.78rem;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            font-weight: 700;
+        }
+
+        .table tbody tr:hover {
+            background: rgba(148, 163, 184, 0.04);
+        }
+
+        .status-pill {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0.38rem 0.9rem;
+            border-radius: 999px;
+            font-size: 0.72rem;
+            font-weight: 700;
+            letter-spacing: 0.02em;
+            border: 1px solid transparent;
+        }
+
+        .status-pill.pendente {
+            background: rgba(245, 158, 11, 0.14);
+            color: #fbbf24;
+            border-color: rgba(245, 158, 11, 0.28);
+        }
+
+        .status-pill.aprovada {
+            background: rgba(16, 185, 129, 0.14);
+            color: #34d399;
+            border-color: rgba(16, 185, 129, 0.28);
+        }
+
+        .status-pill.recusada {
+            background: rgba(239, 68, 68, 0.14);
+            color: #f87171;
+            border-color: rgba(239, 68, 68, 0.28);
         }
     </style>
 </head>
@@ -283,11 +333,11 @@
                             <td>{{ s.hora_correta }}</td>
                             <td>
                                 {% if s.status == 'Pendente' %}
-                                    <span class="badge bg-warning-subtle text-warning-emphasis rounded-pill px-3 py-2 fw-semibold">Pendente</span>
+                                    <span class="status-pill pendente">Pendente</span>
                                 {% elif s.status == 'Aprovada' %}
-                                    <span class="badge bg-success-subtle text-success-emphasis rounded-pill px-3 py-2 fw-semibold">Aprovada</span>
+                                    <span class="status-pill aprovada">Aprovada</span>
                                 {% else %}
-                                    <span class="badge bg-danger-subtle text-danger-emphasis rounded-pill px-3 py-2 fw-semibold">Recusada</span>
+                                    <span class="status-pill recusada">Recusada</span>
                                 {% endif %}
                             </td>
                         </tr>
