@@ -25,19 +25,19 @@
     <style>
         /* --- Variáveis de Tema (Escuro / Dark Padrão) --- */
         :root, [data-theme="dark"] {
-            --bg-body: #0b0f19;          /* Fundo geral bem escuro */
-            --bg-card: #182234;          /* Card em cinza escuro / grafite */
-            --bg-input: #0f172a;         /* Inputs levemente mais escuros */
-            --bg-navbar: #111827;        /* Topo escuro unificado */
-            --border-color: #24334a;     /* Bordas sutis para separar os elementos */
+            --bg-body: #0b0f19;      /* Fundo geral bem escuro */
+            --bg-card: #182234;      /* Card em cinza escuro / grafite */
+            --bg-input: #0f172a;     /* Inputs levemente mais escuros */
+            --bg-navbar: #111827;    /* Topo escuro unificado */
+            --border-color: #24334a; /* Bordas sutis para separar os elementos */
             
-            --text-main: #f8fafc;        /* Texto principal claro */
-            --text-muted: #94a3b8;       /* Texto secundário */
+            --text-main: #f8fafc;    /* Texto principal claro */
+            --text-muted: #94a3b8;   /* Texto secundário */
             
             --shadow-sm: 0 4px 20px rgba(0, 0, 0, 0.4);
             --shadow-card: 0 10px 30px rgba(0, 0, 0, 0.5);
             
-            --btn-bg: #3b82f6;           /* Azul principal de destaque */
+            --btn-bg: #3b82f6;       /* Azul principal de destaque */
             --btn-hover: #2563eb;
             --btn-text: #ffffff;
             
@@ -115,8 +115,8 @@
             border-radius: 50px;
         }
 
-        /* Botão Alternador de Tema */
-        .btn-theme-toggle {
+        /* Botão Alternador de Tema & Notificações */
+        .btn-theme-toggle, .btn-notification {
             background: var(--bg-input);
             border: 1px solid var(--border-color);
             color: var(--text-main);
@@ -128,11 +128,37 @@
             justify-content: center;
             cursor: pointer;
             transition: all 0.2s ease;
+            text-decoration: none;
+            position: relative;
         }
 
-        .btn-theme-toggle:hover {
+        .btn-theme-toggle:hover, .btn-notification:hover {
             transform: scale(1.05);
             border-color: var(--text-muted);
+            color: var(--text-main);
+        }
+
+        /* Estilização do Menu Dropdown de Notificações */
+        .notification-dropdown {
+            width: 320px;
+            background-color: var(--bg-card) !important;
+            border: 1px solid var(--border-color) !important;
+            box-shadow: var(--shadow-card) !important;
+            border-radius: var(--radius-md);
+            padding: 0.5rem;
+        }
+
+        .notification-item {
+            border-radius: 8px;
+            padding: 8px 12px;
+            transition: background 0.2s;
+            color: var(--text-main) !important;
+            text-decoration: none;
+            display: block;
+        }
+
+        .notification-item:hover {
+            background-color: var(--bg-input);
         }
 
         /* Sobrescrita Global dos Cards e Inputs */
@@ -223,6 +249,41 @@
                                     </a>
                                 </li>
                             {% endif %}
+
+                            <!-- CENTRO DE NOTIFICAÇÕES -->
+                            <li class="nav-item dropdown">
+                                <a href="#" class="btn-notification dropdown-toggle hide-arrow" id="notifDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false" title="Notificações">
+                                    <i class="bi bi-bell"></i>
+                                    {% if total_notificacoes > 0 %}
+                                        <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger" style="font-size: 0.65rem;">
+                                            {{ total_notificacoes }}
+                                        </span>
+                                    {% endif %}
+                                </a>
+                                <ul class="dropdown-menu dropdown-menu-end notification-dropdown p-2" aria-labelledby="notifDropdown">
+                                    <li><h6 class="dropdown-header text-muted text-uppercase small fw-bold px-2">Notificações</h6></li>
+                                    <li><hr class="dropdown-divider border-light my-1"></li>
+                                    
+                                    {% if notificacoes_usuario %}
+                                        {% for n in notificacoes_usuario %}
+                                            <li>
+                                                <a class="notification-item mb-1" href="{{ n.link }}">
+                                                    <div class="d-flex align-items-center gap-2">
+                                                        <i class="bi bi-exclamation-circle text-{{ n.tipo }} fs-5"></i>
+                                                        <div>
+                                                            <div class="fw-semibold small text-dark">{{ n.titulo }}</div>
+                                                            <div class="text-muted" style="font-size: 0.75rem; line-height: 1.2;">{{ n.mensagem }}</div>
+                                                        </div>
+                                                    </div>
+                                                </a>
+                                            </li>
+                                        {% endfor %}
+                                    {% else %}
+                                        <li><span class="dropdown-item text-muted text-center small py-3">Nenhuma notificação no momento</span></li>
+                                    {% endif %}
+                                </ul>
+                            </li>
+                            <!-- FIM DAS NOTIFICAÇÕES -->
 
                             <li class="nav-item ms-lg-2">
                                 <div class="user-pill d-flex align-items-center gap-2">

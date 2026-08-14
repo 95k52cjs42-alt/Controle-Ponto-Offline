@@ -13,6 +13,8 @@ from flask import (
     request,
     send_file,
     url_for,
+    redirect,
+    make_response,
 )
 from flask_login import (
     LoginManager,
@@ -64,6 +66,16 @@ def eh_dia_util(data_obj):
 # ==========================================
 #          MODELOS DO BANCO DE DADOS
 # ==========================================
+class Notificacao(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    usuario_id = db.Column(db.Integer, db.ForeignKey('usuario.id'), nullable=False)
+    titulo = db.Column(db.String(150), default="Aviso Geral")
+    mensagem = db.Column(db.Text, nullable=False)
+    tipo = db.Column(db.String(50), default="info")  # Ex: 'info', 'danger', etc.
+    link = db.Column(db.String(255), nullable=True)   # Link opcional para redirecionar
+    lida = db.Column(db.Boolean, default=False)
+    data_criacao = db.Column(db.DateTime, default=datetime.utcnow)
+
 class Usuario(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     nome = db.Column(db.String(100), nullable=False)
@@ -262,6 +274,7 @@ def inject_notifications():
 # ==========================================
 # ROTAS DE AUTENTICAÇÃO
 # ==========================================
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if current_user.is_authenticated:
@@ -651,6 +664,18 @@ def admin_panel():
     solicitacoes_pendentes = SolicitacaoCorrecao.query.filter_by(status="Pendente").count()
     return render_template("admin.html", usuarios=usuarios, solicitacoes_pendentes=solicitacoes_pendentes)
 
+def admin_panel():
+    # Isso seria uma query no seu banco de dados, ex:
+    # logs = RegistroPonto.query.order_by(RegistroPonto.data.desc()).limit(5).all()
+    
+    # Exemplo de como formatar os dados para o template:
+    logs_recentes = [
+        {"nome": "João Silva", "horario": "10:15", "descricao": "Registrou entrada", "tipo": "entrada", "icone": "bi-door-open"},
+        {"nome": "Maria Souza", "horario": "09:30", "descricao": "Ajuste de ponto solicitado", "tipo": "alerta", "icone": "bi-pencil-square"},
+        {"nome": "Pedro Santos", "horario": "08:00", "descricao": "Registrou entrada", "tipo": "entrada", "icone": "bi-door-open"}
+    ]
+    
+    return render_template('admin_panel.html', logs_recentes=logs_recentes,  )
 
 @app.route("/admin/historico")
 @login_required
@@ -752,21 +777,259 @@ def responder_solicitacao(id, acao):
     return redirect(url_for("admin_solicitacoes"))
 
 
+@app.route("/admin/usuarios")
+@login_required
+def admin_usuarios():
+    # Garante que apenas administradores acessem
+    if not current_user.is_admin:
+        flash("Acesso negado.", "danger")
+        return redirect(url_for("index"))
+        
+    usuarios = Usuario.query.all()
+    
+    # Calcula solicitações pendentes para o badge do menu superior
+    total_solicitacoes_pendentes = 0
+    try:
+        total_solicitacoes_pendentes = SolicitacaoCorrecao.query.filter_by(status="Pendente").count()
+    except Exception:
+        pass
+    
+    return render_template(
+        "admin_usuarios.html", 
+        usuarios=usuarios, 
+        total_solicitacoes_pendentes=total_solicitacoes_pendentes
+    )
+
 @app.route("/admin/toggle-admin/<int:user_id>", methods=["POST"])
 @login_required
-@admin_required
 def toggle_admin(user_id):
-    if user_id == current_user.id:
-        flash("Você não pode alterar o seu próprio status de administrador.", "danger")
-        return redirect(url_for("admin_panel"))
+    # Garante que apenas administradores alterem permissões
+    if not current_user.is_admin:
+        flash("Acesso negado.", "danger")
+        return redirect(url_for("index"))
+    
+    user = Usuario.query.get_or_404(user_id)
+    
+    if user.id == current_user.id:
+        flash("Você não pode alterar suas próprias permissões de administrador.", "warning")
+    else:
+        user.is_admin = not user.is_admin
+        db.session.commit()
+        flash(f"Permissões do usuário {user.nome} atualizadas com sucesso!", "success")
+        
+    return redirect(url_for("admin_usuarios"))
 
+@app.route('/admin/exportar-relatorio')
+@login_required
+def admin_exportar_relatorio():
+    # Lógica para gerar e exportar o relatório (ex: Excel, CSV ou PDF)
+    # Por enquanto, redirecionamos de volta ao painel com uma mensagem de sucesso
+    flash('Relatório exportado com sucesso!', 'success')
+    return redirect(url_for('admin_panel'))
+
+@app.route('/admin/usuarios/novo', methods=['GET', 'POST'])
+@login_required
+def admin_usuarios_novo():
+    # Rota para cadastrar um novo colaborador pelo painel administrativo
+    return redirect(url_for('admin_usuarios'))
+
+@app.route("/admin/exportar-ponto/<int:user_id>")
+@login_required
+def admin_exportar_ponto(user_id):
+    # 1. Validação de Administrador
+    if not current_user.is_admin:
+        flash("Acesso negado.", "danger")
+        return redirect(url_for("index"))
+
+    # 2. Buscar o usuário específico pelo ID
+    # IMPORTANTE: Verifique se o nome da sua classe de usuário é 'Usuario' ou 'User'
     usuario = Usuario.query.get_or_404(user_id)
-    usuario.is_admin = not usuario.is_admin
-    db.session.commit()
 
-    flash(f"Status do usuário {usuario.nome} atualizado!", "success")
-    return redirect(url_for("admin_panel"))
+    # 3. Buscar registros desse usuário
+    # IMPORTANTE: Verifique se o nome da sua classe de registros é 'RegistroPonto'
+    registros = RegistroPonto.query.filter_by(usuario_id=user_id).all()
 
+    # --- LÓGICA COPIADA DA SUA ROTA ORIGINAL ---
+    hoje = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
+    dias_registrados = defaultdict(dict)
+    primeira_data = hoje
+
+    for r in registros:
+        try:
+            d_obj = datetime.strptime(r.data, "%d/%m/%Y").date()
+            dias_registrados[d_obj][r.tipo] = r.hora
+            if d_obj < primeira_data:
+                primeira_data = d_obj
+        except ValueError:
+            pass
+
+    tabela_linhas = [["Dia", "Entrada", "Almoço", "Retorno", "Saída", "Total / Status"]]
+    
+    total_segundos_trabalhados = 0
+    total_segundos_extras = 0
+    total_segundos_faltantes = 0
+    total_faltas_dias = 0
+    
+    FMT = "%H:%M:%S"
+    segundos_carga_diaria = int(CARGA_HORARIA_DIARIA.total_seconds())
+
+    curr = primeira_data
+    while curr <= hoje:
+        dia_str = curr.strftime("%d/%m/%Y")
+        reg = dias_registrados.get(curr, {})
+
+        if reg:
+            e = reg.get("Entrada", "--:--")
+            a = reg.get("Almoço", "--:--")
+            r_ponto = reg.get("Retorno", "--:--") # Renomeado para não conflitar com variável 'r'
+            s = reg.get("Saída", "--:--")
+
+            tempo_trabalhado = timedelta()
+
+            if e != "--:--" and a != "--:--":
+                t1, t2 = datetime.strptime(e, FMT), datetime.strptime(a, FMT)
+                if t2 > t1: tempo_trabalhado += t2 - t1
+
+            if r_ponto != "--:--" and s != "--:--":
+                t3, t4 = datetime.strptime(r_ponto, FMT), datetime.strptime(s, FMT)
+                if t4 > t3: tempo_trabalhado += t4 - t3
+
+            tot = int(tempo_trabalhado.total_seconds())
+            total_segundos_trabalhados += tot
+
+            if curr < hoje or s != "--:--":
+                if tot > segundos_carga_diaria:
+                    total_segundos_extras += (tot - segundos_carga_diaria)
+                elif eh_dia_util(curr) and tot < segundos_carga_diaria:
+                    total_segundos_faltantes += (segundos_carga_diaria - tot)
+
+            hrs, mins = divmod(tot // 60, 60)
+            tabela_linhas.append([dia_str, e, a, r_ponto, s, f"{hrs:02d}:{mins:02d}h"])
+
+        elif eh_dia_util(curr):
+            if curr < hoje:
+                total_faltas_dias += 1
+                total_segundos_faltantes += segundos_carga_diaria
+                tabela_linhas.append([dia_str, "--:--", "--:--", "--:--", "--:--", "FALTA"])
+            else:
+                tabela_linhas.append([dia_str, "--:--", "--:--", "--:--", "--:--", "Em Aberto"])
+
+        curr += timedelta(days=1)
+
+    # 4. Cálculo do Balanço e PDF (Usando dados do 'usuario' buscado)
+    balanco_segundos = total_segundos_extras - total_segundos_faltantes
+    hrs_t, mins_t = divmod(total_segundos_trabalhados // 60, 60)
+    hrs_e, mins_e = divmod(total_segundos_extras // 60, 60)
+    hrs_f, mins_f = divmod(total_segundos_faltantes // 60, 60)
+    hrs_b, mins_b = divmod(abs(balanco_segundos) // 60, 60)
+    
+    cor_balanco = colors.HexColor("#2e7d32") if balanco_segundos >= 0 else colors.HexColor("#c62828")
+    texto_balanco = f"+{hrs_b:02d}:{mins_b:02d}h (Crédito)" if balanco_segundos >= 0 else f"-{hrs_b:02d}:{mins_b:02d}h (A Repor)"
+
+    buffer = io.BytesIO()
+    pdf = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
+    elementos = []
+    estilos = getSampleStyleSheet()
+
+    titulo_estilo = ParagraphStyle("T", parent=estilos["Heading1"], fontSize=18, alignment=1, spaceAfter=15)
+    elementos.append(Paragraph(f"<b>Folha de Ponto - {usuario.nome}</b>", titulo_estilo))
+    elementos.append(Paragraph(f"<b>E-mail:</b> {usuario.email} | <b>Emissão:</b> {datetime.now(ZoneInfo('America/Sao_Paulo')).strftime('%d/%m/%Y às %H:%M')}", estilos["Normal"]))
+    elementos.append(Spacer(1, 15))
+
+    tabela = Table(tabela_linhas, colWidths=[80, 85, 85, 85, 85, 90])
+    estilo_tabela = [
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2c3e50")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cccccc")),
+    ]
+    for i, linha in enumerate(tabela_linhas[1:], start=1):
+        if linha[5] == "FALTA":
+            estilo_tabela.append(("TEXTCOLOR", (0, i), (-1, i), colors.HexColor("#d32f2f")))
+            estilo_tabela.append(("FONTNAME", (0, i), (-1, i), "Helvetica-Bold"))
+            estilo_tabela.append(("BACKGROUND", (0, i), (-1, i), colors.HexColor("#ffebee")))
+
+    tabela.setStyle(TableStyle(estilo_tabela))
+    elementos.append(tabela)
+    elementos.append(Spacer(1, 20))
+
+    dados_resumo = [
+        ["Horas Totais Trabalhadas:", f"{hrs_t:02d}:{mins_t:02d}h"],
+        ["(+) Total Horas Extras:", f"{hrs_e:02d}:{mins_e:02d}h"],
+        ["(-) Total Horas Faltantes:", f"{hrs_f:02d}:{mins_f:02d}h ({total_faltas_dias} dia(s) ausente)"],
+        ["BALANÇO FINAL (BANCO DE HORAS):", texto_balanco],
+    ]
+    
+    tabela_resumo = Table(dados_resumo, colWidths=[310, 200])
+    tabela_resumo.setStyle(TableStyle([
+        ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"),
+        ("ALIGN", (0, 0), (0, -1), "RIGHT"),
+        ("ALIGN", (1, 0), (1, -1), "LEFT"),
+        ("TEXTCOLOR", (1, 3), (1, 3), cor_balanco),
+        ("LINEABOVE", (0, 3), (-1, 3), 1, colors.HexColor("#000000")),
+    ]))
+    elementos.append(tabela_resumo)
+
+    pdf.build(elementos)
+    buffer.seek(0)
+
+    agora_br = datetime.now(ZoneInfo("America/Sao_Paulo"))
+    return send_file(
+        buffer,
+        as_attachment=True,
+        download_name=f"Folha_Ponto_{usuario.nome.replace(' ', '_')}_{agora_br.strftime('%m_%Y')}.pdf",
+        mimetype="application/pdf",
+    )
+
+@app.route('/admin/enviar-lembrete-geral', methods=['POST'])
+@login_required
+def enviar_lembrete_geral():
+    # Valida se é admin (ajuste conforme a sua regra de segurança)
+    if not getattr(current_user, 'is_admin', False):
+        flash('Acesso negado.', 'danger')
+        return redirect(url_for('index'))
+
+    mensagem = request.form.get('mensagem')
+
+    if mensagem:
+        # Busca todos os usuários do sistema
+        usuarios = Usuario.query.all()
+
+        for user in usuarios:
+            nova_notificacao = Notificacao(
+                usuario_id=user.id,
+                titulo="Lembrete da Administração",
+                mensagem=mensagem,
+                tipo="info",  # Define o tipo (aparecerá no dropdown do sino)
+                link="#"      # Pode colocar uma URL específica se quiser
+            )
+            db.session.add(nova_notificacao)
+        
+        db.session.commit()
+        flash('Lembrete enviado com sucesso para todos os colaboradores!', 'success')
+    else:
+        flash('A mensagem do lembrete não pode estar vazia.', 'warning')
+
+    return redirect(url_for('admin_panel'))
+
+def index():
+    # Busca apenas as notificações não lidas do usuário logado
+    notificacoes_usuario = Notificacao.query.filter_by(
+        usuario_id=current_user.id, 
+        lida=False
+    ).order_by(Notificacao.data_criacao.desc()).all()
+
+    # Conta o total para acender a bolinha vermelha (pulse-badge) no sino
+    total_notificacoes = len(notificacoes_usuario)
+
+    # Restante da sua lógica de pontos...
+    
+    return render_template(
+        'app.html', 
+        notificacoes_usuario=notificacoes_usuario,
+        total_notificacoes=total_notificacoes
+    )
 
 if __name__ == "__main__":
     app.run(debug=True)

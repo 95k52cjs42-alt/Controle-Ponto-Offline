@@ -14,6 +14,9 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
 
+    <!-- Chart.js para os gráficos -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
     <style>
         /* TEMA ESCURO (Padrão) */
         [data-theme="dark"] {
@@ -22,17 +25,13 @@
             --card-border: #1f293d;
             --text-main: #ffffff;
             --text-muted: #94a3b8;
-            
             --blue-accent: #2563eb;
             --blue-hover: #1d4ed8;
             --blue-glow: rgba(37, 99, 235, 0.25);
-            
             --green-accent: #10b981;
             --green-glow: rgba(16, 185, 129, 0.2);
-            
             --orange-accent: #f59e0b;
             --orange-glow: rgba(245, 158, 11, 0.25);
-
             --nav-btn-bg: rgba(255, 255, 255, 0.05);
             --nav-btn-hover: rgba(255, 255, 255, 0.12);
         }
@@ -44,17 +43,13 @@
             --card-border: #e2e8f0;
             --text-main: #0f172a;
             --text-muted: #64748b;
-            
             --blue-accent: #2563eb;
             --blue-hover: #1d4ed8;
             --blue-glow: rgba(37, 99, 235, 0.15);
-            
             --green-accent: #059669;
             --green-glow: rgba(5, 150, 105, 0.15);
-            
             --orange-accent: #d97706;
             --orange-glow: rgba(217, 119, 6, 0.15);
-
             --nav-btn-bg: #f8fafc;
             --nav-btn-hover: #e2e8f0;
         }
@@ -73,13 +68,8 @@
             transition: background-color 0.3s ease, color 0.3s ease;
         }
 
-        .text-muted {
-            color: var(--text-muted) !important;
-        }
-
-        .fade-in-up {
-            animation: fadeInUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-        }
+        .text-muted { color: var(--text-muted) !important; }
+        .fade-in-up { animation: fadeInUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
 
         @keyframes fadeInUp {
             from { opacity: 0; transform: translateY(15px); }
@@ -98,7 +88,6 @@
             justify-content: space-between;
             flex-wrap: wrap;
             gap: 12px;
-            transition: background-color 0.3s ease, border-color 0.3s ease;
         }
 
         .brand-title {
@@ -152,10 +141,7 @@
             border-color: rgba(148, 163, 184, 0.4);
         }
 
-        .btn-theme {
-            padding: 0.45rem 0.75rem;
-            font-size: 1rem;
-        }
+        .btn-theme { padding: 0.45rem 0.75rem; font-size: 1rem; }
 
         .nav-btn.active {
             background: var(--blue-accent);
@@ -168,13 +154,6 @@
             border-color: rgba(245, 158, 11, 0.5);
             color: var(--orange-accent);
             background: rgba(245, 158, 11, 0.08);
-        }
-
-        .nav-btn.btn-solicitacoes:hover {
-            background: var(--orange-accent);
-            color: #ffffff;
-            font-weight: 600;
-            box-shadow: 0 0 12px var(--orange-glow);
         }
 
         .user-pill {
@@ -207,126 +186,113 @@
             color: #ef4444;
             background: rgba(239, 68, 68, 0.1);
         }
+        .btn-logout:hover { background: #ef4444; color: #ffffff; border-color: #ef4444; }
 
-        .btn-logout:hover {
-            background: #ef4444;
-            color: #ffffff;
-            border-color: #ef4444;
-        }
-
-        /* User Cards */
-        .user-card {
+        /* Dashboard Cards & Charts */
+        .dashboard-card {
             background: var(--card-bg);
             border: 1px solid var(--card-border);
             border-radius: var(--radius-main);
-            padding: 1.25rem 1.5rem;
-            margin-bottom: 1rem;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .metric-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: var(--radius-main);
+            padding: 1.25rem;
             display: flex;
             align-items: center;
-            justify-content: space-between;
-            flex-wrap: wrap;
             gap: 15px;
-            transition: all 0.2s ease;
         }
 
-        .user-card:hover {
-            border-color: rgba(37, 99, 235, 0.5);
-            transform: translateY(-2px);
-        }
-
-        .user-info {
-            display: flex;
-            align-items: center;
-            gap: 14px;
-        }
-
-        .user-avatar {
-            width: 42px;
-            height: 42px;
-            background: var(--blue-accent);
-            color: #ffffff;
-            border-radius: 50%;
+        .metric-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 14px;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 1.1rem;
-            font-weight: 700;
-            box-shadow: 0 0 10px var(--blue-glow);
+            font-size: 1.5rem;
         }
 
-        .user-id-badge {
-            color: var(--text-muted);
-            font-weight: 700;
-            font-size: 0.9rem;
-        }
-
-        .badge-role-admin {
-            background: rgba(37, 99, 235, 0.15);
-            color: var(--blue-accent);
-            border: 1px solid rgba(37, 99, 235, 0.3);
-            border-radius: 20px;
-            padding: 0.35rem 0.85rem;
-            font-size: 0.8rem;
-            font-weight: 600;
-        }
-
-        .badge-role-func {
-            background: var(--nav-btn-bg);
-            color: var(--text-muted);
-            border: 1px solid var(--card-border);
-            border-radius: 20px;
-            padding: 0.35rem 0.85rem;
-            font-size: 0.8rem;
-        }
-
-        .btn-action-outline {
-            background: transparent;
-            border: 1px solid var(--blue-accent);
-            color: var(--blue-accent);
-            border-radius: var(--radius-btn);
-            padding: 0.45rem 1rem;
-            font-size: 0.85rem;
-            font-weight: 500;
-            text-decoration: none;
-            display: inline-flex;
+        /* Estilos do Feed de Atividades Recentes */
+        .activity-item {
+            display: flex;
             align-items: center;
-            gap: 6px;
-            transition: all 0.2s;
+            gap: 15px;
+            padding: 12px 0;
+            border-bottom: 1px solid var(--card-border);
+        }
+        .activity-item:last-child { border-bottom: none; }
+        
+        .activity-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2rem;
+            flex-shrink: 0;
+        }
+        
+        .activity-icon.entrada { background: rgba(16, 185, 129, 0.15); color: var(--green-accent); }
+        .activity-icon.saida { background: rgba(37, 99, 235, 0.15); color: var(--blue-accent); }
+        .activity-icon.alerta { background: rgba(245, 158, 11, 0.15); color: var(--orange-accent); }
+        
+        .activity-content { flex-grow: 1; }
+    
+        /* Estilos para Ações Rápidas */
+        .quick-action-btn {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            color: var(--text-main);
+            padding: 0.75rem 1.25rem;
+            border-radius: var(--radius-btn);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            transition: all 0.2s ease;
+            text-decoration: none;
+            font-weight: 500;
         }
 
-        .btn-action-outline:hover {
+        .quick-action-btn:hover {
             background: var(--blue-accent);
             color: #ffffff;
-            box-shadow: 0 0 12px var(--blue-glow);
+            border-color: var(--blue-accent);
+            box-shadow: 0 4px 12px var(--blue-glow);
+            transform: translateY(-2px);
         }
 
-        .btn-toggle-admin {
-            border-color: rgba(16, 185, 129, 0.5);
-            color: var(--green-accent);
-        }
+        .quick-action-btn i { font-size: 1.2rem; }
 
-        .btn-toggle-admin:hover {
-            background: var(--green-accent);
-            color: #ffffff;
-            box-shadow: 0 0 12px var(--green-glow);
+        .modal-user-item { 
+            cursor: pointer; 
+            transition: all 0.2s ease; 
+        }
+        .modal-user-item:hover { 
+            background: var(--card-border) !important; 
+            border-color: var(--blue-accent) !important;
         }
     </style>
 </head>
 <body>
 
-    <div class="container fade-in-up" style="max-width: 1000px;">
+    <div class="container fade-in-up" style="max-width: 1100px;">
         
         <!-- Topbar Navbar -->
         <div class="top-navbar">
             <div class="brand-title">
                 <div class="brand-icon">
-                    <i class="bi bi-clock-history"></i>
+                    <i class="bi bi-speedometer2"></i>
                 </div>
-                <span>Controle de Ponto</span>
+                <span>4Lab Orbit | Painel Admin</span>
             </div>
 
             <div class="nav-actions">
-                <!-- BOTÃO DE ALTERNAR TEMA -->
                 <button class="nav-btn btn-theme" id="themeToggle" title="Mudar Tema">
                     <i class="bi bi-sun" id="themeIcon"></i>
                 </button>
@@ -339,12 +305,15 @@
                     <i class="bi bi-shield-check"></i> Painel Admin
                 </a>
 
-                <!-- BOTÃO HISTÓRICO GERAL (Ajustado com url_for direto) -->
-                <a href="{{ url_for('admin_historico') }}" class="nav-btn" title="Histórico Geral de Registros">
-                    <i class="bi bi-people-fill text-primary"></i> Histórico Geral
+                <a href="{{ url_for('admin_usuarios') }}" class="nav-btn">
+                    <i class="bi bi-people"></i> Usuários
                 </a>
 
-                <a href="{{ url_for('admin_solicitacoes') if 'solicitacoes_admin' in endpoints else url_for('admin_solicitacoes') }}" class="nav-btn btn-solicitacoes" title="Ver Ajustes de Ponto">
+                <a href="{{ url_for('admin_historico') }}" class="nav-btn" title="Histórico Geral">
+                    <i class="bi bi-clock-history text-primary"></i> Histórico Geral
+                </a>
+
+                <a href="{{ url_for('admin_solicitacoes') }}" class="nav-btn btn-solicitacoes" title="Ver Ajustes">
                     <i class="bi bi-pencil-square"></i> Solicitações
                     {% if total_solicitacoes_pendentes and total_solicitacoes_pendentes > 0 %}
                         <span class="badge bg-warning text-dark rounded-pill ms-1">{{ total_solicitacoes_pendentes }}</span>
@@ -366,80 +335,265 @@
             </div>
         </div>
 
-        <!-- Título e Descrição da Seção -->
+        <!-- Cabeçalho do Dashboard -->
         <div class="mb-4">
-            <h3 class="fw-bold mb-1">Usuários Cadastrados</h3>
-            <p class="text-muted small m-0">Gerencie acessos e consulte o histórico de cada colaborador</p>
+            <h3 class="fw-bold mb-1">Visão Geral & Indicadores</h3>
+            <p class="text-muted small m-0">Acompanhe a conformidade dos registros de ponto e o desempenho da equipe</p>
         </div>
 
-        <!-- Lista de Usuários -->
-        <div class="row g-2">
-            {% if usuarios %}
-                {% for u in usuarios %}
-                <div class="col-12">
-                    <div class="user-card">
-                        
-                        <!-- ID e Info do Usuário -->
-                        <div class="user-info">
-                            <span class="user-id-badge me-2">#{{ u.id }}</span>
-                            <div class="user-avatar">
-                                {{ u.nome[0]|upper if u.nome else 'U' }}
-                            </div>
-                            <div>
-                                <h6 class="fw-bold mb-0">{{ u.nome }}</h6>
-                                <span class="text-muted small">{{ u.email }}</span>
-                            </div>
-                        </div>
-
-                        <!-- Badge Nível de Acesso -->
-                        <div>
-                            {% if u.is_admin %}
-                                <span class="badge-role-admin">
-                                    <i class="bi bi-shield-check me-1"></i> Administrador
-                                </span>
-                            {% else %}
-                                <span class="badge-role-func">
-                                    <i class="bi bi-person me-1"></i> Funcionário
-                                </span>
-                            {% endif %}
-                        </div>
-
-                        <!-- Ações Rápidas -->
-                        <div class="d-flex align-items-center gap-2">
-                            <a href="{{ url_for('admin_historico', usuario_id=u.id) }}" class="btn-action-outline">
-                            <i class="bi bi-clock-history"></i> Histórico
-                            </a>
-                        </div>
-
-                            {% if u.id != current_user.id %}
-    <form action="{{ url_for('toggle_admin', user_id=u.id) }}" method="POST" class="d-inline">
-        <button type="submit" class="btn-action-outline btn-toggle-admin">
-            <i class="bi bi-person-gear"></i>
-            {% if u.is_admin %} Remover Admin {% else %} Tornar Admin {% endif %}
-        </button>
-    </form>
-{% else %}
-    <span class="text-muted small px-2">(Sua Conta)</span>
-{% endif %}
-</div>
-
+        <!-- Cards de Métricas Rápidas -->
+        <div class="row g-3 mb-4">
+            <div class="col-md-4">
+                <div class="metric-card">
+                    <div class="metric-icon" style="background: rgba(37, 99, 235, 0.15); color: var(--blue-accent);">
+                        <i class="bi bi-people-fill"></i>
+                    </div>
+                    <div>
+                        <span class="text-muted small d-block">Colaboradores</span>
+                        <h4 class="fw-bold mb-0">{{ usuarios|length if usuarios else 0 }}</h4>
                     </div>
                 </div>
-                {% endfor %}
-            {% else %}
-                <div class="col-12 text-center py-5 text-muted">
-                    <i class="bi bi-people fs-1 d-block mb-2"></i>
-                    Nenhum usuário cadastrado no momento.
+            </div>
+            <div class="col-md-4">
+                <div class="metric-card">
+                    <div class="metric-icon" style="background: rgba(16, 185, 129, 0.15); color: var(--green-accent);">
+                        <i class="bi bi-check-circle-fill"></i>
+                    </div>
+                    <div>
+                        <span class="text-muted small d-block">Horas Certas (Conformes)</span>
+                        <h4 class="fw-bold mb-0 text-success">--</h4>
+                    </div>
                 </div>
-            {% endif %}
+            </div>
+            <div class="col-md-4">
+                <div class="metric-card">
+                    <div class="metric-icon" style="background: rgba(239, 68, 68, 0.15); color: #ef4444;">
+                        <i class="bi bi-exclamation-triangle-fill"></i>
+                    </div>
+                    <div>
+                        <span class="text-muted small d-block">Incompletas / Erros</span>
+                        <h4 class="fw-bold mb-0 text-danger">--</h4>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Atalhos de Ações Rápidas -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="d-flex flex-wrap gap-3">
+                    <button class="quick-action-btn" data-bs-toggle="modal" data-bs-target="#modalExportarPonto">
+                        <i class="bi bi-file-earmark-spreadsheet"></i> 
+                        Exportar Relatório
+                    </button>
+                    
+                    <button class="quick-action-btn" data-bs-toggle="modal" data-bs-target="#modalLembrete">
+                        <i class="bi bi-megaphone"></i> 
+                        Enviar Lembrete
+                    </button>
+                    
+                    <a href="{{ url_for('admin_usuarios_novo') }}" class="quick-action-btn">
+                        <i class="bi bi-person-plus"></i> 
+                        Novo Colaborador
+                    </a>
+                    
+                    <button class="quick-action-btn" onclick="location.reload()">
+                        <i class="bi bi-arrow-clockwise"></i> 
+                        Sincronizar
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Seção de Gráficos -->
+        <div class="row g-4 mb-4">
+            <div class="col-lg-8">
+                <div class="dashboard-card h-100">
+                    <h5 class="fw-bold mb-3">Fluxo de Registros da Semana</h5>
+                    <div style="height: 280px; position: relative;">
+                        <canvas id="weeklyChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-4">
+                <div class="dashboard-card h-100">
+                    <h5 class="fw-bold mb-3">Conformidade de Pontos</h5>
+                    <div style="height: 280px; position: relative; display: flex; align-items: center; justify-content: center;">
+                        <canvas id="complianceChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Widget: Atividades Recentes -->
+        <div class="row">
+            <div class="col-12">
+                <div class="dashboard-card">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h5 class="fw-bold m-0">Atividades Recentes</h5>
+                        <a href="{{ url_for('admin_historico') }}" class="text-primary small text-decoration-none">Ver histórico geral</a>
+                    </div>
+
+                    <div class="activity-list">
+                        {% if logs_recentes %}
+                            {% for log in logs_recentes %}
+                            <div class="activity-item">
+                                <div class="activity-icon {{ log.tipo }}">
+                                    <i class="bi {{ log.icone }}"></i>
+                                </div>
+                                <div class="activity-content">
+                                    <div class="d-flex justify-content-between">
+                                        <span class="fw-bold">{{ log.nome }}</span>
+                                        <span class="text-muted small">{{ log.horario }}</span>
+                                    </div>
+                                    <span class="text-muted small">{{ log.descricao }}</span>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        {% else %}
+                            <div class="text-center py-4 text-muted">
+                                <i class="bi bi-clock-history fs-3 d-block mb-1"></i>
+                                Nenhuma atividade recente registrada.
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
         </div>
 
     </div>
 
-    <!-- Scripts JS -->
+    <!-- ========================================== -->
+    <!-- MODAIS POSICIONADOS CORRETAMENTE NA RAIZ -->
+    <!-- ========================================== -->
+
+    <!-- Modal: Enviar Lembrete Geral -->
+    <div class="modal fade" id="modalLembrete" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content" style="background: var(--card-bg); border: 1px solid var(--card-border); color: var(--text-main); border-radius: var(--radius-main); padding: 1rem;">
+                <div class="modal-header border-0 pb-1">
+                    <h5 class="modal-title fw-bold d-flex align-items-center gap-2" style="font-size: 1.2rem;">
+                        <i class="bi bi-megaphone text-primary"></i> Enviar Lembrete Geral
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                
+                <form method="POST" action="{{ url_for('enviar_lembrete_geral') }}">
+                    <div class="modal-body pt-2">
+                        <p class="text-muted small mb-3">Escreva a mensagem que será enviada como lembrete para todos os colaboradores:</p>
+                        
+                        <div class="mb-3">
+                            <textarea class="form-control" name="mensagem" rows="4" placeholder="Digite o lembrete aqui..." required style="background: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main); border-radius: var(--radius-btn); padding: 0.85rem; font-size: 0.95rem; resize: none;"></textarea>
+                        </div>
+
+                        <button type="submit" class="btn btn-primary w-100 py-3 d-flex align-items-center justify-content-center gap-2 shadow-sm" style="border-radius: var(--radius-btn); font-weight: 600; font-size: 0.95rem;">
+                            <i class="bi bi-send"></i> Enviar Notificação
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Selecionar Usuário e Período para Emitir Folha Ponto -->
+    <div class="modal fade" id="modalExportarPonto" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content" style="background: var(--card-bg); border: 1px solid var(--card-border); color: var(--text-main); border-radius: var(--radius-main); padding: 1rem;">
+                <div class="modal-header border-0 pb-1">
+                    <h5 class="modal-title fw-bold d-flex align-items-center gap-2" style="font-size: 1.2rem;">
+                        <i class="bi bi-file-earmark-spreadsheet text-primary"></i> Emitir Folha Ponto Individual
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body pt-2">
+                    
+                    <!-- ETAPA 1: Selecionar Colaborador -->
+                    <div id="stepUserList">
+                        <p class="text-muted small mb-4">Clique no colaborador para gerar o relatório detalhado de ponto.</p>
+                        
+                        <div style="position: relative;" class="mb-4">
+                            <i class="bi bi-search" style="position: absolute; left: 1.25rem; top: 50%; transform: translateY(-50%); color: var(--text-muted);"></i>
+                            <input type="text" id="modalUserSearch" class="form-control" placeholder="Pesquisar por nome ou e-mail..." style="background: var(--bg-dark); border: 1px solid var(--card-border); padding: 0.85rem 1rem 0.85rem 3.2rem; color: var(--text-main); border-radius: var(--radius-btn); font-size: 0.95rem;">
+                        </div>
+
+                        <div id="modalUserListContainer" style="max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding-right: 4px;">
+                            {% if usuarios %}
+                                {% for u in usuarios %}
+                                <div class="modal-user-item d-flex align-items-center justify-content-between p-3 rounded-4" 
+                                     style="background: var(--bg-dark); border: 1px solid var(--card-border);" 
+                                     data-name="{{ u.nome|lower }}" 
+                                     data-email="{{ u.email|lower }}"
+                                     data-user-id="{{ u.id }}" 
+                                     data-user-name="{{ u.nome }}"
+                                     onclick="selectUser(this)">
+                                    
+                                    <div class="d-flex align-items-center gap-3">
+                                        <div class="d-flex align-items-center justify-content-center text-white fw-bold rounded-circle shadow-sm" style="width: 44px; height: 44px; background: var(--blue-accent); font-size: 1rem; flex-shrink: 0;">
+                                            {{ u.nome[0]|upper if u.nome else 'U' }}
+                                        </div>
+                                        <div>
+                                            <h6 class="fw-bold mb-1 modal-name" style="font-size: 1rem; color: var(--text-main);">{{ u.nome }}</h6>
+                                            <span class="text-muted small modal-email" style="font-size: 0.85rem;">{{ u.email }}</span>
+                                        </div>
+                                    </div>
+                                    
+                                    <i class="bi bi-chevron-right text-muted"></i>
+                                </div>
+                                {% endfor %}
+                            {% else %}
+                                <div class="text-center py-5 text-muted">
+                                    <i class="bi bi-people fs-2 d-block mb-2"></i>
+                                    Nenhum colaborador encontrado.
+                                </div>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    <!-- ETAPA 2: Selecionar Período -->
+                    <div id="stepPeriod" style="display: none;">
+                        <div class="d-flex align-items-center justify-content-between mb-4 pb-3 border-bottom" style="border-color: var(--card-border) !important;">
+                            <div class="d-flex align-items-center gap-3">
+                                <div class="d-flex align-items-center justify-content-center text-white fw-bold rounded-circle shadow-sm" style="width: 40px; height: 40px; background: var(--blue-accent); font-size: 0.95rem; flex-shrink: 0;" id="selectedUserAvatar">
+                                    U
+                                </div>
+                                <div>
+                                    <span class="text-muted small d-block">Colaborador selecionado:</span>
+                                    <h6 id="selectedUserNameDisplay" class="fw-bold mb-0" style="font-size: 1.05rem; color: var(--text-main);">Nome do Usuário</h6>
+                                </div>
+                            </div>
+                            <button type="button" class="btn btn-outline-secondary btn-sm d-flex align-items-center gap-1 px-3 py-2" id="backToUserListBtn" style="border-radius: 10px; font-size: 0.85rem;">
+                                <i class="bi bi-arrow-left"></i> Trocar
+                            </button>
+                        </div>
+
+                        <form id="formExportarPonto" method="GET" action="">
+                            <p class="text-muted small mb-3">Defina o período desejado para a geração da folha ponto:</p>
+                            
+                            <div class="row g-3 mb-4">
+                                <div class="col-md-6">
+                                    <label class="form-label text-muted small fw-semibold">Data Inicial</label>
+                                    <input type="date" name="inicio" id="dateInicio" class="form-control" required style="background: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main); border-radius: var(--radius-btn); padding: 0.75rem;">
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label text-muted small fw-semibold">Data Final</label>
+                                    <input type="date" name="fim" id="dateFim" class="form-control" required style="background: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main); border-radius: var(--radius-btn); padding: 0.75rem;">
+                                </div>
+                            </div>
+
+                            <button type="submit" class="btn btn-primary w-100 py-3 d-flex align-items-center justify-content-center gap-2 shadow-sm" style="border-radius: var(--radius-btn); font-weight: 600; font-size: 0.95rem;">
+                                <i class="bi bi-download"></i> Baixar Relatório de Ponto
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts JS e Gráficos -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        // LÓGICA DE TROCA DE TEMA
+        // Lógica de Tema
         const themeBtn = document.getElementById('themeToggle');
         const themeIcon = document.getElementById('themeIcon');
         const htmlTag = document.documentElement;
@@ -449,22 +603,114 @@
 
         themeBtn.addEventListener('click', () => {
             const currentTheme = htmlTag.getAttribute('data-theme');
-            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
-            setTheme(newTheme);
+            setTheme(currentTheme === 'dark' ? 'light' : 'dark');
         });
 
         function setTheme(theme) {
             htmlTag.setAttribute('data-theme', theme);
             localStorage.setItem('theme', theme);
-
-            if (theme === 'dark') {
-                themeIcon.className = 'bi bi-sun';
-                themeBtn.setAttribute('title', 'Mudar para Tema Claro');
-            } else {
-                themeIcon.className = 'bi bi-moon-stars';
-                themeBtn.setAttribute('title', 'Mudar para Tema Escuro');
-            }
+            themeIcon.className = theme === 'dark' ? 'bi bi-sun' : 'bi bi-moon-stars';
         }
+
+        // Gráfico de Linha (Fluxo Semanal)
+        const ctxWeekly = document.getElementById('weeklyChart').getContext('2d');
+        new Chart(ctxWeekly, {
+            type: 'line',
+            data: {
+                labels: ['Seg', 'Ter', 'Qua', 'Qui', 'Sex'],
+                datasets: [{
+                    label: 'Registros Realizados',
+                    data: [12, 19, 15, 17, 14],
+                    borderColor: '#2563eb',
+                    backgroundColor: 'rgba(37, 99, 235, 0.1)',
+                    borderWidth: 3,
+                    fill: true,
+                    tension: 0.4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    y: { grid: { color: 'rgba(148, 163, 184, 0.1)' }, ticks: { color: '#94a3b8' } },
+                    x: { grid: { display: false }, ticks: { color: '#94a3b8' } }
+                }
+            }
+        });
+
+        // Gráfico de Rosca (Conformidade / Horas Certas vs Erradas)
+        const ctxCompliance = document.getElementById('complianceChart').getContext('2d');
+        new Chart(ctxCompliance, {
+            type: 'doughnut',
+            data: {
+                labels: ['Horas Certas', 'Incompletas / Faltas'],
+                datasets: [{
+                    data: [85, 15],
+                    backgroundColor: ['#10b981', '#ef4444'],
+                    borderWidth: 0
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: 'bottom', labels: { color: '#94a3b8', boxWidth: 12 } }
+                }
+            }
+        });
+
+        // Filtro de pesquisa no modal
+        const modalUserSearch = document.getElementById('modalUserSearch');
+        if(modalUserSearch) {
+            modalUserSearch.addEventListener('keyup', function() {
+                let filter = this.value.toLowerCase();
+                let items = document.querySelectorAll('.modal-user-item');
+                items.forEach(item => {
+                    let name = item.getAttribute('data-name');
+                    let email = item.getAttribute('data-email');
+                    item.style.display = (name.includes(filter) || email.includes(filter)) ? "flex" : "none";
+                });
+            });
+        }
+
+        // Função única para selecionar o usuário ao clicar na div
+        function selectUser(element) {
+            let userId = element.getAttribute('data-user-id');
+            let userName = element.getAttribute('data-user-name');
+
+            // Atualiza os dados na tela de período
+            document.getElementById('selectedUserNameDisplay').textContent = userName;
+            document.getElementById('selectedUserAvatar').textContent = userName.charAt(0).toUpperCase();
+
+            // Configura a URL
+            document.getElementById('formExportarPonto').action = "/admin/exportar-ponto/" + userId;
+
+            // Pré-preenche datas
+            let date = new Date();
+            document.getElementById('dateInicio').value = new Date(date.getFullYear(), date.getMonth(), 1).toISOString().split('T')[0];
+            document.getElementById('dateFim').value = new Date(date.getFullYear(), date.getMonth() + 1, 0).toISOString().split('T')[0];
+
+            // Alterna telas
+            document.getElementById('stepUserList').style.display = 'none';
+            document.getElementById('stepPeriod').style.display = 'block';
+        }
+
+        // Botão Voltar
+        document.getElementById('backToUserListBtn').addEventListener('click', function() {
+            document.getElementById('stepPeriod').style.display = 'none';
+            document.getElementById('stepUserList').style.display = 'block';
+        });
+
+        // Limpeza de backdrop dos modais por segurança
+        document.querySelectorAll('[data-bs-dismiss="modal"]').forEach(element => {
+            element.addEventListener('click', function () {
+                const backdrop = document.querySelector('.modal-backdrop');
+                if (backdrop) backdrop.remove();
+                document.body.classList.remove('modal-open');
+                document.body.style.overflow = '';
+            });
+        });
     </script>
 </body>
 </html>
