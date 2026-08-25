@@ -277,7 +277,7 @@
             <div class="d-flex justify-content-between align-items-center mb-4">
                 <div>
                     <span class="badge rounded-pill text-secondary bg-body-tertiary border px-3 py-1 mb-1 fw-normal">
-                        ✨ Bem-vindo(a) de volta
+                        👋 Bem-vindo(a) de volta
                     </span>
                     <h4 class="fw-bold m-0" style="color: var(--text-dark);">
                         {% if current_user and current_user.is_authenticated and current_user.nome %}
@@ -315,7 +315,7 @@
                                 </li>
                                 {% endfor %}
                             {% else %}
-                                <li class="text-center text-muted py-3 small">Nenhuma pendência 🎉</li>
+                                <li class="text-center text-muted py-3 small">Nenhuma pendência ✨</li>
                             {% endif %}
                         </ul>
                     </div>
@@ -384,7 +384,7 @@
                         </a>
                     </div>
                     <div class="col-6">
-                        <a href="{{ url_for('exportar_pdf') }}" class="soft-link">
+                        <a href="{{ url_for('exportar_historico_ponto', format='pdf') }}" class="soft-link">
                             <i class="bi bi-file-earmark-pdf text-danger"></i> Baixar PDF
                         </a>
                     </div>

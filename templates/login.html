@@ -1,15 +1,9 @@
 {% extends 'base.html' %}
 
+{% block navbar_title %}4Lab Orbit | Controle de Ponto{% endblock %}
+
 {% block content %}
 <style>
-    :root {
-        --pastel-bg: #f7f9fc;
-        --text-dark: #2d3748;
-        --border-soft: #edf2f7;
-        --radius-xl: 28px;
-        --radius-md: 16px;
-    }
-
     .fade-in-up {
         animation: fadeInUp 0.5s ease-out forwards;
     }
@@ -19,54 +13,36 @@
         to { opacity: 1; transform: translateY(0); }
     }
 
-    .pastel-card {
-        background: #ffffff;
-        border: 2px solid #ffffff;
-        border-radius: var(--radius-xl);
-        box-shadow: 0 10px 30px rgba(160, 175, 200, 0.12);
-    }
-
-    .form-control {
-        border-radius: 14px;
-        border: 1px solid var(--border-soft);
-        background-color: #f8fafc;
-        padding: 0.75rem 1rem;
-        transition: all 0.2s ease;
-    }
-
-    .form-control:focus {
-        background-color: #ffffff;
-        border-color: #cbd5e1;
-        box-shadow: 0 0 0 4px rgba(226, 232, 240, 0.6);
-    }
-
-    .btn-login {
-        background-color: #1e293b;
-        color: #ffffff;
-        border-radius: 14px;
-        padding: 0.75rem;
-        font-weight: 600;
-        transition: all 0.2s ease;
-    }
-
-    .btn-login:hover {
-        background-color: #0f172a;
-        color: #ffffff;
-        transform: translateY(-1px);
-        box-shadow: 0 4px 12px rgba(15, 23, 42, 0.15);
-    }
-
     .brand-icon {
         width: 48px;
         height: 48px;
-        background-color: #f1f5f9;
-        color: #334155;
+        background-color: var(--bg-input);
+        color: var(--text-muted);
         border-radius: 16px;
         display: inline-flex;
         align-items: center;
         justify-content: center;
         font-size: 1.25rem;
         margin-bottom: 1rem;
+    }
+
+    .password-toggle {
+        position: absolute;
+        top: 50%;
+        right: 12px;
+        transform: translateY(-50%);
+        background: none;
+        border: none;
+        color: var(--text-muted);
+        cursor: pointer;
+        padding: 4px;
+        font-size: 1.1rem;
+        transition: color 0.2s ease;
+        z-index: 2;
+    }
+
+    .password-toggle:hover {
+        color: var(--text-main);
     }
 </style>
 
@@ -83,21 +59,57 @@
                 <p class="text-muted small">Informe seus dados para acessar sua conta</p>
             </div>
 
+            <!-- Flash Messages -->
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div class="alert alert-{{ category }} alert-dismissible fade show small" role="alert">
+                            {{ message }}
+                            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                        </div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+
             <!-- Formulário de Login -->
             <form method="POST" action="{{ url_for('login') }}">
                 <div class="mb-3">
                     <label for="email" class="form-label fw-medium text-dark small">E-mail</label>
                     <div class="position-relative">
-                        <input type="email" class="form-control" id="email" name="email" placeholder="seu@email.com" required>
+                        <input type="email" class="form-control" id="email" name="email" placeholder="seu@email.com" value="{{ email or '' }}" required>
                     </div>
                 </div>
 
                 <div class="mb-4">
                     <div class="d-flex justify-content-between align-items-center mb-1">
                         <label for="senha" class="form-label fw-medium text-dark small m-0">Senha</label>
+                        <a href="{{ url_for('forgot_password') }}" class="small text-decoration-none text-muted">Esqueceu a senha?</a>
                     </div>
-                    <input type="password" class="form-control" id="senha" name="senha" placeholder="••••••••" required>
+                    <div class="position-relative">
+                        <input type="password" class="form-control pe-5" id="senha" name="senha" placeholder="••••••••" required>
+                        <button type="button" class="password-toggle" id="toggleSenha" title="Mostrar/Ocultar senha" tabindex="-1">
+                            <i class="bi bi-eye-slash" id="senhaIcon"></i>
+                        </button>
+                    </div>
                 </div>
+
+                <script>
+                    const toggleSenha = document.getElementById('toggleSenha');
+                    const senhaInput = document.getElementById('senha');
+                    const senhaIcon = document.getElementById('senhaIcon');
+                    
+                    if (toggleSenha && senhaInput && senhaIcon) {
+                        toggleSenha.addEventListener('click', function() {
+                            if (senhaInput.type === 'password') {
+                                senhaInput.type = 'text';
+                                senhaIcon.className = 'bi bi-eye';
+                            } else {
+                                senhaInput.type = 'password';
+                                senhaIcon.className = 'bi bi-eye-slash';
+                            }
+                        });
+                    }
+                </script>
 
                 <button type="submit" class="btn btn-login w-100 mb-3">
                     <i class="bi bi-arrow-right-circle me-1"></i> Acessar Conta

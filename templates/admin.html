@@ -169,35 +169,26 @@
             box-shadow: 0 0 10px var(--blue-glow);
         }
 
-        .nav-btn.btn-solicitacoes {
-            background: rgba(15, 23, 42, 0.72);
-            border-color: rgba(148, 163, 184, 0.25);
-            color: #f8fafc;
+
+        .notification-dot {
+            position: absolute;
+            top: -4px;
+            right: -4px;
+            width: 12px;
+            height: 12px;
+            background-color: #ef4444;
+            border: 2px solid var(--card-bg);
+            border-radius: 50%;
+            display: block;
+            animation: pulse-red 2s infinite;
         }
 
-        .nav-btn.btn-solicitacoes:hover {
-            background: rgba(30, 41, 59, 0.9);
-            color: #ffffff;
-            border-color: rgba(148, 163, 184, 0.45);
+        @keyframes pulse-red {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
         }
 
-        .nav-btn.btn-solicitacoes.active {
-            background: var(--blue-accent);
-            border-color: var(--blue-accent);
-            color: #ffffff !important;
-            box-shadow: 0 0 10px var(--blue-glow);
-        }
-
-        [data-theme="light"] .nav-btn.btn-solicitacoes {
-            background: var(--nav-btn-bg);
-            color: var(--text-main);
-            border-color: var(--card-border);
-        }
-
-        [data-theme="light"] .nav-btn.btn-solicitacoes:hover {
-            background: var(--nav-btn-hover);
-            color: var(--text-main);
-        }
 
         .user-pill {
             background: var(--nav-btn-bg);
@@ -231,13 +222,19 @@
         }
         .btn-logout:hover { background: #ef4444; color: #ffffff; border-color: #ef4444; }
 
-        /* Dashboard Cards & Charts */
+        /* Dashboard Cards & Charts (Melhorados) */
         .dashboard-card {
             background: var(--card-bg);
             border: 1px solid var(--card-border);
             border-radius: var(--radius-main);
             padding: 1.5rem;
             margin-bottom: 1.5rem;
+            transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s ease, border-color 0.25s ease;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
+        }
+        .dashboard-card:hover {
+            border-color: rgba(37, 99, 235, 0.25);
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.08);
         }
 
         .metric-card {
@@ -247,17 +244,43 @@
             padding: 1.25rem;
             display: flex;
             align-items: center;
-            gap: 15px;
+            gap: 16px;
+            transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.03);
+            position: relative;
+            overflow: hidden;
+        }
+        .metric-card:hover {
+            transform: translateY(-3px);
+            border-color: rgba(37, 99, 235, 0.3);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.12);
+        }
+        .metric-card::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 4px;
+            height: 100%;
+            background: transparent;
+            transition: background 0.3s ease;
+        }
+        .metric-card:hover::after {
+            background: var(--blue-accent);
         }
 
         .metric-icon {
-            width: 48px;
-            height: 48px;
-            border-radius: 14px;
+            width: 52px;
+            height: 52px;
+            border-radius: 16px;
             display: flex;
             align-items: center;
             justify-content: center;
             font-size: 1.5rem;
+            transition: transform 0.3s ease;
+        }
+        .metric-card:hover .metric-icon {
+            transform: scale(1.08);
         }
 
         /* Estilos do Feed de Atividades Recentes */
@@ -265,8 +288,13 @@
             display: flex;
             align-items: center;
             gap: 15px;
-            padding: 12px 0;
+            padding: 12px 10px;
             border-bottom: 1px solid var(--card-border);
+            border-radius: 12px;
+            transition: background 0.2s ease;
+        }
+        .activity-item:hover {
+            background: rgba(148, 163, 184, 0.05);
         }
         .activity-item:last-child { border-bottom: none; }
         
@@ -287,26 +315,34 @@
         
         .activity-content { flex-grow: 1; }
     
-        /* Estilos para Ações Rápidas */
+        /* Estilos para Ações Rápidas (Fluidas & Elegantes) */
+        .quick-actions-wrapper {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+            gap: 12px;
+        }
         .quick-action-btn {
             background: var(--card-bg);
             border: 1px solid var(--card-border);
             color: var(--text-main);
-            padding: 0.75rem 1.25rem;
+            padding: 0.85rem 1rem;
             border-radius: var(--radius-btn);
             display: flex;
             align-items: center;
+            justify-content: center;
             gap: 10px;
-            transition: all 0.2s ease;
+            transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
             text-decoration: none;
             font-weight: 500;
+            font-size: 0.9rem;
+            white-space: nowrap;
         }
 
         .quick-action-btn:hover {
             background: var(--blue-accent);
-            color: #ffffff;
+            color: #ffffff !important;
             border-color: var(--blue-accent);
-            box-shadow: 0 4px 12px var(--blue-glow);
+            box-shadow: 0 6px 20px var(--blue-glow);
             transform: translateY(-2px);
         }
 
@@ -411,13 +447,14 @@
             border-radius: var(--radius-main);
             padding: 1.25rem 1.5rem;
             margin-bottom: 1rem;
-            display: flex;
+            display: grid;
+            grid-template-columns: 1fr 180px 260px;
             align-items: center;
-            justify-content: space-between;
-            flex-wrap: wrap;
             gap: 15px;
         }
         .user-info { display: flex; align-items: center; gap: 14px; }
+        .user-role { text-align: left; }
+        .user-actions { display: flex; align-items: center; gap: 10px; justify-content: flex-start; }
         .user-avatar {
             width: 42px; height: 42px; background: var(--blue-accent); color: #fff;
             border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700;
@@ -437,6 +474,19 @@
         .btn-action-outline:hover { background: var(--blue-accent); color: #fff; }
         .btn-toggle-admin { border-color: rgba(16, 185, 129, 0.5); color: var(--green-accent); }
         .btn-toggle-admin:hover { background: var(--green-accent); color: #fff; }
+
+        .btn-delete-user { 
+            border: 1px solid rgba(239, 68, 68, 0.5); 
+            color: #ef4444; 
+            background: transparent;
+            border-radius: var(--radius-btn);
+            padding: 0.45rem 0.8rem;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+        }
+        .btn-delete-user:hover { background: #ef4444; color: #fff; border-color: #ef4444; }
 
         .status-badge {
             padding: 0.42rem 0.8rem;
@@ -503,7 +553,7 @@
             </div>
 
             <div class="nav-actions">
-                <button class="nav-btn btn-theme" id="themeToggle" title="Mudar Tema">
+                <button class="nav-btn btn-theme" id="themeToggleBtn" title="Mudar Tema">
                     <i class="bi bi-sun" id="themeIcon"></i>
                 </button>
 
@@ -523,11 +573,15 @@
                     <i class="bi bi-clock-history text-primary"></i> Histórico Geral
                 </button>
 
-                <button type="button" class="nav-btn btn-solicitacoes js-admin-nav" data-admin-view="solicitacoes" data-target-url="{{ url_for('admin_solicitacoes') }}" title="Ver Ajustes">
+                <button type="button" class="nav-btn js-admin-nav position-relative" data-admin-view="solicitacoes" data-target-url="{{ url_for('admin_solicitacoes') }}" title="Ver Ajustes">
                     <i class="bi bi-pencil-square"></i> Solicitações
                     {% if total_solicitacoes_pendentes and total_solicitacoes_pendentes > 0 %}
-                        <span class="badge bg-warning text-dark rounded-pill ms-1">{{ total_solicitacoes_pendentes }}</span>
+                        <span class="notification-dot"></span>
                     {% endif %}
+                </button>
+
+                <button type="button" class="nav-btn js-admin-nav" data-admin-view="logs" data-target-url="{{ url_for('admin_logs') }}" title="Logs">
+                    <i class="bi bi-journal-text"></i> Logs
                 </button>
 
                 <div class="user-pill">
@@ -572,7 +626,7 @@
                     </div>
                     <div>
                         <span class="text-muted small d-block">Horas Certas (Conformes)</span>
-                        <h4 class="fw-bold mb-0 text-success">--</h4>
+                        <h4 class="fw-bold mb-0 text-success">{{ conformes|default(0) }}</h4>
                     </div>
                 </div>
             </div>
@@ -583,7 +637,7 @@
                     </div>
                     <div>
                         <span class="text-muted small d-block">Incompletas / Erros</span>
-                        <h4 class="fw-bold mb-0 text-danger">--</h4>
+                        <h4 class="fw-bold mb-0 text-danger">{{ incompletos|default(0) }}</h4>
                     </div>
                 </div>
             </div>
@@ -603,14 +657,9 @@
                         Enviar Lembrete
                     </button>
                     
-                    <a href="{{ url_for('admin_usuarios_novo') }}" class="quick-action-btn">
+                    <button type="button" class="quick-action-btn" data-bs-toggle="modal" data-bs-target="#modalNovoUsuario">
                         <i class="bi bi-person-plus"></i> 
                         Novo Colaborador
-                    </a>
-                    
-                    <button class="quick-action-btn" onclick="location.reload()">
-                        <i class="bi bi-arrow-clockwise"></i> 
-                        Sincronizar
                     </button>
                 </div>
             </div>
@@ -622,7 +671,9 @@
                 <div class="dashboard-card h-100">
                     <h5 class="fw-bold mb-3">Fluxo de Registros da Semana</h5>
                     <div style="height: 280px; position: relative;">
-                        <canvas id="weeklyChart"></canvas>
+                        <div id="weeklyChartContainer" data-labels='{{ labels_semana|default([])|tojson }}' data-values='{{ dados_semana|default([])|tojson }}'>
+                            <canvas id="weeklyChart"></canvas>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -630,7 +681,9 @@
                 <div class="dashboard-card h-100">
                     <h5 class="fw-bold mb-3">Conformidade de Pontos</h5>
                     <div style="height: 280px; position: relative; display: flex; align-items: center; justify-content: center;">
-                        <canvas id="complianceChart"></canvas>
+                        <div id="complianceChartContainer" data-conformes="{{ conformes|default(0) }}" data-incompletos="{{ incompletos|default(0) }}">
+                            <canvas id="complianceChart"></canvas>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -700,6 +753,68 @@
 
                         <button type="submit" class="btn btn-primary w-100 py-3 d-flex align-items-center justify-content-center gap-2 shadow-sm" style="border-radius: var(--radius-btn); font-weight: 600; font-size: 0.95rem;">
                             <i class="bi bi-send"></i> Enviar Notificação
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Novo Colaborador -->
+    <div class="modal fade" id="modalNovoUsuario" tabindex="-1" aria-labelledby="modalNovoUsuarioLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content text-start" style="background: var(--card-bg); border: 1px solid var(--card-border);">
+                <form action="{{ url_for('admin_cadastrar_usuario') }}" method="POST">
+                    <div class="modal-header border-0">
+                        <h5 class="modal-title fw-bold" style="color: var(--text-main);" id="modalNovoUsuarioLabel">Cadastrar Colaborador</h5>
+                        <button type="button" class="btn-close" data-bs-theme="dark" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="mb-3">
+                            <label for="nome" class="form-label text-muted small">Nome Completo</label>
+                            <input type="text" class="form-control" name="nome" required style="background: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main);">
+                        </div>
+                        <div class="mb-3">
+                            <label for="email" class="form-label text-muted small">E-mail</label>
+                            <input type="email" class="form-control" name="email" required style="background: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main);">
+                        </div>
+                    </div>
+                    <div class="modal-footer border-0">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                        <button type="submit" class="btn btn-primary" style="background: #2563eb; border: none;">Cadastrar</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Cadastrar Feriado -->
+    <div class="modal fade" id="modalInformarFeriado" tabindex="-1" aria-labelledby="modalInformarFeriadoLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content" style="background: var(--card-bg); color: var(--text-main); border: 1px solid var(--card-border); border-radius: var(--radius-main); padding: 0.5rem;">
+                <div class="modal-header border-0 pb-1">
+                    <h5 class="modal-title fw-bold d-flex align-items-center gap-2" id="modalInformarFeriadoLabel" style="font-size: 1.2rem; color: var(--text-main);">
+                        <i class="bi bi-calendar-event text-primary"></i> Cadastrar Feriado
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <form method="POST" action="{{ url_for('adicionar_feriado') }}">
+                    <div class="modal-body pt-2">
+                        <div class="mb-3">
+                            <label for="dataFeriado" class="form-label text-muted small fw-semibold">Data do Feriado</label>
+                            <input type="date" class="form-control" id="dataFeriado" name="data" required style="background: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main); border-radius: var(--radius-btn); padding: 0.75rem;">
+                        </div>
+                        <div class="mb-3">
+                            <label for="descFeriado" class="form-label text-muted small fw-semibold">Descrição (Ex: Feriado Municipal, Natal)</label>
+                            <input type="text" class="form-control" id="descFeriado" name="descricao" placeholder="Nome do feriado" required style="background: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main); border-radius: var(--radius-btn); padding: 0.75rem;">
+                        </div>
+                        <p class="text-muted small mb-3">
+                            <i class="bi bi-info-circle me-1"></i>
+                            Dias cadastrados como feriado não serão contabilizados como falta nem descontados no banco de horas.
+                        </p>
+
+                        <button type="submit" class="btn btn-primary w-100 py-3 d-flex align-items-center justify-content-center gap-2 shadow-sm" style="border-radius: var(--radius-btn); font-weight: 600; font-size: 0.95rem;">
+                            <i class="bi bi-calendar-plus"></i> Cadastrar Feriado
                         </button>
                     </div>
                 </form>
@@ -779,16 +894,25 @@
                         </div>
 
                         <form id="formExportarPonto" method="GET" action="">
-                            <p class="text-muted small mb-3">Defina o período desejado para a geração da folha ponto:</p>
+                            <p class="text-muted small mb-3">Defina o período e o formato desejado para a geração da folha ponto:</p>
                             
+                            <div class="mb-3">
+                                <label class="form-label text-muted small fw-semibold">Formato do Relatório</label>
+                                <select name="format" class="form-select" style="background: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main); border-radius: var(--radius-btn); padding: 0.75rem;">
+                                    <option value="pdf">Documento PDF</option>
+                                    <option value="excel">Planilha Excel (.xlsx)</option>
+                                    <option value="csv">Arquivo CSV</option>
+                                </select>
+                            </div>
+
                             <div class="row g-3 mb-4">
                                 <div class="col-md-6">
                                     <label class="form-label text-muted small fw-semibold">Data Inicial</label>
-                                    <input type="date" name="inicio" id="dateInicio" class="form-control" required style="background: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main); border-radius: var(--radius-btn); padding: 0.75rem;">
+                                    <input type="date" name="data_inicio" id="dateInicio" class="form-control" required style="background: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main); border-radius: var(--radius-btn); padding: 0.75rem;">
                                 </div>
                                 <div class="col-md-6">
                                     <label class="form-label text-muted small fw-semibold">Data Final</label>
-                                    <input type="date" name="fim" id="dateFim" class="form-control" required style="background: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main); border-radius: var(--radius-btn); padding: 0.75rem;">
+                                    <input type="date" name="data_fim" id="dateFim" class="form-control" required style="background: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main); border-radius: var(--radius-btn); padding: 0.75rem;">
                                 </div>
                             </div>
 
@@ -805,33 +929,30 @@
     <!-- Scripts JS e Gráficos -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        const themeBtn = document.getElementById('themeToggle');
+        const themeToggleBtn = document.getElementById('themeToggleBtn');
         const themeIcon = document.getElementById('themeIcon');
         const htmlTag = document.documentElement;
 
-        const savedTheme = localStorage.getItem('theme') || 'dark';
-        setTheme(savedTheme);
-
-        themeBtn.addEventListener('click', () => {
-            const currentTheme = htmlTag.getAttribute('data-theme');
-            setTheme(currentTheme === 'dark' ? 'light' : 'dark');
-        });
-
-        function setTheme(theme) {
-            htmlTag.setAttribute('data-theme', theme);
-            localStorage.setItem('theme', theme);
+        function updateIcon(theme) {
             themeIcon.className = theme === 'dark' ? 'bi bi-sun' : 'bi bi-moon-stars';
         }
+
+        const savedTheme = localStorage.getItem('theme') || 'dark';
+        htmlTag.setAttribute('data-theme', savedTheme);
+        updateIcon(savedTheme);
+
+        themeToggleBtn.addEventListener('click', () => {
+            const currentTheme = htmlTag.getAttribute('data-theme');
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            htmlTag.setAttribute('data-theme', newTheme);
+            localStorage.setItem('theme', newTheme);
+            updateIcon(newTheme);
+        });
 
         function setActiveNav(viewName) {
             document.querySelectorAll('.js-admin-nav').forEach(button => {
                 const isActive = button.dataset.adminView === viewName;
                 button.classList.toggle('active', isActive);
-
-                if (button.dataset.adminView === 'solicitacoes') {
-                    button.classList.toggle('btn-solicitacoes', true);
-                    button.classList.toggle('active', isActive);
-                }
             });
         }
 
@@ -868,6 +989,7 @@
                 history.pushState({}, '', url);
                 setActiveNav(viewName);
                 if (typeof window.bindAdminSearch === 'function') window.bindAdminSearch();
+                if (viewName === 'painel') initCharts();
             } finally {
                 contentWrap.classList.remove('loading');
             }
@@ -884,63 +1006,83 @@
         bindAdminSearch();
 
         const initialView = '{{ initial_view|default("painel") }}';
-        if (initialView !== 'painel') {
-            window.addEventListener('DOMContentLoaded', () => {
-                const target = document.querySelector(`.js-admin-nav[data-admin-view="${initialView}"]`);
-                if (target) {
-                    const url = target.dataset.targetUrl || '/admin';
-                    loadAdminView(initialView, url);
-                }
-            });
+        window.addEventListener('DOMContentLoaded', () => {
+            const target = document.querySelector(`.js-admin-nav[data-admin-view="${initialView}"]`);
+            if (target) {
+                const url = target.dataset.targetUrl || '/admin';
+                loadAdminView(initialView, url);
+            }
+        });
+
+        let weeklyChart, complianceChart;
+
+        function initCharts() {
+            // Destruir gráficos existentes se houver para evitar sobreposição
+            if (weeklyChart) weeklyChart.destroy();
+            if (complianceChart) complianceChart.destroy();
+
+            const weeklyCont = document.getElementById('weeklyChartContainer');
+            const complianceCont = document.getElementById('complianceChartContainer');
+
+            if (weeklyCont && document.getElementById('weeklyChart')) {
+                const labels = JSON.parse(weeklyCont.dataset.labels || '["Seg", "Ter", "Qua", "Qui", "Sex"]');
+                const values = JSON.parse(weeklyCont.dataset.values || '[0, 0, 0, 0, 0]');
+                
+                const ctxWeekly = document.getElementById('weeklyChart').getContext('2d');
+                weeklyChart = new Chart(ctxWeekly, {
+                    type: 'line',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Registros Realizados',
+                            data: values,
+                            borderColor: '#2563eb',
+                            backgroundColor: 'rgba(37, 99, 235, 0.1)',
+                            borderWidth: 3,
+                            fill: true,
+                            tension: 0.4
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { legend: { display: false } },
+                        scales: {
+                            y: { beginAtZero: true, grid: { color: 'rgba(148, 163, 184, 0.1)' }, ticks: { color: '#94a3b8', stepSize: 1 } },
+                            x: { grid: { display: false }, ticks: { color: '#94a3b8' } }
+                        }
+                    }
+                });
+            }
+
+            if (complianceCont && document.getElementById('complianceChart')) {
+                const conformes = parseInt(complianceCont.dataset.conformes || '0');
+                const incompletos = parseInt(complianceCont.dataset.incompletos || '0');
+                
+                const ctxCompliance = document.getElementById('complianceChart').getContext('2d');
+                complianceChart = new Chart(ctxCompliance, {
+                    type: 'doughnut',
+                    data: {
+                        labels: ['Horas Certas', 'Incompletas / Faltas'],
+                        datasets: [{
+                            data: (conformes === 0 && incompletos === 0) ? [1, 0] : [conformes, incompletos],
+                            backgroundColor: (conformes === 0 && incompletos === 0) ? ['#e2e8f0', '#ef4444'] : ['#10b981', '#ef4444'],
+                            borderWidth: 0
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { position: 'bottom', labels: { color: '#94a3b8', boxWidth: 12 } }
+                        }
+                    }
+                });
+            }
         }
 
-        // Gráfico de Linha (Fluxo Semanal)
-        const ctxWeekly = document.getElementById('weeklyChart').getContext('2d');
-        new Chart(ctxWeekly, {
-            type: 'line',
-            data: {
-                labels: ['Seg', 'Ter', 'Qua', 'Qui', 'Sex'],
-                datasets: [{
-                    label: 'Registros Realizados',
-                    data: [12, 19, 15, 17, 14],
-                    borderColor: '#2563eb',
-                    backgroundColor: 'rgba(37, 99, 235, 0.1)',
-                    borderWidth: 3,
-                    fill: true,
-                    tension: 0.4
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: { legend: { display: false } },
-                scales: {
-                    y: { grid: { color: 'rgba(148, 163, 184, 0.1)' }, ticks: { color: '#94a3b8' } },
-                    x: { grid: { display: false }, ticks: { color: '#94a3b8' } }
-                }
-            }
-        });
-
-        // Gráfico de Rosca (Conformidade / Horas Certas vs Erradas)
-        const ctxCompliance = document.getElementById('complianceChart').getContext('2d');
-        new Chart(ctxCompliance, {
-            type: 'doughnut',
-            data: {
-                labels: ['Horas Certas', 'Incompletas / Faltas'],
-                datasets: [{
-                    data: [85, 15],
-                    backgroundColor: ['#10b981', '#ef4444'],
-                    borderWidth: 0
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: { position: 'bottom', labels: { color: '#94a3b8', boxWidth: 12 } }
-                }
-            }
-        });
+        // Inicialização na carga da página
+        document.addEventListener('DOMContentLoaded', initCharts);
 
         // Filtro de pesquisa no modal
         const modalUserSearch = document.getElementById('modalUserSearch');
@@ -962,7 +1104,7 @@
             let userName = element.getAttribute('data-user-name');
 
             // Atualiza os dados na tela de período
-            document.getElementById('selectedUserNameDisplay').textContent = userName;
+             document.getElementById('selectedUserNameDisplay').textContent = userName;
             document.getElementById('selectedUserAvatar').textContent = userName.charAt(0).toUpperCase();
 
             // Configura a URL
