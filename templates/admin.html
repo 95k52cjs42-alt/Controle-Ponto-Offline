@@ -971,9 +971,20 @@
             };
         }
 
-        async function loadAdminView(viewName, url) {
+        const fragmentCache = {};
+
+        async function loadAdminView(viewName, url, forceRefresh = false) {
             const contentWrap = document.getElementById('adminContent');
             if (!contentWrap) return;
+
+            if (!forceRefresh && fragmentCache[viewName]) {
+                contentWrap.innerHTML = fragmentCache[viewName];
+                history.pushState({}, '', url);
+                setActiveNav(viewName);
+                if (typeof window.bindAdminSearch === 'function') window.bindAdminSearch();
+                if (viewName === 'painel') initCharts();
+                return;
+            }
 
             contentWrap.classList.add('loading');
 
@@ -985,6 +996,7 @@
                 }
 
                 const html = await response.text();
+                fragmentCache[viewName] = html;
                 contentWrap.innerHTML = html;
                 history.pushState({}, '', url);
                 setActiveNav(viewName);
