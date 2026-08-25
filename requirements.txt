@@ -5,3 +5,7 @@ reportlab
 gunicorn
 psycopg2-binary
 tzdata
+resend
+dnspython
+pandas
+openpyxl

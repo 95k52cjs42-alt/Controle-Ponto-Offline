@@ -163,12 +163,39 @@
         .nav-btn.btn-solicitacoes {
             background: rgba(15, 23, 42, 0.7);
             border-color: rgba(148, 163, 184, 0.25);
-            color: #e2e8f0;
+            color: var(--text-main);
+            position: relative;
+        }
+
+        .notification-dot {
+            position: absolute;
+            top: -4px;
+            right: -4px;
+            width: 12px;
+            height: 12px;
+            background-color: #ef4444;
+            border: 2px solid var(--card-bg);
+            border-radius: 50%;
+            display: block;
+            animation: pulse-red 2s infinite;
+        }
+
+        @keyframes pulse-red {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
         }
 
         [data-theme="light"] .nav-btn.btn-solicitacoes {
             background: var(--nav-btn-bg);
             color: var(--text-main);
+        }
+
+        [data-theme="light"] .nav-btn.btn-solicitacoes.active {
+            background: var(--blue-accent);
+            border-color: var(--blue-accent);
+            color: #ffffff !important;
+            box-shadow: 0 0 10px var(--blue-glow);
         }
 
         .nav-btn.btn-solicitacoes.active {
@@ -363,10 +390,10 @@
                     <i class="bi bi-clock-history"></i> Histórico Geral
                 </a>
 
-                <a href="{{ url_for('admin_solicitacoes') }}" class="nav-btn btn-solicitacoes active" title="Ver Ajustes">
+                <a href="{{ url_for('admin_solicitacoes') }}" class="nav-btn btn-solicitacoes active position-relative" title="Ver Ajustes">
                     <i class="bi bi-pencil-square"></i> Solicitações
                     {% if total_solicitacoes_pendentes and total_solicitacoes_pendentes > 0 %}
-                        <span class="badge bg-warning text-dark rounded-pill ms-1">{{ total_solicitacoes_pendentes }}</span>
+                        <span class="notification-dot"></span>
                     {% endif %}
                 </a>
 

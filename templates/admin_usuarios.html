@@ -53,11 +53,56 @@
         .nav-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
         .nav-btn { background: var(--nav-btn-bg); border: 1px solid var(--card-border); color: var(--text-main); padding: 0.45rem 0.9rem; border-radius: var(--radius-btn); font-size: 0.85rem; font-weight: 500; text-decoration: none; display: flex; align-items: center; gap: 6px; }
         .nav-btn.active { background: var(--blue-accent); border-color: var(--blue-accent); color: #fff !important; }
-        .nav-btn.btn-solicitacoes { border-color: rgba(245, 158, 11, 0.5); color: var(--orange-accent); background: rgba(245, 158, 11, 0.08); }
+        .nav-btn.btn-solicitacoes {
+            background: rgba(15, 23, 42, 0.7);
+            border-color: rgba(148, 163, 184, 0.25);
+            color: var(--text-main);
+            position: relative;
+        }
+
+        [data-theme="light"] .nav-btn.btn-solicitacoes {
+            background: var(--nav-btn-bg);
+            color: var(--text-main);
+            border-color: var(--card-border);
+        }
+
+        [data-theme="light"] .nav-btn.btn-solicitacoes.active {
+            background: var(--blue-accent);
+            border-color: var(--blue-accent);
+            color: #ffffff !important;
+            box-shadow: 0 0 10px var(--blue-glow);
+        }
+
+        .nav-btn.btn-solicitacoes.active {
+            background: var(--blue-accent);
+            border-color: var(--blue-accent);
+            color: #ffffff !important;
+            box-shadow: 0 0 10px var(--blue-glow);
+        }
+
+        .notification-dot {
+            position: absolute;
+            top: -4px;
+            right: -4px;
+            width: 12px;
+            height: 12px;
+            background-color: #ef4444;
+            border: 2px solid var(--card-bg);
+            border-radius: 50%;
+            display: block;
+            animation: pulse-red 2s infinite;
+        }
+        @keyframes pulse-red {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
         .user-pill { background: var(--nav-btn-bg); border: 1px solid var(--card-border); padding: 0.35rem 0.8rem; border-radius: 20px; font-size: 0.85rem; display: flex; align-items: center; gap: 8px; }
         .avatar-circle { width: 24px; height: 24px; background: var(--blue-accent); color: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 700; }
-        .user-card { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: var(--radius-main); padding: 1.25rem 1.5rem; margin-bottom: 1rem; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 15px; }
+        .user-card { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: var(--radius-main); padding: 1.25rem 1.5rem; margin-bottom: 1rem; display: grid; grid-template-columns: 1fr 180px 220px; align-items: center; gap: 15px; }
         .user-info { display: flex; align-items: center; gap: 14px; }
+        .user-role { text-align: left; }
+        .user-actions { display: flex; align-items: center; gap: 10px; justify-content: flex-start; }
         .user-avatar { width: 42px; height: 42px; background: var(--blue-accent); color: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; }
         .badge-role-admin { background: rgba(37, 99, 235, 0.15); color: var(--blue-accent); border: 1px solid rgba(37, 99, 235, 0.3); border-radius: 20px; padding: 0.35rem 0.85rem; font-size: 0.8rem; font-weight: 600; }
         .badge-role-func { background: var(--nav-btn-bg); color: var(--text-muted); border: 1px solid var(--card-border); border-radius: 20px; padding: 0.35rem 0.85rem; font-size: 0.8rem; }
@@ -92,7 +137,7 @@
                 <a href="{{ url_for('admin_solicitacoes') }}" class="nav-btn btn-solicitacoes">
                     <i class="bi bi-pencil-square"></i> Solicitações
                     {% if total_solicitacoes_pendentes and total_solicitacoes_pendentes > 0 %}
-                        <span class="badge bg-warning text-dark rounded-pill ms-1">{{ total_solicitacoes_pendentes }}</span>
+                        <span class="notification-dot"></span>
                     {% endif %}
                 </a>
                 <div class="user-pill">
@@ -105,15 +150,50 @@
             </div>
         </div>
 
-        <div class="mb-4">
-            <h3 class="fw-bold mb-1">Usuários Cadastrados</h3>
-            <p class="text-muted small mb-3">Gerencie acessos e consulte o histórico individual de cada colaborador</p>
-            
-            <!-- Barra de Pesquisa -->
-            <div class="search-container">
-                <i class="bi bi-search search-icon"></i>
-                <input type="text" id="userSearch" class="search-input" placeholder="Pesquisar por nome ou e-mail...">
+        <div class="mb-4 d-flex justify-content-between align-items-center">
+            <div>
+                <h3 class="fw-bold mb-1">Usuários Cadastrados</h3>
+                <p class="text-muted small mb-0">Gerencie acessos e consulte o histórico individual de cada colaborador</p>
             </div>
+            <button type="button" class="btn-action-outline" data-bs-toggle="modal" data-bs-target="#modalNovoUsuario">
+                <i class="bi bi-person-plus"></i> Novo Colaborador
+            </button>
+        </div>
+
+        <!-- Modal Novo Colaborador -->
+        <div class="modal fade" id="modalNovoUsuario" tabindex="-1" aria-labelledby="modalNovoUsuarioLabel" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content" style="background: var(--card-bg); border: 1px solid var(--card-border);">
+                    <form action="{{ url_for('admin_cadastrar_usuario') }}" method="POST">
+                        <div class="modal-header border-0">
+                            <h5 class="modal-title fw-bold" id="modalNovoUsuarioLabel">Cadastrar Colaborador</h5>
+                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="mb-3">
+                                <label for="nome" class="form-label text-muted small">Nome Completo</label>
+                                <input type="text" class="form-control" name="nome" required style="background: var(--nav-btn-bg); border: 1px solid var(--card-border); color: var(--text-main);">
+                            </div>
+                            <div class="mb-3">
+                                <label for="email" class="form-label text-muted small">E-mail</label>
+                                <input type="email" class="form-control" name="email" required style="background: var(--nav-btn-bg); border: 1px solid var(--card-border); color: var(--text-main);">
+                            </div>
+                        </div>
+                        <div class="modal-footer border-0">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                            <button type="submit" class="btn btn-primary" style="background: var(--blue-accent); border: none;">Cadastrar</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+            
+        <!-- Barra de Pesquisa -->
+            
+        <!-- Barra de Pesquisa -->
+        <div class="search-container">
+            <i class="bi bi-search search-icon"></i>
+            <input type="text" id="userSearch" class="search-input" placeholder="Pesquisar por nome ou e-mail...">
         </div>
 
         <!-- Lista de Usuários -->
@@ -123,7 +203,6 @@
                 <div class="col-12 user-item">
                     <div class="user-card">
                         <div class="user-info">
-                            <span class="text-muted fw-bold me-2">#{{ u.id }}</span>
                             <div class="user-avatar">{{ u.nome[0]|upper if u.nome else 'U' }}</div>
                             <div>
                                 <h6 class="fw-bold mb-0 user-name">{{ u.nome }}</h6>
@@ -131,7 +210,7 @@
                             </div>
                         </div>
 
-                        <div>
+                        <div class="user-role">
                             {% if u.is_admin %}
                                 <span class="badge-role-admin"><i class="bi bi-shield-check me-1"></i> Administrador</span>
                             {% else %}
@@ -139,7 +218,7 @@
                             {% endif %}
                         </div>
 
-                        <div class="d-flex align-items-center gap-2">
+                        <div class="user-actions">
                             <a href="{{ url_for('admin_historico', usuario_id=u.id) }}" class="btn-action-outline">
                                 <i class="bi bi-clock-history"></i> Histórico
                             </a>

@@ -1,5 +1,7 @@
 {% extends 'base.html' %}
 
+{% block navbar_title %}4Lab Orbit | Controle de Ponto{% endblock %}
+
 {% block content %}
 <style>
     :root {
@@ -69,6 +71,25 @@
         font-size: 1.25rem;
         margin-bottom: 1rem;
     }
+
+    .password-toggle {
+        position: absolute;
+        top: 50%;
+        right: 12px;
+        transform: translateY(-50%);
+        background: none;
+        border: none;
+        color: var(--text-muted);
+        cursor: pointer;
+        padding: 4px;
+        font-size: 1.1rem;
+        transition: color 0.2s ease;
+        z-index: 2;
+    }
+
+    .password-toggle:hover {
+        color: var(--text-main);
+    }
 </style>
 
 <div class="row justify-content-center align-items-center fade-in-up py-4" style="min-height: 75vh;">
@@ -84,22 +105,58 @@
                 <p class="text-muted small">Preencha os campos abaixo para se cadastrar</p>
             </div>
 
+            <!-- Flash Messages -->
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div class="alert alert-{{ category }} alert-dismissible fade show small" role="alert">
+                            {{ message }}
+                            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                        </div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+
             <!-- Formulário de Cadastro -->
             <form method="POST" action="{{ url_for('cadastro') }}">
                 <div class="mb-3">
                     <label for="nome" class="form-label fw-medium text-dark small">Nome Completo</label>
-                    <input type="text" class="form-control" id="nome" name="nome" placeholder="Seu Nome" required>
+                    <input type="text" class="form-control" id="nome" name="nome" placeholder="Seu Nome" value="{{ nome or '' }}" required>
                 </div>
 
                 <div class="mb-3">
                     <label for="email" class="form-label fw-medium text-dark small">E-mail</label>
-                    <input type="email" class="form-control" id="email" name="email" placeholder="seu@email.com" required>
+                    <input type="email" class="form-control" id="email" name="email" placeholder="seu@email.com" value="{{ email or '' }}" required>
                 </div>
 
                 <div class="mb-4">
                     <label for="senha" class="form-label fw-medium text-dark small">Senha</label>
-                    <input type="password" class="form-control" id="senha" name="senha" placeholder="••••••••" required>
+                    <div class="position-relative">
+                        <input type="password" class="form-control pe-5" id="senha" name="senha" placeholder="••••••••" required>
+                        <button type="button" class="password-toggle" id="toggleSenha" title="Mostrar/Ocultar senha" tabindex="-1">
+                            <i class="bi bi-eye-slash" id="senhaIcon"></i>
+                        </button>
+                    </div>
+                    <small class="text-muted d-block mt-1">Mínimo 8 caracteres, incluindo maiúsculas, minúsculas, números e @#*.</small>
                 </div>
+
+                <script>
+                    const toggleSenha = document.getElementById('toggleSenha');
+                    const senhaInput = document.getElementById('senha');
+                    const senhaIcon = document.getElementById('senhaIcon');
+                    
+                    if (toggleSenha && senhaInput && senhaIcon) {
+                        toggleSenha.addEventListener('click', function() {
+                            if (senhaInput.type === 'password') {
+                                senhaInput.type = 'text';
+                                senhaIcon.className = 'bi bi-eye';
+                            } else {
+                                senhaInput.type = 'password';
+                                senhaIcon.className = 'bi bi-eye-slash';
+                            }
+                        });
+                    }
+                </script>
 
                 <button type="submit" class="btn btn-register w-100 mb-3">
                     <i class="bi bi-check-circle me-1"></i> Finalizar Cadastro
