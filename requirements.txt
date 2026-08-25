@@ -9,3 +9,4 @@ resend
 dnspython
 pandas
 openpyxl
+python-dotenv
