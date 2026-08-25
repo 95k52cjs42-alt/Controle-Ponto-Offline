@@ -207,7 +207,10 @@ with app.app_context():
         if "precisa_redefinir_senha" not in colunas_usuario:
             db.session.execute(text("ALTER TABLE usuario ADD COLUMN precisa_redefinir_senha BOOLEAN DEFAULT FALSE;"))
         if "data_cadastro" not in colunas_usuario:
-            db.session.execute(text("ALTER TABLE usuario ADD COLUMN data_cadastro DATETIME;"))
+            if db.engine.name == "postgresql":
+                db.session.execute(text("ALTER TABLE usuario ADD COLUMN data_cadastro TIMESTAMP;"))
+            else:
+                db.session.execute(text("ALTER TABLE usuario ADD COLUMN data_cadastro DATETIME;"))
             db.session.execute(text("UPDATE usuario SET data_cadastro = CURRENT_TIMESTAMP;"))
 
         colunas_ponto = [c["name"] for c in inspector.get_columns("registro_ponto")]
