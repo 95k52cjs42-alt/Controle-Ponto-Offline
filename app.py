@@ -207,7 +207,10 @@ with app.app_context():
         if "precisa_redefinir_senha" not in colunas_usuario:
             db.session.execute(text("ALTER TABLE usuario ADD COLUMN precisa_redefinir_senha BOOLEAN DEFAULT FALSE;"))
         if "data_cadastro" not in colunas_usuario:
-            db.session.execute(text("ALTER TABLE usuario ADD COLUMN data_cadastro DATETIME;"))
+            if db.engine.name == "postgresql":
+                db.session.execute(text("ALTER TABLE usuario ADD COLUMN data_cadastro TIMESTAMP;"))
+            else:
+                db.session.execute(text("ALTER TABLE usuario ADD COLUMN data_cadastro DATETIME;"))
             db.session.execute(text("UPDATE usuario SET data_cadastro = CURRENT_TIMESTAMP;"))
 
         colunas_ponto = [c["name"] for c in inspector.get_columns("registro_ponto")]
@@ -1729,4 +1732,5 @@ def enviar_lembrete_geral():
     return redirect(url_for('admin_panel'))
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=True)
