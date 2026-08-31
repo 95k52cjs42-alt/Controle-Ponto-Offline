@@ -150,11 +150,13 @@
                                 <span class="badge bg-danger rounded-pill me-2">{{ f.data.strftime('%d/%m') }}</span>
                                 <span class="fw-medium" style="color: var(--text-main);">{{ f.descricao }}</span>
                             </div>
+                            {% if f.id %}
                             <form method="POST" action="{{ url_for('excluir_feriado', id=f.id) }}" class="d-inline" onsubmit="return confirm('Deseja remover este feriado?');">
                                 <button type="submit" class="btn btn-link text-danger p-0 border-0 shadow-none ms-2" title="Excluir feriado">
                                     <i class="bi bi-trash"></i>
                                 </button>
                             </form>
+                            {% endif %}
                         </div>
                     {% endfor %}
                 </div>

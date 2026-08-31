@@ -335,6 +335,7 @@
                         <th class="ps-3">Data</th>
                         <th>Batidas Realizadas</th>
                         <th>Status / Faltantes</th>
+                        <th class="text-center">Saldo do Dia</th>
                         <th class="text-end pe-3">Ação</th>
                     </tr>
                 </thead>
@@ -378,6 +379,32 @@
                                 {% endif %}
                             </td>
 
+                            <!-- Saldo do Dia (minutos faltantes/excedentes) -->
+                            <td class="text-center" style="white-space: nowrap;">
+                                {% if item.saldo.tem_registro %}
+                                    <div class="d-flex flex-column align-items-center gap-1">
+                                        <span class="small fw-semibold" style="color: var(--text-muted);">
+                                            {{ item.saldo.total_trabalhado_fmt }}
+                                        </span>
+                                        {% if item.saldo.is_excedente %}
+                                            <span class="badge rounded-pill px-2 py-1 small fw-bold" style="background: rgba(16, 185, 129, 0.15); color: #34d399;">
+                                                <i class="bi bi-arrow-up-short"></i>{{ item.saldo.diferenca_fmt }}
+                                            </span>
+                                        {% elif item.saldo.is_faltante %}
+                                            <span class="badge rounded-pill px-2 py-1 small fw-bold" style="background: rgba(239, 68, 68, 0.2); color: #fca5a5;">
+                                                <i class="bi bi-arrow-down-short"></i>{{ item.saldo.diferenca_fmt }}
+                                            </span>
+                                        {% else %}
+                                            <span class="badge rounded-pill px-2 py-1 small fw-bold" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd;">
+                                                <i class="bi bi-dash"></i> 0min
+                                            </span>
+                                        {% endif %}
+                                    </div>
+                                {% else %}
+                                    <span class="text-muted small">--</span>
+                                {% endif %}
+                            </td>
+
                             <!-- Botão de Ajuste -->
                             <td class="text-end pe-3" style="white-space: nowrap;">
                                 {% set dia, mes, ano = item.data.split('/') %}
@@ -390,7 +417,7 @@
                         {% endfor %}
                     {% else %}
                         <tr>
-                            <td colspan="4" class="text-center py-5 text-muted custom-card rounded-4">
+                            <td colspan="5" class="text-center py-5 text-muted custom-card rounded-4">
                                 <i class="bi bi-inbox fs-2 d-block mb-2 text-secondary"></i>
                                 Nenhum registro encontrado para este período.
                             </td>

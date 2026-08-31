@@ -1185,37 +1185,53 @@
         }
         window.bindAdminSearch = bindAdminSearch;
 
-        const fragmentCache = {};
+        let currentAbortController = null;
 
-        async function loadAdminView(viewName, url, forceRefresh = false) {
+        function initHistoricoFadeAlert(scope) {
+            var alert = (scope || document).querySelector('#historico-vazio-alert');
+            if (alert) {
+                setTimeout(function() {
+                    alert.style.opacity = '0';
+                    alert.style.transform = 'translateY(-8px)';
+                    setTimeout(function() {
+                        if (alert.parentNode) alert.remove();
+                    }, 350);
+                }, 4000);
+            }
+        }
+
+        async function loadAdminView(viewName, url) {
             const contentWrap = document.getElementById('adminContent');
             if (!contentWrap) return;
 
-            if (!forceRefresh && fragmentCache[viewName]) {
-                contentWrap.innerHTML = fragmentCache[viewName];
-                history.pushState({}, '', url);
-                setActiveNav(viewName);
-                if (typeof window.bindAdminSearch === 'function') window.bindAdminSearch();
-                if (viewName === 'painel') initCharts();
-                return;
+            // Aborta o fetch anterior que ainda esteja pendente
+            if (currentAbortController) {
+                currentAbortController.abort();
             }
+            currentAbortController = new AbortController();
 
             contentWrap.classList.add('loading');
 
             try {
-                const response = await fetch(`/admin/fragment/${viewName}`);
+                const response = await fetch(`/admin/fragment/${viewName}`, {
+                    signal: currentAbortController.signal
+                });
                 if (!response.ok) {
                     window.location.href = url;
                     return;
                 }
 
                 const html = await response.text();
-                fragmentCache[viewName] = html;
                 contentWrap.innerHTML = html;
                 history.pushState({}, '', url);
                 setActiveNav(viewName);
                 if (typeof window.bindAdminSearch === 'function') window.bindAdminSearch();
                 if (viewName === 'painel') initCharts();
+                if (viewName === 'historico') initHistoricoFadeAlert(contentWrap);
+            } catch (err) {
+                if (err.name !== 'AbortError') {
+                    console.error('Error loading fragment:', err);
+                }
             } finally {
                 contentWrap.classList.remove('loading');
             }
@@ -1231,11 +1247,67 @@
 
         bindAdminSearch();
 
-        const initialView = '{{ initial_view|default("painel") }}';
-        window.addEventListener('DOMContentLoaded', () => {
+        // ------------------------------------------------------------------
+        // Filtro do Histórico Geral (event delegation)
+        // Os <script> embutidos nos fragmentos NÃO são executados quando o
+        // HTML é injetado via innerHTML. Por isso, tratamos aqui no painel,
+        // delegando no documento — funciona para qualquer conteúdo dinâmico.
+        // ------------------------------------------------------------------
+        document.addEventListener('submit', function(e) {
+            const form = e.target;
+            if (!form || form.id !== 'historico-filter-form') return;
+
+            e.preventDefault();
+
+            const formData = new FormData(form);
+            const params = new URLSearchParams();
+            for (let [key, value] of formData.entries()) {
+                if (value) params.append(key, value);
+            }
+
+            const queryString = params.toString();
+            const url = '/admin/fragment/historico' + (queryString ? '?' + queryString : '');
+
             const contentWrap = document.getElementById('adminContent');
-            if (contentWrap && contentWrap.innerHTML.trim() !== '') {
-                fragmentCache[initialView] = contentWrap.innerHTML;
+            if (!contentWrap) return;
+
+            contentWrap.classList.add('loading');
+            fetch(url)
+                .then(function(response) {
+                    if (!response.ok) throw new Error('Erro ao carregar fragmento');
+                    return response.text();
+                })
+                .then(function(html) {
+                    contentWrap.innerHTML = html;
+                    history.pushState({}, '', '/admin/historico' + (queryString ? '?' + queryString : ''));
+                    setActiveNav('historico');
+                    if (typeof window.bindAdminSearch === 'function') window.bindAdminSearch();
+                    initHistoricoFadeAlert(contentWrap);
+                })
+                .catch(function(err) { console.error('Error loading fragment:', err); })
+                .finally(function() { contentWrap.classList.remove('loading'); });
+        });
+
+        document.addEventListener('click', function(e) {
+            const clearBtn = e.target.closest('a[href*="/admin/historico"]');
+            if (!clearBtn) return;
+
+            const form = clearBtn.closest('form');
+            if (form && form.id === 'historico-filter-form') {
+                e.preventDefault();
+                const contentWrap = document.getElementById('adminContent');
+                if (!contentWrap) return;
+                contentWrap.classList.add('loading');
+                fetch('/admin/fragment/historico')
+                    .then(function(response) { return response.text(); })
+                    .then(function(html) {
+                        contentWrap.innerHTML = html;
+                        history.pushState({}, '', '/admin/historico');
+                        setActiveNav('historico');
+                        if (typeof window.bindAdminSearch === 'function') window.bindAdminSearch();
+                        initHistoricoFadeAlert(contentWrap);
+                    })
+                    .finally(function() { contentWrap.classList.remove('loading'); });
             }
         });
 

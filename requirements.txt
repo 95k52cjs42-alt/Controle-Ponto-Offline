@@ -10,3 +10,4 @@ dnspython
 pandas
 openpyxl
 python-dotenv
+holidays
