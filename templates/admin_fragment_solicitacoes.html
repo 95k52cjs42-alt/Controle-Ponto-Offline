@@ -10,6 +10,7 @@
                 <tr>
                     <th>Colaborador</th>
                     <th>Data</th>
+                    <th>Ponto / Horário</th>
                     <th>Motivo</th>
                     <th>Status</th>
                     <th class="text-end">Ações</th>
@@ -24,6 +25,10 @@
                             <small class="text-muted">{{ sol.usuario.email }}</small>
                         </td>
                         <td style="white-space: nowrap;">{{ sol.data_ponto }}</td>
+                        <td style="white-space: nowrap;">
+                            <div class="fw-bold">{{ sol.tipo_ponto }}</div>
+                            <small class="text-muted"><i class="bi bi-clock me-1"></i>{{ sol.hora_correta }}</small>
+                        </td>
                         <td>{{ sol.justificativa }}</td>
                         <td>
                             {% set status_normalizado = (sol.status or '') | lower %}
@@ -58,7 +63,7 @@
                     {% endfor %}
                 {% else %}
                     <tr>
-                        <td colspan="5">
+                        <td colspan="6">
                             <div class="empty-state">
                                 <i class="bi bi-inbox"></i>
                                 Nenhuma solicitação pendente no momento.

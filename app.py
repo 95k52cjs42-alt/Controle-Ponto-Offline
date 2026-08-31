@@ -1,6 +1,9 @@
 import io
 import os
 import re
+import holidays
+import calendar
+
 import secrets
 from collections import defaultdict
 from dotenv import load_dotenv
@@ -75,8 +78,23 @@ CARGA_HORARIA_DIARIA = timedelta(hours=8)
 def eh_dia_util(data_obj):
     if data_obj.weekday() >= 5:
         return False
-    feriado = Feriado.query.filter_by(data=data_obj).first()
-    return feriado is None
+    
+    # Verifica feriado no banco de dados
+    feriado_db = Feriado.query.filter_by(data=data_obj).first()
+    if feriado_db:
+        return False
+        
+    # Verifica feriado na biblioteca
+    try:
+        estado = os.environ.get("ESTADO_FERIADO", "BR")
+        subdiv = estado if estado != 'BR' else None
+        br_holidays = holidays.country_holidays('BR', subdiv=subdiv)
+        if data_obj in br_holidays:
+            return False
+    except Exception:
+        pass
+        
+    return True
 
 def verificar_conformidade_clt(data_anterior, hora_saida, data_atual, hora_entrada):
     """
@@ -275,6 +293,105 @@ def identificar_pontos_faltantes(registros_do_dia):
     ]
     faltantes = [p for p in PONTOS_OBRIGATORIOS if p not in tipos_batidos]
     return faltantes
+
+
+def calcular_saldo_dia(registros_do_dia, data_obj):
+    """
+    Calcula o tempo trabalhado no dia e o saldo em relação à carga horária diária.
+    Retorna um dict com:
+      - total_trabalhado_seg: segundos totais trabalhados
+      - total_trabalhado_fmt: string formatada (ex: "07:15h")
+      - diferenca_seg: diferença em segundos (negativo=faltante, positivo=extra)
+      - diferenca_fmt: string formatada (ex: "-45min" ou "+30min")
+      - is_excedente: True se trabalhou mais que a carga diária
+      - is_faltante: True se trabalhou menos que a carga diária
+      - tem_registro: True se houve ao menos 1 batida no dia
+    """
+    FMT = "%H:%M:%S"
+    carga_seg = int(CARGA_HORARIA_DIARIA.total_seconds())
+
+    tempo_trabalhado = timedelta()
+    tem_registro = len(registros_do_dia) > 0
+
+    if not tem_registro:
+        h_falt, m_falt = divmod(carga_seg // 60, 60)
+        return {
+            "total_trabalhado_seg": 0,
+            "total_trabalhado_fmt": "--:--",
+            "diferenca_seg": -carga_seg,
+            "diferenca_fmt": f"-{h_falt:02d}:{m_falt:02d}h",
+            "is_excedente": False,
+            "is_faltante": True,
+            "tem_registro": False,
+        }
+
+    # Monta dict tipo -> hora
+    tipos = {}
+    for p in registros_do_dia:
+        tipo = getattr(p, "tipo", getattr(p, "tipo_ponto", ""))
+        hora = getattr(p, "hora", None)
+        if tipo and hora:
+            tipos[tipo] = hora
+
+    entrada = tipos.get("Entrada")
+    almoco = tipos.get("Almoço")
+    retorno = tipos.get("Retorno")
+    saida = tipos.get("Saída")
+
+    # Entrada -> Almoço
+    if entrada and almoco:
+        try:
+            t1 = datetime.strptime(entrada, FMT)
+            t2 = datetime.strptime(almoco, FMT)
+            if t2 > t1:
+                tempo_trabalhado += t2 - t1
+        except ValueError:
+            pass
+
+    # Retorno -> Saída
+    if retorno and saida:
+        try:
+            t3 = datetime.strptime(retorno, FMT)
+            t4 = datetime.strptime(saida, FMT)
+            if t4 > t3:
+                tempo_trabalhado += t4 - t3
+        except ValueError:
+            pass
+
+    # Se tem entrada mas não tem almoço nem saída, calcula parcial (apenas para hoje)
+    hoje_obj = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
+    if entrada and not almoco and not retorno and not saida and data_obj == hoje_obj:
+        try:
+            t1 = datetime.strptime(entrada, FMT)
+            agora = datetime.now(ZoneInfo("America/Sao_Paulo"))
+            t_entrada_hoje = datetime.combine(data_obj, t1.time()).replace(tzinfo=ZoneInfo("America/Sao_Paulo"))
+            if agora > t_entrada_hoje:
+                tempo_trabalhado += agora - t_entrada_hoje
+        except ValueError:
+            pass
+
+    total_seg = int(tempo_trabalhado.total_seconds())
+    horas, mins = divmod(total_seg // 60, 60)
+    total_fmt = f"{horas:02d}:{mins:02d}h"
+
+    diferenca_seg = total_seg - carga_seg
+    diff_abs = abs(diferenca_seg) // 60
+    diff_h, diff_m = divmod(diff_abs, 60)
+
+    if diferenca_seg >= 0:
+        diferenca_fmt = f"+{diff_h:02d}:{diff_m:02d}h"
+    else:
+        diferenca_fmt = f"-{diff_h:02d}:{diff_m:02d}h"
+
+    return {
+        "total_trabalhado_seg": total_seg,
+        "total_trabalhado_fmt": total_fmt,
+        "diferenca_seg": diferenca_seg,
+        "diferenca_fmt": diferenca_fmt,
+        "is_excedente": diferenca_seg > 0,
+        "is_faltante": diferenca_seg < 0,
+        "tem_registro": True,
+    }
 
 def obter_notificacoes_usuario(user_id):
     if not user_id:
@@ -834,18 +951,19 @@ def meu_historico():
         data_str = d_obj.strftime("%d/%m/%Y")
         registros_do_dia = dias_registrados.get(d_obj, [])
         
-        # Se for fim de semana (sábado=5, domingo=6) e NÃO houver registros, pula o dia
-        is_fim_de_semana = d_obj.weekday() >= 5
-        if is_fim_de_semana and not registros_do_dia:
+        # Se NÃO for dia útil e NÃO houver registros, pula o dia
+        if not eh_dia_util(d_obj) and not registros_do_dia:
             continue
 
         faltantes = identificar_pontos_faltantes(registros_do_dia)
+        saldo = calcular_saldo_dia(registros_do_dia, d_obj)
         
         historico_analisado.append({
             "data": data_str,
             "registros": registros_do_dia,
             "faltantes": faltantes,
             "incompleto": len(faltantes) > 0,
+            "saldo": saldo,
         })
 
     return render_template(
@@ -1309,7 +1427,41 @@ def admin_fragment(view_name):
         # Feriados do mês atual
         mes_atual = hoje.month
         ano_atual = hoje.year
-        feriados = Feriado.query.filter(db.extract('month', Feriado.data) == mes_atual, db.extract('year', Feriado.data) == ano_atual).all()
+        _, last_day = calendar.monthrange(ano_atual, mes_atual)
+        start_date = date(ano_atual, mes_atual, 1)
+        end_date = date(ano_atual, mes_atual, last_day)
+        
+        feriados_db = Feriado.query.filter(Feriado.data >= start_date, Feriado.data <= end_date).all()
+        
+        # Obter feriados da biblioteca
+        estado = os.environ.get("ESTADO_FERIADO", "BR")
+        subdiv = estado if estado != 'BR' else None
+        
+        # Usar uma classe simples para o template
+        class FeriadoObj:
+            def __init__(self, data, descricao, id=None):
+                self.data = data
+                self.descricao = descricao
+                self.id = id
+        
+        feriados = []
+        # Adicionar feriados do DB
+        for f in feriados_db:
+            feriados.append(FeriadoObj(f.data, f.descricao, f.id))
+            
+        # Adicionar feriados da lib (se não estiverem no DB)
+        try:
+            br_holidays = holidays.country_holidays('BR', subdiv=subdiv)
+            datas_db = {f.data for f in feriados_db}
+            for dt, name in br_holidays.items():
+                if dt.year == ano_atual and dt.month == mes_atual:
+                    if dt not in datas_db:
+                        feriados.append(FeriadoObj(dt, name))
+        except Exception:
+            pass
+        
+        # Ordenar por data
+        feriados.sort(key=lambda x: x.data)
         
         # Calcular Banco de Horas por usuário
         usuarios_banco_horas = []
