@@ -21,10 +21,23 @@
         <div class="col-12 user-item">
             <div class="user-card">
                 <div class="user-info">
-                    <div class="user-avatar">{{ u.nome[0]|upper if u.nome else 'U' }}</div>
+                    {% if u.foto_url %}
+                        <img src="{{ u.foto_url }}" class="rounded-circle object-fit-cover" style="width: 42px; height: 42px; border: 1px solid var(--card-border);" alt="{{ u.nome }}">
+                    {% else %}
+                        <div class="user-avatar">{{ u.nome[0]|upper if u.nome else 'U' }}</div>
+                    {% endif %}
                     <div>
                         <h6 class="fw-bold mb-0 user-name">{{ u.nome }}</h6>
-                        <span class="text-muted small user-email">{{ u.email }}</span>
+                        <span class="text-muted small user-email d-block" style="font-size: 0.8rem;">{{ u.email }}</span>
+                        {% if u.departamento_rel %}
+                            <span class="badge bg-secondary text-light rounded-pill mt-1" style="font-size: 0.7rem;">
+                                <i class="bi bi-building me-1"></i>{{ u.departamento_rel.nome }}
+                            </span>
+                        {% else %}
+                            <span class="badge bg-dark text-muted border border-secondary rounded-pill mt-1" style="font-size: 0.7rem;">
+                                Sem depto.
+                            </span>
+                        {% endif %}
                     </div>
                 </div>
 
@@ -40,6 +53,25 @@
                 </div>
 
                 <div class="user-actions">
+                    <button type="button"
+                            class="btn-action-outline text-warning border-warning btn-configurar-usuario"
+                            title="Gerenciar Permissões e Departamento"
+                            data-bs-toggle="modal"
+                            data-bs-target="#modalConfigurarUsuario"
+                            data-user-id="{{ u.id }}"
+                            data-user-nome="{{ u.nome }}"
+                            data-user-email="{{ u.email }}"
+                            data-user-departamento="{{ u.departamento_id if u.departamento_id else 'none' }}"
+                            data-is-admin="{{ 'true' if u.is_admin else 'false' }}"
+                            data-perm-dashboard="{{ 'true' if u.tem_permissao('pode_ver_dashboard') else 'false' }}"
+                            data-perm-historico="{{ 'true' if u.tem_permissao('pode_ver_historico') else 'false' }}"
+                            data-perm-ponto="{{ 'true' if u.tem_permissao('pode_lancar_ponto_manual') else 'false' }}"
+                            data-perm-solic="{{ 'true' if u.tem_permissao('pode_aprovar_solicitacoes') else 'false' }}"
+                            data-perm-exp="{{ 'true' if u.tem_permissao('pode_exportar_relatorios') else 'false' }}"
+                            data-perm-fer="{{ 'true' if u.tem_permissao('pode_gerenciar_feriados') else 'false' }}">
+                        <i class="bi bi-gear-fill"></i> Configurar
+                    </button>
+
                     <a href="{{ url_for('admin_historico', usuario_id=u.id) }}" class="btn-action-outline">
                         <i class="bi bi-clock-history"></i> Histórico
                     </a>
@@ -51,7 +83,7 @@
                                 {% if u.is_admin %} Remover Admin {% else %} Tornar Admin {% endif %}
                             </button>
                         </form>
-                        <form action="{{ url_for('excluir_usuario', user_id=u.id) }}" method="POST" class="d-inline-block" onsubmit="return confirm('Tem certeza que deseja excluir este usuário? Esta ação não pode ser desfeita.');">
+                        <form action="{{ url_for('excluir_usuario', user_id=u.id) }}" method="POST" class="d-inline-block" onsubmit="return confirm('Tem certeza que deseja excluir este colaborador? Esta ação não pode ser desfeita.');">
                             <button type="submit" class="btn-delete-user" title="Excluir Usuário" style="height: 38px;">
                                 <i class="bi bi-trash"></i>
                             </button>

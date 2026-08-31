@@ -58,6 +58,12 @@ elif DATABASE_URL.startswith("postgresql://") and not DATABASE_URL.startswith("p
 
 app.config["SQLALCHEMY_DATABASE_URI"] = DATABASE_URL
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+    "pool_size": 10,
+    "max_overflow": 20,
+    "pool_recycle": 300,
+    "pool_pre_ping": True,
+}
 
 db = SQLAlchemy(app)
 login_manager = LoginManager(app)
@@ -118,6 +124,13 @@ class LogAuditoria(db.Model):
 
     usuario = db.relationship("Usuario", backref="logs")
 
+class Departamento(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    nome = db.Column(db.String(100), nullable=False, unique=True)
+    descricao = db.Column(db.String(255), nullable=True)
+    data_criacao = db.Column(db.DateTime, default=lambda: datetime.now(ZoneInfo("America/Sao_Paulo")))
+    usuarios = db.relationship("Usuario", backref="departamento_rel", lazy=True)
+
 class Feriado(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     data = db.Column(db.Date, nullable=False, unique=True)
@@ -131,9 +144,24 @@ class Usuario(UserMixin, db.Model):
     is_admin = db.Column(db.Boolean, default=False)
     email_confirmado = db.Column(db.Boolean, default=False)
     precisa_redefinir_senha = db.Column(db.Boolean, default=False)
+    foto_url = db.Column(db.String(255), nullable=True)
+    departamento_id = db.Column(db.Integer, db.ForeignKey('departamento.id'), nullable=True)
+    permissoes = db.Column(db.Text, nullable=True) # Guarda JSON ex: {"pode_ver_dashboard": true, ...}
     data_cadastro = db.Column(db.DateTime, default=lambda: datetime.now(ZoneInfo("America/Sao_Paulo")))
     pontos = db.relationship("RegistroPonto", backref="usuario", lazy=True)
     solicitacoes = db.relationship("SolicitacaoCorrecao", backref="usuario", lazy=True)
+
+    def tem_permissao(self, permissao):
+        if self.is_admin:
+            return True
+        if not self.permissoes:
+            return False
+        try:
+            import json
+            perms = json.loads(self.permissoes)
+            return perms.get(permissao, False)
+        except:
+            return False
 
     def get_reset_token(self, expires_sec=1800):
         s = Serializer(app.config['SECRET_KEY'])
@@ -212,6 +240,13 @@ with app.app_context():
             else:
                 db.session.execute(text("ALTER TABLE usuario ADD COLUMN data_cadastro DATETIME;"))
             db.session.execute(text("UPDATE usuario SET data_cadastro = CURRENT_TIMESTAMP;"))
+
+        if "foto_url" not in colunas_usuario:
+            db.session.execute(text("ALTER TABLE usuario ADD COLUMN foto_url VARCHAR(255);"))
+        if "departamento_id" not in colunas_usuario:
+            db.session.execute(text("ALTER TABLE usuario ADD COLUMN departamento_id INTEGER;"))
+        if "permissoes" not in colunas_usuario:
+            db.session.execute(text("ALTER TABLE usuario ADD COLUMN permissoes TEXT;"))
 
         colunas_ponto = [c["name"] for c in inspector.get_columns("registro_ponto")]
         if "foi_ajustado" not in colunas_ponto:
@@ -480,6 +515,66 @@ def redefinir_senha_forca():
         return redirect(url_for("index"))
     
     return render_template("redefinir_senha_forca.html")
+
+@app.route("/admin/lancar-ponto-manual", methods=["POST"])
+@admin_required
+def admin_lancar_ponto_manual():
+    usuario_id = request.form.get("usuario_id")
+    data_raw = request.form.get("data")        # esperada no formato YYYY-MM-DD
+    tipo = request.form.get("tipo")
+    hora_raw = request.form.get("hora")        # esperada no formato HH:MM
+    justificativa = request.form.get("justificativa", "").strip()
+
+    if not usuario_id or not data_raw or not tipo or not hora_raw:
+        flash("Todos os campos obrigatórios devem ser preenchidos.", "danger")
+        return redirect(request.referrer or url_for("admin"))
+
+    usuario_alvo = Usuario.query.get(usuario_id)
+    if not usuario_alvo:
+        flash("Usuário não encontrado.", "danger")
+        return redirect(request.referrer or url_for("admin"))
+
+    # Formatar data de YYYY-MM-DD para DD/MM/YYYY
+    try:
+        data_obj = datetime.strptime(data_raw, "%Y-%m-%d")
+        data_formatada = data_obj.strftime("%d/%m/%Y")
+    except ValueError:
+        data_formatada = data_raw
+
+    # Garantir formato HH:MM:SS para hora
+    hora_formatada = hora_raw if len(hora_raw) == 8 else f"{hora_raw}:00"
+
+    # Verificar se já existe um registro idêntico para o usuário nessa data e tipo
+    ponto_existente = RegistroPonto.query.filter_by(
+        usuario_id=usuario_alvo.id,
+        data=data_formatada,
+        tipo=tipo
+    ).first()
+
+    if ponto_existente:
+        ponto_existente.hora = hora_formatada
+        ponto_existente.foi_ajustado = True
+        msg_acao = f"Atualizou o ponto ({tipo}) de {usuario_alvo.nome} para o dia {data_formatada} às {hora_formatada}."
+    else:
+        novo_ponto = RegistroPonto(
+            usuario_id=usuario_alvo.id,
+            data=data_formatada,
+            tipo=tipo,
+            hora=hora_formatada,
+            foi_ajustado=True
+        )
+        db.session.add(novo_ponto)
+        msg_acao = f"Lançou manualmente o ponto ({tipo}) de {usuario_alvo.nome} para o dia {data_formatada} às {hora_formatada}."
+
+    db.session.commit()
+
+    desc_log = msg_acao
+    if justificativa:
+        desc_log += f" Justificativa: {justificativa}"
+    registrar_log(current_user.id, desc_log, entidade_id=usuario_alvo.id)
+
+    flash(f"Ponto de {usuario_alvo.nome} lançado com sucesso!", "success")
+    return redirect(request.referrer or url_for("admin"))
 
 @app.route("/admin/cadastrar_usuario", methods=["POST"])
 @admin_required
@@ -879,9 +974,55 @@ def exportar_historico_ponto():
         pdf = SimpleDocTemplate(buffer, pagesize=letter)
         elementos = []
         estilos = getSampleStyleSheet()
+        
+        # Cabeçalho
         elementos.append(Paragraph(f"Folha de Ponto - {usuario.nome}", estilos["Heading1"]))
-        tabela = Table(tabela_linhas)
+        elementos.append(Paragraph(f"E-mail: {usuario.email} | Emissão: {datetime.now().strftime('%d/%m/%Y às %H:%M')}", estilos["Normal"]))
+        elementos.append(Spacer(1, 12))
+        
+        # Tabela
+        tabela = Table(tabela_linhas, repeatRows=1)
+        estilo_tabela = TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2c3e50')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+        ])
+        
+        # Estilo para "FALTA"
+        for i, row in enumerate(tabela_linhas):
+            if "FALTA" in row:
+                estilo_tabela.add('BACKGROUND', (0, i), (-1, i), colors.HexColor('#fdecea'))
+                estilo_tabela.add('TEXTCOLOR', (0, i), (-1, i), colors.HexColor('#d9534f'))
+        
+        tabela.setStyle(estilo_tabela)
         elementos.append(tabela)
+        elementos.append(Spacer(1, 12))
+        
+        # Footer (Totais)
+        h_t = total_segundos_trabalhados // 3600
+        m_t = (total_segundos_trabalhados % 3600) // 60
+        
+        h_e = total_segundos_extras // 3600
+        m_e = (total_segundos_extras % 3600) // 60
+        
+        h_f = total_segundos_faltantes // 3600
+        m_f = (total_segundos_faltantes % 3600) // 60
+        
+        balanco = total_segundos_extras - total_segundos_faltantes
+        h_b = abs(balanco) // 3600
+        m_b = (abs(balanco) % 3600) // 60
+        
+        elementos.append(Paragraph(f"<b>Horas Totais Trabalhadas:</b> {h_t:02d}:{m_t:02d}h", estilos["Normal"]))
+        elementos.append(Paragraph(f"<b>(+) Total Horas Extras:</b> <font color='green'>{h_e:02d}:{m_e:02d}h</font>", estilos["Normal"]))
+        elementos.append(Paragraph(f"<b>(-) Total Horas Faltantes:</b> <font color='red'>{h_f:02d}:{m_f:02d}h ({total_faltas_dias} dia(s) ausente)</font>", estilos["Normal"]))
+        
+        cor_balanco = 'red' if balanco < 0 else 'green'
+        texto_balanco = f"BALANÇO FINAL (BANCO DE HORAS): <font color='{cor_balanco}'>{'-' if balanco < 0 else ''}{h_b:02d}:{m_b:02d}h ({'A Repor' if balanco < 0 else 'Crédito'})</font>"
+        
+        elementos.append(Paragraph(f"<b>{texto_balanco}</b>", estilos["Normal"]))
+        
         pdf.build(elementos)
         buffer.seek(0)
         return send_file(buffer, as_attachment=True, download_name=f"Folha_Ponto_{usuario.nome}.pdf", mimetype="application/pdf")
@@ -902,6 +1043,118 @@ def exportar_historico_ponto():
         return send_file(io.BytesIO(output.getvalue().encode('utf-8-sig')), as_attachment=True, download_name=f"Folha_Ponto_{usuario.nome}.csv", mimetype="text/csv")
 
     return redirect(url_for("meu_historico"))
+# ==========================================
+#   ROTAS DE UPLOAD, DEPARTAMENTOS & RBAC
+# ==========================================
+from werkzeug.utils import secure_filename
+
+UPLOAD_FOLDER = os.path.join(app.root_path, 'static', 'uploads', 'perfil')
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+@app.route("/perfil/upload-foto", methods=["POST"])
+@login_required
+def upload_foto_perfil():
+    if 'foto' not in request.files:
+        flash("Nenhum arquivo enviado.", "warning")
+        return redirect(request.referrer or url_for("index"))
+    
+    file = request.files['foto']
+    if file.filename == '':
+        flash("Nenhum arquivo selecionado.", "warning")
+        return redirect(request.referrer or url_for("index"))
+    
+    if file and allowed_file(file.filename):
+        ext = file.filename.rsplit('.', 1)[1].lower()
+        filename = f"user_{current_user.id}_{secrets.token_hex(8)}.{ext}"
+        filepath = os.path.join(UPLOAD_FOLDER, filename)
+        file.save(filepath)
+        
+        # Remove foto antiga se existir
+        if current_user.foto_url:
+            old_path = os.path.join(app.root_path, current_user.foto_url.lstrip('/'))
+            if os.path.exists(old_path):
+                try:
+                    os.remove(old_path)
+                except Exception:
+                    pass
+        
+        current_user.foto_url = f"/static/uploads/perfil/{filename}"
+        db.session.commit()
+        registrar_log(current_user.id, "Atualizou foto de perfil")
+        flash("Foto de perfil atualizada com sucesso!", "success")
+    else:
+        flash("Formato de imagem inválido (use PNG, JPG ou JPEG).", "danger")
+
+    return redirect(request.referrer or url_for("index"))
+
+@app.route("/admin/departamentos", methods=["GET", "POST"])
+@login_required
+@admin_required
+def gerenciar_departamentos():
+    if request.method == "POST":
+        nome = request.form.get("nome", "").strip()
+        descricao = request.form.get("descricao", "").strip()
+        if not nome:
+            flash("Nome do departamento é obrigatório.", "warning")
+        elif Departamento.query.filter_by(nome=nome).first():
+            flash(f"Departamento '{nome}' já existe.", "warning")
+        else:
+            dep = Departamento(nome=nome, descricao=descricao)
+            db.session.add(dep)
+            db.session.commit()
+            registrar_log(current_user.id, f"Criou o departamento '{nome}'")
+            flash(f"Departamento '{nome}' cadastrado com sucesso!", "success")
+        return redirect(url_for("admin_usuarios"))
+
+    deps = Departamento.query.order_by(Departamento.nome.asc()).all()
+    return render_template("admin_fragment_departamentos.html", departamentos=deps)
+
+@app.route("/admin/departamentos/excluir/<int:id>", methods=["POST"])
+@login_required
+@admin_required
+def excluir_departamento(id):
+    dep = Departamento.query.get_or_404(id)
+    nome_dep = dep.nome
+    # Desvincular usuários do departamento excluído
+    Usuario.query.filter_by(departamento_id=id).update({"departamento_id": None})
+    db.session.delete(dep)
+    db.session.commit()
+    registrar_log(current_user.id, f"Excluiu departamento '{nome_dep}'")
+    flash(f"Departamento '{nome_dep}' excluído com sucesso!", "success")
+    return redirect(url_for("admin_usuarios"))
+
+@app.route("/admin/usuarios/<int:user_id>/atualizar", methods=["POST"])
+@login_required
+@admin_required
+def atualizar_usuario_admin(user_id):
+    user = Usuario.query.get_or_404(user_id)
+    departamento_id = request.form.get("departamento_id")
+    
+    if departamento_id == "" or departamento_id == "none":
+        user.departamento_id = None
+    elif departamento_id:
+        user.departamento_id = int(departamento_id)
+    
+    # Atualizar Permissões Granulares (RBAC)
+    import json
+    permissoes = {
+        "pode_ver_dashboard": request.form.get("pode_ver_dashboard") == "on",
+        "pode_ver_historico": request.form.get("pode_ver_historico") == "on",
+        "pode_lancar_ponto_manual": request.form.get("pode_lancar_ponto_manual") == "on",
+        "pode_aprovar_solicitacoes": request.form.get("pode_aprovar_solicitacoes") == "on",
+        "pode_exportar_relatorios": request.form.get("pode_exportar_relatorios") == "on",
+        "pode_gerenciar_feriados": request.form.get("pode_gerenciar_feriados") == "on",
+    }
+    user.permissoes = json.dumps(permissoes)
+    db.session.commit()
+    registrar_log(current_user.id, f"Atualizou departamento e permissões do usuário {user.nome}", user_id)
+    flash(f"Dados e permissões do colaborador {user.nome} salvos com sucesso!", "success")
+    return redirect(url_for("admin_usuarios"))
+
 # ==========================================
 #          ROTAS DE ADMINISTRAÇÃO
 # ==========================================
@@ -975,6 +1228,8 @@ def build_admin_logs_recentes(limit=5):
     return logs[:limite_logs]
 
 def render_admin_shell(initial_view="painel", **context):
+    if "departamentos" not in context:
+        context["departamentos"] = Departamento.query.order_by(Departamento.nome.asc()).all()
     return render_template("admin.html", initial_view=initial_view, **context)
 
 @app.route("/admin")
@@ -1172,8 +1427,9 @@ def admin_fragment(view_name):
 
     if view_name == "usuarios":
         usuarios = Usuario.query.all()
+        departamentos = Departamento.query.order_by(Departamento.nome.asc()).all()
         total_solicitacoes_pendentes = SolicitacaoCorrecao.query.filter_by(status="Pendente").count()
-        return render_template("admin_fragment_usuarios.html", usuarios=usuarios, total_solicitacoes_pendentes=total_solicitacoes_pendentes)
+        return render_template("admin_fragment_usuarios.html", usuarios=usuarios, departamentos=departamentos, total_solicitacoes_pendentes=total_solicitacoes_pendentes)
 
     if view_name == "historico":
         usuario_id = request.args.get("usuario_id", type=int)
@@ -1362,6 +1618,7 @@ def admin_usuarios():
         return redirect(url_for("index"))
 
     usuarios = Usuario.query.all()
+    departamentos = Departamento.query.order_by(Departamento.nome.asc()).all()
     total_solicitacoes_pendentes = 0
     try:
         total_solicitacoes_pendentes = SolicitacaoCorrecao.query.filter_by(status="Pendente").count()
@@ -1371,6 +1628,7 @@ def admin_usuarios():
     return render_admin_shell(
         initial_view="usuarios",
         usuarios=usuarios,
+        departamentos=departamentos,
         total_solicitacoes_pendentes=total_solicitacoes_pendentes,
     )
 
