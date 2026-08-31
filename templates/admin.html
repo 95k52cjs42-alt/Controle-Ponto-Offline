@@ -448,9 +448,15 @@
             padding: 1.25rem 1.5rem;
             margin-bottom: 1rem;
             display: grid;
-            grid-template-columns: 1fr 180px 260px;
+            grid-template-columns: 1fr 180px minmax(280px, auto);
             align-items: center;
             gap: 15px;
+        }
+        @media (max-width: 992px) {
+            .user-card {
+                grid-template-columns: 1fr;
+            }
+            .user-actions { flex-wrap: wrap; }
         }
         .user-info { display: flex; align-items: center; gap: 14px; }
         .user-role { text-align: left; }
@@ -651,15 +657,30 @@
                         <i class="bi bi-file-earmark-spreadsheet"></i> 
                         Exportar Relatório
                     </button>
+
+                    <a href="{{ url_for('admin_exportar_afd') }}" class="quick-action-btn">
+                        <i class="bi bi-file-earmark-text"></i>
+                        Gerar AFD (Portaria 671)
+                    </a>
                     
                     <button class="quick-action-btn" data-bs-toggle="modal" data-bs-target="#modalLembrete">
                         <i class="bi bi-megaphone"></i> 
                         Enviar Lembrete
                     </button>
+
+                    <button type="button" class="quick-action-btn" data-bs-toggle="modal" data-bs-target="#modalLancarPontoManual">
+                        <i class="bi bi-clock-history"></i> 
+                        Lançar Ponto Manual
+                    </button>
                     
                     <button type="button" class="quick-action-btn" data-bs-toggle="modal" data-bs-target="#modalNovoUsuario">
                         <i class="bi bi-person-plus"></i> 
                         Novo Colaborador
+                    </button>
+
+                    <button type="button" class="quick-action-btn" data-bs-toggle="modal" data-bs-target="#modalInformarFeriado">
+                        <i class="bi bi-calendar-event"></i> 
+                        Informar Feriado
                     </button>
                 </div>
             </div>
@@ -689,9 +710,9 @@
             </div>
         </div>
 
-        <!-- Widget: Atividades Recentes -->
+        <!-- Widget: Atividades Recentes e Feriados / Alertas -->
         <div class="row">
-            <div class="col-12">
+            <div class="col-lg-7">
                 <div class="dashboard-card">
                     <div class="d-flex justify-content-between align-items-center mb-3">
                         <h5 class="fw-bold m-0">Atividades Recentes</h5>
@@ -723,6 +744,63 @@
                     </div>
                 </div>
             </div>
+            <div class="col-lg-5">
+                <!-- Card de Feriados do Mês -->
+                <div class="dashboard-card mb-4">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h5 class="fw-bold m-0"><i class="bi bi-calendar-check text-primary me-2"></i>Feriados do Mês</h5>
+                        <button type="button" class="btn btn-sm btn-outline-primary rounded-3" data-bs-toggle="modal" data-bs-target="#modalInformarFeriado">
+                            <i class="bi bi-plus-lg"></i> Novo
+                        </button>
+                    </div>
+                    {% if feriados %}
+                        <div class="list-group list-group-flush border-0">
+                            {% for f in feriados %}
+                                <div class="list-group-item bg-transparent d-flex justify-content-between align-items-center px-0 py-2 border-secondary border-opacity-25">
+                                    <div>
+                                        <span class="badge bg-danger rounded-pill me-2">{{ f.data.strftime('%d/%m') }}</span>
+                                        <span class="fw-medium" style="color: var(--text-main);">{{ f.descricao }}</span>
+                                    </div>
+                                    <form method="POST" action="{{ url_for('excluir_feriado', id=f.id) }}" class="d-inline" onsubmit="return confirm('Deseja remover este feriado?');">
+                                        <button type="submit" class="btn btn-link text-danger p-0 border-0 shadow-none ms-2" title="Excluir feriado">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    </form>
+                                </div>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <div class="text-center py-3 text-muted small">
+                            <i class="bi bi-calendar-x d-block fs-4 mb-1"></i>
+                            Nenhum feriado cadastrado para este mês.
+                        </div>
+                    {% endif %}
+                </div>
+
+                <div class="dashboard-card">
+                    <h5 class="fw-bold mb-3">Alertas de Conformidade (CLT)</h5>
+                    <div class="activity-list">
+                        {% if alertas_clt %}
+                            {% for alerta in alertas_clt %}
+                            <div class="activity-item">
+                                <div class="activity-icon alerta">
+                                    <i class="bi bi-exclamation-triangle"></i>
+                                </div>
+                                <div class="activity-content">
+                                    <span class="fw-bold d-block">{{ alerta.nome }}</span>
+                                    <span class="text-muted small">{{ alerta.msg }}</span>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        {% else %}
+                            <div class="text-center py-4 text-muted">
+                                <i class="bi bi-shield-check fs-3 d-block mb-1 text-success"></i>
+                                Tudo em conformidade!
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
         </div>
         </div>
 
@@ -731,6 +809,53 @@
     <!-- ========================================== -->
     <!-- MODAIS POSICIONADOS CORRETAMENTE NA RAIZ -->
     <!-- ========================================== -->
+
+    <!-- Modal: Gerenciar Departamentos -->
+    <div class="modal fade" id="modalDepartamentos" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content" style="background: var(--card-bg); border: 1px solid var(--card-border); color: var(--text-main); border-radius: var(--radius-main); padding: 1rem;">
+                <div class="modal-header border-0 pb-1">
+                    <h5 class="modal-title fw-bold d-flex align-items-center gap-2" style="font-size: 1.2rem;">
+                        <i class="bi bi-building text-info"></i> Gestão de Departamentos
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                
+                <div class="modal-body pt-2">
+                    <form method="POST" action="{{ url_for('gerenciar_departamentos') }}" class="mb-4">
+                        <label class="form-label text-muted small fw-semibold">Novo Departamento / Setor</label>
+                        <div class="input-group">
+                            <input type="text" name="nome" class="form-control" placeholder="Ex: Tecnologia, Recursos Humanos" required style="background: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main); border-radius: var(--radius-btn) 0 0 var(--radius-btn);">
+                            <button type="submit" class="btn btn-primary px-3" style="border-radius: 0 var(--radius-btn) var(--radius-btn) 0;">
+                                <i class="bi bi-plus-lg me-1"></i> Criar
+                            </button>
+                        </div>
+                    </form>
+
+                    <h6 class="fw-bold small text-muted text-uppercase mb-2">Departamentos Existentes</h6>
+                    <div style="max-height: 220px; overflow-y: auto;" class="d-flex flex-column gap-2">
+                        {% if departamentos %}
+                            {% for d in departamentos %}
+                                <div class="d-flex align-items-center justify-content-between p-2 rounded-3" style="background: var(--bg-dark); border: 1px solid var(--card-border);">
+                                    <div>
+                                        <span class="fw-semibold text-main small d-block"><i class="bi bi-building me-1 text-info"></i>{{ d.nome }}</span>
+                                        <span class="text-muted" style="font-size: 0.75rem;">{{ d.usuarios|length }} colaborador(es)</span>
+                                    </div>
+                                    <form action="{{ url_for('excluir_departamento', id=d.id) }}" method="POST" onsubmit="return confirm('Deseja excluir este departamento?');">
+                                        <button type="submit" class="btn btn-sm text-danger border-0 bg-transparent p-1" title="Excluir">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    </form>
+                                </div>
+                            {% endfor %}
+                        {% else %}
+                            <p class="text-muted small text-center py-3 mb-0">Nenhum departamento cadastrado.</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- Modal: Enviar Lembrete Geral -->
     <div class="modal fade" id="modalLembrete" tabindex="-1" aria-hidden="true">
@@ -753,6 +878,94 @@
 
                         <button type="submit" class="btn btn-primary w-100 py-3 d-flex align-items-center justify-content-center gap-2 shadow-sm" style="border-radius: var(--radius-btn); font-weight: 600; font-size: 0.95rem;">
                             <i class="bi bi-send"></i> Enviar Notificação
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Lançar Ponto Manual -->
+    <div class="modal fade" id="modalLancarPontoManual" tabindex="-1" aria-labelledby="modalLancarPontoManualLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content" style="background: var(--card-bg); border: 1px solid var(--card-border); color: var(--text-main); border-radius: var(--radius-main); padding: 1rem;">
+                <div class="modal-header border-0">
+                    <h5 class="modal-title fw-bold" style="color: var(--text-main);" id="modalLancarPontoManualLabel">
+                        <i class="bi bi-clock-history text-primary me-2"></i>Lançamento Manual de Ponto
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <form method="POST" action="{{ url_for('admin_lancar_ponto_manual') }}">
+                    <div class="modal-body">
+                        <!-- Busca e Seleção de Colaborador -->
+                        <div class="mb-3">
+                            <label class="form-label text-muted small fw-semibold">Colaborador</label>
+                            
+                            <div style="position: relative;" class="mb-2">
+                                <i class="bi bi-search" style="position: absolute; left: 1rem; top: 50%; transform: translateY(-50%); color: var(--text-muted);"></i>
+                                <input type="text" id="searchColaboradorLancarPonto" class="form-control" placeholder="Buscar colaborador por nome ou e-mail..." style="background: var(--bg-dark); border: 1px solid var(--card-border); padding: 0.65rem 1rem 0.65rem 2.8rem; color: var(--text-main); border-radius: var(--radius-btn); font-size: 0.9rem;">
+                            </div>
+
+                            <input type="hidden" name="usuario_id" id="selectedUsuarioIdLancarPonto" required>
+
+                            <div id="listaColaboradoresLancarPonto" style="max-height: 180px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding-right: 4px; border: 1px solid var(--card-border); border-radius: var(--radius-btn); padding: 6px; background: var(--bg-dark);">
+                                {% if usuarios %}
+                                    {% for u in usuarios %}
+                                    <div class="colaborador-item-lancar p-2 rounded-3 d-flex align-items-center justify-content-between" 
+                                         style="cursor: pointer; transition: all 0.2s ease;"
+                                         data-id="{{ u.id }}"
+                                         data-name="{{ u.nome|lower }}"
+                                         data-email="{{ u.email|lower }}"
+                                         data-nome-exibicao="{{ u.nome }}">
+                                        <div class="d-flex align-items-center gap-2">
+                                            <div class="d-flex align-items-center justify-content-center text-white fw-bold rounded-circle" style="width: 32px; height: 32px; background: var(--blue-accent); font-size: 0.85rem; flex-shrink: 0;">
+                                                {{ u.nome[0]|upper if u.nome else 'U' }}
+                                            </div>
+                                            <div>
+                                                <span class="d-block fw-semibold text-main" style="font-size: 0.85rem; line-height: 1.2;">{{ u.nome }}</span>
+                                                <span class="text-muted" style="font-size: 0.75rem;">{{ u.email }}</span>
+                                            </div>
+                                        </div>
+                                        <i class="bi bi-check-circle-fill text-primary selected-check d-none"></i>
+                                    </div>
+                                    {% endfor %}
+                                {% else %}
+                                    <div class="text-center py-3 text-muted small">Nenhum colaborador encontrado.</div>
+                                {% endif %}
+                            </div>
+                            <div id="colaboradorSelecionadoInfo" class="mt-2 text-primary small fw-semibold d-none">
+                                <i class="bi bi-person-check-fill me-1"></i> Selecionado: <span id="nomeColaboradorSelecionado"></span>
+                            </div>
+                        </div>
+
+                        <div class="row g-2 mb-3">
+                            <div class="col-md-6">
+                                <label for="dataLancarPonto" class="form-label text-muted small fw-semibold">Data do Registro</label>
+                                <input type="date" class="form-control" id="dataLancarPonto" name="data" required style="background: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main); border-radius: var(--radius-btn); padding: 0.65rem;">
+                            </div>
+                            <div class="col-md-6">
+                                <label for="horaLancarPonto" class="form-label text-muted small fw-semibold">Horário</label>
+                                <input type="time" class="form-control" id="horaLancarPonto" name="hora" required style="background: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main); border-radius: var(--radius-btn); padding: 0.65rem;">
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="tipoLancarPonto" class="form-label text-muted small fw-semibold">Tipo de Ponto</label>
+                            <select class="form-select" id="tipoLancarPonto" name="tipo" required style="background: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main); border-radius: var(--radius-btn); padding: 0.65rem;">
+                                <option value="Entrada">Entrada</option>
+                                <option value="Almoço">Almoço</option>
+                                <option value="Retorno">Retorno</option>
+                                <option value="Saída">Saída</option>
+                            </select>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="justificativaLancarPonto" class="form-label text-muted small fw-semibold">Justificativa / Observação (opcional)</label>
+                            <textarea class="form-control" id="justificativaLancarPonto" name="justificativa" rows="2" placeholder="Motivo do lançamento manual..." style="background: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main); border-radius: var(--radius-btn); padding: 0.65rem; resize: none;"></textarea>
+                        </div>
+
+                        <button type="submit" class="btn btn-primary w-100 py-3 mt-2 shadow-sm d-flex align-items-center justify-content-center gap-2" style="border-radius: var(--radius-btn); font-weight: 600;">
+                            <i class="bi bi-check-circle"></i> Confirmar Lançamento
                         </button>
                     </div>
                 </form>
@@ -970,6 +1183,7 @@
                 });
             };
         }
+        window.bindAdminSearch = bindAdminSearch;
 
         const fragmentCache = {};
 
@@ -1019,10 +1233,9 @@
 
         const initialView = '{{ initial_view|default("painel") }}';
         window.addEventListener('DOMContentLoaded', () => {
-            const target = document.querySelector(`.js-admin-nav[data-admin-view="${initialView}"]`);
-            if (target) {
-                const url = target.dataset.targetUrl || '/admin';
-                loadAdminView(initialView, url);
+            const contentWrap = document.getElementById('adminContent');
+            if (contentWrap && contentWrap.innerHTML.trim() !== '') {
+                fragmentCache[initialView] = contentWrap.innerHTML;
             }
         });
 
@@ -1138,6 +1351,67 @@
             document.getElementById('stepUserList').style.display = 'block';
         });
 
+        // Lógica para Busca e Seleção de Colaborador no Modal de Lançamento Manual
+        const searchColabInput = document.getElementById('searchColaboradorLancarPonto');
+        if (searchColabInput) {
+            searchColabInput.addEventListener('input', function() {
+                const filter = this.value.toLowerCase().trim();
+                const items = document.querySelectorAll('.colaborador-item-lancar');
+                items.forEach(item => {
+                    const name = item.getAttribute('data-name') || '';
+                    const email = item.getAttribute('data-email') || '';
+                    if (name.includes(filter) || email.includes(filter)) {
+                        item.style.display = 'flex';
+                    } else {
+                        item.style.display = 'none';
+                    }
+                });
+            });
+        }
+
+        // Seleção do Colaborador
+        document.querySelectorAll('.colaborador-item-lancar').forEach(item => {
+            item.addEventListener('click', function() {
+                // Limpa seleções anteriores
+                document.querySelectorAll('.colaborador-item-lancar').forEach(el => {
+                    el.style.background = 'transparent';
+                    const check = el.querySelector('.selected-check');
+                    if (check) check.classList.add('d-none');
+                });
+
+                // Seleciona o atual
+                this.style.background = 'rgba(37, 99, 235, 0.15)';
+                const checkIcon = this.querySelector('.selected-check');
+                if (checkIcon) checkIcon.classList.remove('d-none');
+
+                const id = this.getAttribute('data-id');
+                const nomeExibicao = this.getAttribute('data-nome-exibicao');
+
+                document.getElementById('selectedUsuarioIdLancarPonto').value = id;
+                document.getElementById('nomeColaboradorSelecionado').textContent = nomeExibicao;
+                document.getElementById('colaboradorSelecionadoInfo').classList.remove('d-none');
+            });
+        });
+
+        // Pré-preenchimento de Data e Hora ao abrir o Modal
+        const modalLancarPonto = document.getElementById('modalLancarPontoManual');
+        if (modalLancarPonto) {
+            modalLancarPonto.addEventListener('show.bs.modal', function () {
+                const now = new Date();
+                
+                // Formato YYYY-MM-DD para o input[type="date"]
+                const year = now.getFullYear();
+                const month = String(now.getMonth() + 1).padStart(2, '0');
+                const day = String(now.getDate()).padStart(2, '0');
+                document.getElementById('dataLancarPonto').value = `${year}-${month}-${day}`;
+
+                // Formato HH:MM para o input[type="time"]
+                const hours = String(now.getHours()).padStart(2, '0');
+                const minutes = String(now.getMinutes()).padStart(2, '0');
+                document.getElementById('horaLancarPonto').value = `${hours}:${minutes}`;
+            });
+        }
+
         // Limpeza de backdrop dos modais por segurança
         document.querySelectorAll('[data-bs-dismiss="modal"]').forEach(element => {
             element.addEventListener('click', function () {
@@ -1148,5 +1422,69 @@
             });
         });
     </script>
+<!-- Modal Global Configurar Usuário -->
+<div class="modal fade" id="modalConfigurarUsuario" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content" style="background: var(--card-bg); border: 1px solid var(--card-border); color: var(--text-main); border-radius: var(--radius-main);">
+            <div class="modal-header border-bottom border-secondary border-opacity-25 py-3">
+                <h6 class="modal-title fw-bold"><i class="bi bi-sliders me-1 text-primary"></i> Configurar: <span id="modalUserName"></span></h6>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form id="formConfigurarUsuario" method="POST">
+                <div class="modal-body py-3">
+                    <div class="mb-3">
+                        <label class="form-label small fw-semibold text-muted">Departamento / Setor</label>
+                        <select name="departamento_id" id="modalUserDepartamento" class="form-select form-select-sm" style="background: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main);">
+                            <option value="none">Nenhum Departamento</option>
+                            {% for d in departamentos %}
+                                <option value="{{ d.id }}">{{ d.nome }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <h6 class="fw-bold small text-primary mb-2"><i class="bi bi-shield-lock me-1"></i> Permissões Granulares</h6>
+                    <div id="alertAdminGeral" class="alert alert-info py-2 px-3 small mb-3 border-0 d-none" style="background: rgba(37, 99, 235, 0.15); color: var(--text-main);">
+                        <i class="bi bi-info-circle me-1 text-primary"></i> Usuário é <b>Administrador Geral</b>.
+                    </div>
+
+                    <div class="row g-3">
+                        <div class="col-6"><div class="form-check form-switch small"><input class="form-check-input" type="checkbox" name="pode_ver_dashboard" id="perm_dash"><label class="form-check-label" for="perm_dash">Ver Dashboard</label></div></div>
+                        <div class="col-6"><div class="form-check form-switch small"><input class="form-check-input" type="checkbox" name="pode_ver_historico" id="perm_hist"><label class="form-check-label" for="perm_hist">Ver Históricos</label></div></div>
+                        <div class="col-6"><div class="form-check form-switch small"><input class="form-check-input" type="checkbox" name="pode_lancar_ponto_manual" id="perm_ponto"><label class="form-check-label" for="perm_ponto">Lançar Ponto</label></div></div>
+                        <div class="col-6"><div class="form-check form-switch small"><input class="form-check-input" type="checkbox" name="pode_aprovar_solicitacoes" id="perm_solic"><label class="form-check-label" for="perm_solic">Aprovar Correções</label></div></div>
+                        <div class="col-6"><div class="form-check form-switch small"><input class="form-check-input" type="checkbox" name="pode_exportar_relatorios" id="perm_exp"><label class="form-check-label" for="perm_exp">Exportar Relatórios</label></div></div>
+                        <div class="col-6"><div class="form-check form-switch small"><input class="form-check-input" type="checkbox" name="pode_gerenciar_feriados" id="perm_fer"><label class="form-check-label" for="perm_fer">Gerenciar Feriados</label></div></div>
+                    </div>
+                </div>
+                <div class="modal-footer border-top border-secondary border-opacity-25 py-2">
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-check-lg me-1"></i> Salvar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+    const modalConfigurar = document.getElementById('modalConfigurarUsuario');
+    if (modalConfigurar) {
+        modalConfigurar.addEventListener('show.bs.modal', function (event) {
+            const button = event.relatedTarget;
+            const form = document.getElementById('formConfigurarUsuario');
+            
+            form.action = `/admin/usuarios/${button.getAttribute('data-user-id')}/atualizar`;
+            document.getElementById('modalUserName').textContent = button.getAttribute('data-user-nome');
+            document.getElementById('modalUserDepartamento').value = button.getAttribute('data-user-departamento');
+            
+            const isAdmin = button.getAttribute('data-is-admin') === 'true';
+            document.getElementById('alertAdminGeral').classList.toggle('d-none', !isAdmin);
+            
+            ['dashboard', 'historico', 'ponto', 'solic', 'exp', 'fer'].forEach(p => {
+                document.getElementById(`perm_${p}`).checked = button.getAttribute(`data-perm-${p}`) === 'true';
+            });
+        });
+    }
+</script>
+
 </body>
 </html>

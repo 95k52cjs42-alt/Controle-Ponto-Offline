@@ -286,11 +286,16 @@
                             <!-- FIM DAS NOTIFICAÇÕES -->
 
                             <li class="nav-item ms-lg-2">
-                                <div class="user-pill d-flex align-items-center gap-2">
-                                    <div class="bg-primary text-white rounded-circle d-flex align-items-center justify-content-center fw-bold small" style="width: 26px; height: 26px;">
-                                        {{ current_user.nome[0] | upper if current_user.nome else 'U' }}
-                                    </div>
+                                <div class="user-pill d-flex align-items-center gap-2" style="cursor: pointer;" data-bs-toggle="modal" data-bs-target="#modalFotoPerfil" title="Alterar foto de perfil">
+                                    {% if current_user.foto_url %}
+                                        <img src="{{ current_user.foto_url }}" alt="Foto" class="rounded-circle object-fit-cover" style="width: 28px; height: 28px; border: 1px solid var(--btn-bg);">
+                                    {% else %}
+                                        <div class="bg-primary text-white rounded-circle d-flex align-items-center justify-content-center fw-bold small" style="width: 28px; height: 28px;">
+                                            {{ current_user.nome[0] | upper if current_user.nome else 'U' }}
+                                        </div>
+                                    {% endif %}
                                     <span class="small fw-semibold text-dark">{{ current_user.nome }}</span>
+                                    <i class="bi bi-camera text-muted small ms-1"></i>
                                 </div>
                             </li>
 
@@ -305,6 +310,39 @@
             </div>
         </div>
     </nav>
+
+    <!-- Modal Alterar Foto de Perfil -->
+    {% if current_user.is_authenticated %}
+    <div class="modal fade" id="modalFotoPerfil" tabindex="-1" aria-labelledby="modalFotoPerfilLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-sm">
+            <div class="modal-content text-dark" style="background-color: var(--bg-card); border-color: var(--border-color);">
+                <div class="modal-header border-bottom border-secondary border-opacity-25 py-2">
+                    <h6 class="modal-title fw-bold" id="modalFotoPerfilLabel"><i class="bi bi-person-circle me-1"></i> Foto de Perfil</h6>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <form action="{{ url_for('upload_foto_perfil') }}" method="POST" enctype="multipart/form-data">
+                    <div class="modal-body text-center py-3">
+                        <div class="mb-3">
+                            {% if current_user.foto_url %}
+                                <img src="{{ current_user.foto_url }}" class="rounded-circle object-fit-cover mb-2 shadow" style="width: 90px; height: 90px; border: 2px solid var(--btn-bg);">
+                            {% else %}
+                                <div class="bg-primary text-white rounded-circle d-inline-flex align-items-center justify-content-center fw-bold fs-2 mb-2 shadow" style="width: 90px; height: 90px;">
+                                    {{ current_user.nome[0] | upper if current_user.nome else 'U' }}
+                                </div>
+                            {% endif %}
+                        </div>
+                        <label for="fotoInput" class="form-label small text-muted">Selecione uma imagem (PNG, JPG, JPEG)</label>
+                        <input class="form-control form-control-sm" type="file" id="fotoInput" name="foto" accept="image/*" required>
+                    </div>
+                    <div class="modal-footer border-top border-secondary border-opacity-25 py-2">
+                        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+                        <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-upload me-1"></i> Enviar Foto</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    {% endif %}
 
     <!-- Conteúdo Dinâmico -->
     <main class="container mb-5">
