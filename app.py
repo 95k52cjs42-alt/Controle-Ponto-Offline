@@ -1110,6 +1110,34 @@ def admin_lancar_ponto_manual():
     flash(f"Ponto de {usuario_alvo.nome} lançado com sucesso!", "success")
     return redirect(request.referrer or url_for("admin"))
 
+@app.route("/admin/excluir-ponto/<int:ponto_id>", methods=["POST"])
+@login_required
+@admin_required
+def admin_excluir_ponto(ponto_id):
+    """Exclui um registro de ponto (apenas admin/RH). Usado para remover duplicatas."""
+    ponto = RegistroPonto.query.get_or_404(ponto_id)
+    usuario_alvo = Usuario.query.get(ponto.usuario_id)
+
+    # Salvar dados para o log de auditoria ANTES de excluir
+    nome_usuario = usuario_alvo.nome if usuario_alvo else "Usuário"
+    desc_log = (
+        f"Excluiu ponto ({ponto.tipo}) de {nome_usuario} "
+        f"para o dia {ponto.data} às {ponto.hora}"
+    )
+
+    try:
+        db.session.delete(ponto)
+        db.session.commit()
+        _invalidar_notif_cache(ponto.usuario_id)
+    except Exception:
+        db.session.rollback()
+        flash("Erro ao excluir registro. Tente novamente.", "danger")
+        return redirect(url_for("admin_historico"))
+
+    registrar_log(current_user.id, desc_log, entidade_id=ponto.usuario_id)
+    flash(f"Ponto ({ponto.tipo}) de {nome_usuario} excluído com sucesso!", "success")
+    return redirect(url_for("admin_historico"))
+
 @app.route("/admin/cadastrar_usuario", methods=["POST"])
 @admin_required
 def admin_cadastrar_usuario():
