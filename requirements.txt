@@ -11,3 +11,4 @@ pandas
 openpyxl
 python-dotenv
 holidays
+requests

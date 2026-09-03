@@ -33,8 +33,6 @@
                 <select class="form-select" id="tipo_ponto" name="tipo_ponto">
                     <option value="">Todos</option>
                     <option value="Entrada" {% if tipo_ponto == 'Entrada' %}selected{% endif %}>Entrada</option>
-                    <option value="Almoço" {% if tipo_ponto == 'Almoço' %}selected{% endif %}>Almoço</option>
-                    <option value="Retorno" {% if tipo_ponto == 'Retorno' %}selected{% endif %}>Retorno</option>
                     <option value="Saída" {% if tipo_ponto == 'Saída' %}selected{% endif %}>Saída</option>
                 </select>
             </div>
@@ -84,10 +82,6 @@
                     <td class="text-center">
                         {% if reg.tipo == 'Entrada' %}
                             <span class="badge badge-entrada px-3 py-2 rounded-pill fw-semibold">Entrada</span>
-                        {% elif reg.tipo == 'Almoço' %}
-                            <span class="badge badge-almoco px-3 py-2 rounded-pill fw-semibold">Almoço</span>
-                        {% elif reg.tipo == 'Retorno' %}
-                            <span class="badge badge-retorno px-3 py-2 rounded-pill fw-semibold">Retorno</span>
                         {% elif reg.tipo == 'Saída' %}
                             <span class="badge badge-saida px-3 py-2 rounded-pill fw-semibold">Saída</span>
                         {% else %}

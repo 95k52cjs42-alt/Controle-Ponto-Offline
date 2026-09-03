@@ -413,8 +413,6 @@
         }
 
         .badge-entrada { background: rgba(16, 185, 129, 0.2) !important; color: #34d399 !important; border: 1px solid rgba(16, 185, 129, 0.3); }
-        .badge-almoco { background: rgba(245, 158, 11, 0.2) !important; color: #fbbf24 !important; border: 1px solid rgba(245, 158, 11, 0.3); }
-        .badge-retorno { background: rgba(14, 165, 233, 0.2) !important; color: #38bdf8 !important; border: 1px solid rgba(14, 165, 233, 0.3); }
         .badge-saida { background: rgba(239, 68, 68, 0.2) !important; color: #f87171 !important; border: 1px solid rgba(239, 68, 68, 0.3); }
         .badge-ajustado { background: rgba(148, 163, 184, 0.08) !important; color: var(--text-muted) !important; border: 1px solid var(--card-border); }
 
@@ -605,6 +603,25 @@
             </div>
         </div>
 
+        <!-- Flash Messages (feedback das ações do admin) -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="mb-4 d-flex flex-column gap-2">
+                    {% for category, message in messages %}
+                        {% set cat = 'warning' if category == 'message' else category %}
+                        {% set cat = 'info' if cat not in ['danger', 'success', 'warning'] else cat %}
+                        <div class="alert alert-{{ cat }} alert-dismissible fade show border-0 shadow-sm rounded-4 mb-0 d-flex justify-content-between align-items-center" role="alert">
+                            <div class="d-flex align-items-center gap-2">
+                                <i class="bi {{ 'bi-exclamation-triangle-fill' if cat == 'warning' else 'bi-x-circle-fill' if cat == 'danger' else 'bi-check-circle-fill' if cat == 'success' else 'bi-info-circle-fill' }}"></i>
+                                <span>{{ message }}</span>
+                            </div>
+                            <button type="button" class="btn-close ms-2" data-bs-dismiss="alert" aria-label="Fechar"></button>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
+
         <div id="adminContent">
             <!-- Cabeçalho do Dashboard -->
             <div class="mb-4">
@@ -749,9 +766,39 @@
                 <div class="dashboard-card mb-4">
                     <div class="d-flex justify-content-between align-items-center mb-3">
                         <h5 class="fw-bold m-0"><i class="bi bi-calendar-check text-primary me-2"></i>Feriados do Mês</h5>
-                        <button type="button" class="btn btn-sm btn-outline-primary rounded-3" data-bs-toggle="modal" data-bs-target="#modalInformarFeriado">
-                            <i class="bi bi-plus-lg"></i> Novo
+                        <div class="d-flex gap-2">
+                            <form method="POST" action="{{ url_for('sincronizar_feriados') }}" class="d-inline" title="Adicionar automaticamente os feriados nacionais e da região configurada">
+                                <button type="submit" class="btn btn-sm btn-outline-secondary rounded-3">
+                                    <i class="bi bi-arrow-repeat"></i> Sincronizar
+                                </button>
+                            </form>
+                            <button type="button" class="btn btn-sm btn-outline-primary rounded-3" data-bs-toggle="modal" data-bs-target="#modalInformarFeriado">
+                                <i class="bi bi-plus-lg"></i> Novo
+                            </button>
+                        </div>
+                    </div>
+                    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+                        <span class="badge rounded-pill py-1 px-3" id="regiaoBadge" style="background: rgba(37, 99, 235, 0.15); color: var(--text-main); border: 1px solid var(--card-border); font-weight: 500;">
+                            <i class="bi bi-geo-alt me-1"></i>
+                            <span id="regiaoBadgeTexto">
+                                {% if regiao_fonte == 'env' %}{{ regiao_uf }} (definido no servidor)
+                                {% elif regiao_uf == 'BR' %}Feriados nacionais (BR)
+                                {% else %}{{ regiao_uf }}{% if regiao_cidade %} – {{ regiao_cidade }}{% endif %}{% if regiao_fonte == 'manual' %} (manual){% endif %}{% endif %}
+                            </span>
+                        </span>
+                        <button type="button" class="btn btn-sm btn-outline-secondary rounded-3" id="btnDetectarRegiao" title="Detectar a região pela sua localização atual">
+                            <i class="bi bi-crosshair"></i> Detectar região
                         </button>
+                        <form method="POST" action="{{ url_for('definir_regiao_feriados') }}" class="d-inline-flex align-items-center gap-1">
+                            <select id="selectRegiaoUf" name="uf" class="form-select form-select-sm" style="width: auto;" title="Definir manualmente a região dos feriados">
+                                <option value="BR" {% if regiao_uf == 'BR' %}selected{% endif %}>BR – Nacional</option>
+                                {% for sigla, nome in ufs_brasil.items() %}
+                                    <option value="{{ sigla }}" {% if regiao_uf == sigla %}selected{% endif %}>{{ sigla }} – {{ nome }}</option>
+                                {% endfor %}
+                            </select>
+                            <button type="submit" class="btn btn-sm btn-outline-secondary rounded-3" title="Aplicar região"><i class="bi bi-check-lg"></i></button>
+                        </form>
+                        <input type="hidden" id="regiaoFonte" value="{{ regiao_fonte }}">
                     </div>
                     {% if feriados %}
                         <div class="list-group list-group-flush border-0">
@@ -761,11 +808,13 @@
                                         <span class="badge bg-danger rounded-pill me-2">{{ f.data.strftime('%d/%m') }}</span>
                                         <span class="fw-medium" style="color: var(--text-main);">{{ f.descricao }}</span>
                                     </div>
+                                    {% if f.id %}
                                     <form method="POST" action="{{ url_for('excluir_feriado', id=f.id) }}" class="d-inline" onsubmit="return confirm('Deseja remover este feriado?');">
                                         <button type="submit" class="btn btn-link text-danger p-0 border-0 shadow-none ms-2" title="Excluir feriado">
                                             <i class="bi bi-trash"></i>
                                         </button>
                                     </form>
+                                    {% endif %}
                                 </div>
                             {% endfor %}
                         </div>
@@ -953,8 +1002,6 @@
                             <label for="tipoLancarPonto" class="form-label text-muted small fw-semibold">Tipo de Ponto</label>
                             <select class="form-select" id="tipoLancarPonto" name="tipo" required style="background: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main); border-radius: var(--radius-btn); padding: 0.65rem;">
                                 <option value="Entrada">Entrada</option>
-                                <option value="Almoço">Almoço</option>
-                                <option value="Retorno">Retorno</option>
                                 <option value="Saída">Saída</option>
                             </select>
                         </div>
@@ -1227,6 +1274,7 @@
                 setActiveNav(viewName);
                 if (typeof window.bindAdminSearch === 'function') window.bindAdminSearch();
                 if (viewName === 'painel') initCharts();
+                if (viewName === 'painel') initRegionControls();
                 if (viewName === 'historico') initHistoricoFadeAlert(contentWrap);
             } catch (err) {
                 if (err.name !== 'AbortError') {
@@ -1246,6 +1294,16 @@
         });
 
         bindAdminSearch();
+        initRegionControls();
+
+        // Auto-dismiss dos alerts de flash messages do admin após alguns segundos
+        setTimeout(function() {
+            document.querySelectorAll('.container .alert.alert-dismissible').forEach(function(alert) {
+                if (alert && typeof bootstrap !== 'undefined' && bootstrap.Alert) {
+                    new bootstrap.Alert(alert).close();
+                }
+            });
+        }, 6000);
 
         // ------------------------------------------------------------------
         // Filtro do Histórico Geral (event delegation)
@@ -1310,6 +1368,78 @@
                     .finally(function() { contentWrap.classList.remove('loading'); });
             }
         });
+
+        // ------------------------------------------------------------------
+        // Detecção de região dos feriados (geolocalização)
+        // ------------------------------------------------------------------
+        function atualizarBadgeRegiao(uf, cidade) {
+            const badgeTexto = document.getElementById('regiaoBadgeTexto');
+            if (!badgeTexto) return;
+            badgeTexto.textContent = (uf === 'BR') ? 'Feriados nacionais (BR)' : (cidade ? uf + ' – ' + cidade : uf);
+        }
+
+        function detectarRegiao() {
+            const badgeTexto = document.getElementById('regiaoBadgeTexto');
+            const btn = document.getElementById('btnDetectarRegiao');
+            if (!navigator.geolocation) {
+                if (badgeTexto) badgeTexto.textContent = 'Localização não suportada pelo navegador';
+                return;
+            }
+            if (btn) btn.disabled = true;
+            const textoAnterior = badgeTexto ? badgeTexto.textContent : '';
+            if (badgeTexto) badgeTexto.textContent = 'Detectando localização…';
+            navigator.geolocation.getCurrentPosition(
+                async function (pos) {
+                    try {
+                        const resposta = await fetch('/api/localizacao', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                lat: pos.coords.latitude,
+                                lng: pos.coords.longitude
+                            })
+                        });
+                        const dados = await resposta.json();
+                        if (dados.status === 'ok') {
+                            atualizarBadgeRegiao(dados.uf, dados.cidade);
+                            // Recarrega o painel para exibir os feriados da nova região
+                            await loadAdminView('painel', '/admin');
+                        } else {
+                            if (badgeTexto) badgeTexto.textContent = 'Não foi possível identificar a região';
+                            if (dados.msg) console.error('Detecção de região:', dados.msg);
+                        }
+                    } catch (err) {
+                        if (badgeTexto) badgeTexto.textContent = 'Falha ao detectar localização';
+                        console.error('Detecção de região:', err);
+                    } finally {
+                        const novoBtn = document.getElementById('btnDetectarRegiao');
+                        if (novoBtn) novoBtn.disabled = false;
+                    }
+                },
+                function (erro) {
+                    if (badgeTexto) badgeTexto.textContent = 'Localização não liberada pelo navegador';
+                    const novoBtn = document.getElementById('btnDetectarRegiao');
+                    if (novoBtn) novoBtn.disabled = false;
+                },
+                { enableHighAccuracy: false, timeout: 8000, maximumAge: 600000 }
+            );
+        }
+
+        function initRegionControls() {
+            const btn = document.getElementById('btnDetectarRegiao');
+            if (!btn) return;
+            btn.onclick = function () { detectarRegiao(); };
+
+            // Se ainda não há nenhuma região configurada (nem env), tenta
+            // detectar automaticamente uma única vez por sessão do navegador.
+            const fonteInput = document.getElementById('regiaoFonte');
+            const fonteAtual = fonteInput ? fonteInput.value : '';
+            const jaTentou = sessionStorage.getItem('regiaoAutoDeteccao') === 'sim';
+            if (!fonteAtual && !jaTentou) {
+                sessionStorage.setItem('regiaoAutoDeteccao', 'sim');
+                if (navigator.geolocation) detectarRegiao();
+            }
+        }
 
         let weeklyChart, complianceChart;
 

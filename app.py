@@ -1,6 +1,7 @@
 import io
 import os
 import re
+import time
 import holidays
 import calendar
 
@@ -11,10 +12,13 @@ from datetime import datetime, timedelta, date
 from functools import wraps
 from zoneinfo import ZoneInfo
 
+import requests
+
 from flask import (
     Flask,
     flash,
     get_flashed_messages,
+    jsonify,
     redirect,
     render_template,
     request,
@@ -74,27 +78,333 @@ login_manager.login_view = "login"
 
 CARGA_HORARIA_DIARIA = timedelta(hours=8)
 
+# Siglas e nomes das UFs brasileiras (para o seletor manual e validações)
+UFS_BRASIL = {
+    "AC": "Acre", "AL": "Alagoas", "AP": "Amapá", "AM": "Amazonas",
+    "BA": "Bahia", "CE": "Ceará", "DF": "Distrito Federal", "ES": "Espírito Santo",
+    "GO": "Goiás", "MA": "Maranhão", "MT": "Mato Grosso", "MS": "Mato Grosso do Sul",
+    "MG": "Minas Gerais", "PA": "Pará", "PB": "Paraíba", "PR": "Paraná",
+    "PE": "Pernambuco", "PI": "Piauí", "RJ": "Rio de Janeiro", "RN": "Rio Grande do Norte",
+    "RS": "Rio Grande do Sul", "RO": "Rondônia", "RR": "Roraima", "SC": "Santa Catarina",
+    "SP": "São Paulo", "SE": "Sergipe", "TO": "Tocantins",
+}
+
+# Cache curto da região para não consultar o banco a cada chamada de
+# eh_dia_util/_feriados_do_mes (que acontecem em loops de meses inteiros).
+_REGIAO_CACHE = {"momento": 0.0, "regiao": None}
+_REGIAO_CACHE_TTL = 30  # segundos
+
+# Janela (em dias corridos) usada para calcular o alerta de faltas no painel
+# de notificações. Limita a varredura ao período recente, evitando consultar
+# todo o histórico do usuário a cada request (que causava lentidão em produção).
+NOTIF_JANELA_DIAS = 30
+
+# Cache em memória das notificações por usuário (TTL curto) para evitar
+# recalcular o alerta de faltas/pontos incompletos a cada request.
+# Estrutura: {user_id: {"momento": float, "notifs": [...]}}
+_NOTIF_CACHE = {}
+_NOTIF_CACHE_TTL = 30  # segundos
+
+# Cache em memória dos feriados (banco + biblioteca) por ano/região, para que
+# eh_dia_util e os loops de faltas não reconsultem o banco dia a dia.
+# Estrutura: {(ano, subdiv): {"momento": float, "feriados_db": set, "ignorados": set, "lib": set}}
+_FERIADOS_CACHE = {}
+_FERIADOS_CACHE_TTL = 300  # segundos (5 min)
+
+# API de reverse geocoding gratuita e sem chave (BigDataCloud)
+BIGDATACLOUD_URL = "https://api.bigdatacloud.net/data/reverse-geocode-client"
+
+
+def _get_config(chave, default=None):
+    """Lê um valor da tabela de configurações (None se ausente)."""
+    try:
+        reg = Configuracao.query.get(chave)
+        return reg.valor if reg is not None else default
+    except Exception:
+        return default
+
+
+def _set_config(chave, valor):
+    """Grava/atualiza um valor na tabela de configurações."""
+    reg = Configuracao.query.get(chave)
+    if reg is not None:
+        reg.valor = valor
+    else:
+        db.session.add(Configuracao(chave=chave, valor=valor))
+
+
+def _resolver_regiao():
+    """Resolve a região vigente dos feriados.
+
+    Precedência:
+      1. UF persistida na tabela ``configuracao`` (detectada por geolocalização
+         ou definida manualmente pelo admin);
+      2. variável de ambiente ``ESTADO_FERIADO`` (fallback do servidor);
+      3. ``'BR'`` (somente feriados nacionais).
+
+    Retorna ``(uf, cidade, fonte)``, onde ``fonte`` é ``''`` (nada configurado),
+    ``'env'``, ``'manual'`` ou ``'geo'``.
+    """
+    uf = _get_config("uf_feriado")
+    if uf:
+        uf = uf.strip().upper()
+        cidade = _get_config("cidade_feriado", "") or ""
+        fonte = (_get_config("regiao_fonte", "") or "").strip().lower()
+        return uf, cidade, fonte
+    estado_env = os.environ.get("ESTADO_FERIADO", "").strip().upper()
+    if estado_env:
+        return estado_env, "", "env"
+    return "BR", "", ""
+
+
+def _regiao_feriados(usar_cache=True):
+    """Retorna ``(estado, subdiv)`` conforme a região configurada.
+
+    Ex.: ``('SP', 'SP')`` (nacionais + estaduais de SP) ou ``('BR', None)``
+    (somente nacionais). O cache evita consultas repetidas ao banco.
+    """
+    global _REGIAO_CACHE
+    agora = time.time()
+    if not (
+        usar_cache
+        and _REGIAO_CACHE["regiao"] is not None
+        and agora - _REGIAO_CACHE["momento"] < _REGIAO_CACHE_TTL
+    ):
+        _REGIAO_CACHE = {"momento": agora, "regiao": _resolver_regiao()}
+    estado, _, _ = _REGIAO_CACHE["regiao"]
+    subdiv = estado if estado != "BR" else None
+    return estado, subdiv
+
+
+def _regiao_display():
+    """Resolução sem cache para os templates (badges/selectors)."""
+    return _resolver_regiao()
+
+
+def _invalidar_cache_regiao():
+    """Força a região a ser relida da configuração na próxima chamada."""
+    global _REGIAO_CACHE
+    _REGIAO_CACHE = {"momento": 0.0, "regiao": None}
+    # Ao trocar a região, os feriados da biblioteca mudam também
+    _FERIADOS_CACHE.clear()
+
+
+def _invalidar_notif_cache(user_id=None):
+    """Invalida o cache de notificações de um ou todos os usuários."""
+    if user_id is not None:
+        _NOTIF_CACHE.pop(user_id, None)
+    else:
+        _NOTIF_CACHE.clear()
+
+
+def _carregar_feriados(ano, subdiv):
+    """Carrega (com cache) os feriados do banco + biblioteca para um ano/região.
+
+    Retorna ``(feriados_db: set[date], ignorados: set[date], lib: set[date])``.
+    Evita reconsultar o banco e recriar o objeto ``holidays`` a cada chamada
+    de ``eh_dia_util``.
+    """
+    agora = time.time()
+    chave = (ano, subdiv)
+    cached = _FERIADOS_CACHE.get(chave)
+    if cached and (agora - cached["momento"]) < _FERIADOS_CACHE_TTL:
+        return cached["feriados_db"], cached["ignorados"], cached["lib"]
+
+    # 1 query para feriados do ano, 1 query para ignorados do ano
+    feriados_db = {
+        f.data
+        for f in Feriado.query.filter(
+            Feriado.data >= date(ano, 1, 1),
+            Feriado.data <= date(ano, 12, 31),
+        ).all()
+    }
+    ignorados = {
+        ig.data
+        for ig in FeriadoIgnorado.query.filter(
+            FeriadoIgnorado.data >= date(ano, 1, 1),
+            FeriadoIgnorado.data <= date(ano, 12, 31),
+        ).all()
+    }
+
+    lib = set()
+    try:
+        br_holidays = holidays.country_holidays("BR", subdiv=subdiv, years=ano)
+        lib = set(br_holidays.keys())
+    except Exception:
+        pass
+
+    _FERIADOS_CACHE[chave] = {
+        "momento": agora,
+        "feriados_db": feriados_db,
+        "ignorados": ignorados,
+        "lib": lib,
+    }
+    return feriados_db, ignorados, lib
+
+
+def _reverse_geocode(lat, lng):
+    """Converte coordenadas em ``(uf, cidade)`` via API BigDataCloud.
+
+    Retorna ``(None, None)`` caso não consiga resolver ou o ponto não esteja
+    no Brasil. As coordenadas não são armazenadas em lugar nenhum.
+    """
+    try:
+        resp = requests.get(
+            BIGDATACLOUD_URL,
+            params={
+                "latitude": lat,
+                "longitude": lng,
+                "localityLanguage": "pt",
+            },
+            timeout=8,
+        )
+        if resp.status_code != 200:
+            return None, None
+        dados = resp.json()
+        if str(dados.get("countryCode", "")).upper() != "BR":
+            return None, None
+        codigo = dados.get("principalSubdivisionCode") or ""
+        # Ex.: "BR-SP" -> "SP"
+        uf = codigo.split("-")[-1].strip().upper() if codigo else ""
+        if uf not in UFS_BRASIL:
+            return None, None
+        cidade = (dados.get("locality") or dados.get("city") or "").strip()
+        return uf, cidade
+    except Exception:
+        return None, None
+
+
 # Função auxiliar para verificar se a data cai em dia útil (Segunda a Sexta)
 def eh_dia_util(data_obj):
     if data_obj.weekday() >= 5:
         return False
-    
-    # Verifica feriado no banco de dados
-    feriado_db = Feriado.query.filter_by(data=data_obj).first()
-    if feriado_db:
-        return False
-        
-    # Verifica feriado na biblioteca
+
     try:
-        estado = os.environ.get("ESTADO_FERIADO", "BR")
-        subdiv = estado if estado != 'BR' else None
-        br_holidays = holidays.country_holidays('BR', subdiv=subdiv)
-        if data_obj in br_holidays:
+        # Usa cache de feriados (banco + biblioteca) para não reconsultar o
+        # banco e recriar o objeto holidays a cada chamada.
+        _, subdiv = _regiao_feriados()
+        feriados_db, ignorados, lib = _carregar_feriados(data_obj.year, subdiv)
+
+        # Feriado excluído pelo admin -> tratado como dia útil normal
+        if data_obj in ignorados:
+            return True
+
+        # Verifica feriado no banco de dados
+        if data_obj in feriados_db:
+            return False
+
+        # Verifica feriado na biblioteca (nacionais + estaduais da UF configurada)
+        if data_obj in lib:
             return False
     except Exception:
+        # Em caso de erro ao acessar banco ou biblioteca de feriados,
+        # trata como dia útil (mesma proteção do código original).
         pass
-        
+
     return True
+
+class FeriadoObj:
+    """Objeto simples para passar dados de feriado ao template."""
+    def __init__(self, data, descricao, id=None, fonte="manual"):
+        self.data = data
+        self.descricao = descricao
+        self.id = id
+        self.fonte = fonte
+
+def _sincronizar_feriados_lib(anos=None):
+    """Insere no banco os feriados da biblioteca `holidays` (nacionais + os
+    estaduais da UF em ESTADO_FERIADO) para os anos pedidos, sem duplicar nem
+    recriar os que o admin já excluiu. Retorna o número de feriados inseridos.
+
+    Também remove feriados ``fonte='auto'`` que deixaram de existir ao trocar
+    de estado, para o banco refletir a configuração atual.
+    """
+    hoje = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
+    if anos is None:
+        anos = {hoje.year - 1, hoje.year, hoje.year + 1}
+    anos = set(anos)
+
+    try:
+        _, subdiv = _regiao_feriados()
+        br_holidays = holidays.country_holidays("BR", subdiv=subdiv, years=list(anos))
+    except Exception as e:
+        print(f"AVISO: não foi possível carregar feriados da biblioteca: {e}")
+        return 0
+
+    ignorados = {ig.data for ig in FeriadoIgnorado.query.all()}
+    # Datas atuais de feriados automáticos no intervalo dos anos sincronizados
+    existente_auto = {
+        f.data: f for f in Feriado.query.filter(
+            Feriado.fonte == "auto",
+            Feriado.data >= date(min(anos), 1, 1),
+            Feriado.data <= date(max(anos), 12, 31),
+        ).all()
+    }
+
+    inseridos = 0
+
+    # 1) Remove feriados automáticos que não fazem parte da região atual
+    datas_lib = set(br_holidays.keys())
+    for data_auto, feriado in list(existente_auto.items()):
+        if data_auto not in datas_lib:
+            db.session.delete(feriado)
+
+    # 2) Insere os faltantes (respeitando os ignorados/existentes)
+    for dt, name in br_holidays.items():
+        if dt in ignorados:
+            continue
+        if dt in existente_auto:
+            continue
+        if Feriado.query.filter_by(data=dt).first():
+            continue
+        db.session.add(Feriado(data=dt, descricao=name, fonte="auto"))
+        inseridos += 1
+
+    try:
+        db.session.commit()
+        _FERIADOS_CACHE.clear()
+    except Exception:
+        db.session.rollback()
+        raise
+    return inseridos
+
+def _feriados_do_mes(hoje):
+    """Retorna lista de FeriadoObj (DB + biblioteca) para o mês de ``hoje``."""
+    mes_atual = hoje.month
+    ano_atual = hoje.year
+    _, last_day = calendar.monthrange(ano_atual, mes_atual)
+    start_date = date(ano_atual, mes_atual, 1)
+    end_date = date(ano_atual, mes_atual, last_day)
+
+    feriados_db = Feriado.query.filter(
+        Feriado.data >= start_date, Feriado.data <= end_date
+    ).all()
+
+    ignorados = {ig.data for ig in FeriadoIgnorado.query.filter(
+        FeriadoIgnorado.data >= start_date, FeriadoIgnorado.data <= end_date
+    ).all()}
+
+    feriados = []
+    # Feriados cadastrados no banco (ignorando os excluídos pelo admin)
+    for f in feriados_db:
+        if f.data in ignorados:
+            continue
+        feriados.append(FeriadoObj(f.data, f.descricao, f.id, f.fonte))
+
+    # Feriados da biblioteca (se não estiverem já no DB)
+    try:
+        _, subdiv = _regiao_feriados()
+        br_holidays = holidays.country_holidays("BR", subdiv=subdiv, years=ano_atual)
+        datas_db = {f.data for f in feriados_db}
+        for dt, name in br_holidays.items():
+            if dt.year == ano_atual and dt.month == mes_atual:
+                if dt not in datas_db and dt not in ignorados:
+                    feriados.append(FeriadoObj(dt, name, fonte="auto"))
+    except Exception:
+        pass
+
+    feriados.sort(key=lambda x: x.data)
+    return feriados
 
 def verificar_conformidade_clt(data_anterior, hora_saida, data_atual, hora_entrada):
     """
@@ -103,14 +413,6 @@ def verificar_conformidade_clt(data_anterior, hora_saida, data_atual, hora_entra
     dt_saida = datetime.strptime(f"{data_anterior} {hora_saida}", "%d/%m/%Y %H:%M:%S")
     dt_entrada = datetime.strptime(f"{data_atual} {hora_entrada}", "%d/%m/%Y %H:%M:%S")
     return (dt_entrada - dt_saida) >= timedelta(hours=11)
-
-def verificar_intervalo_almoco(hora_almoco, hora_retorno):
-    """
-    Verifica intervalo intrajornada (mínimo 1h).
-    """
-    t1 = datetime.strptime(hora_almoco, "%H:%M:%S")
-    t2 = datetime.strptime(hora_retorno, "%H:%M:%S")
-    return (t2 - t1) >= timedelta(hours=1)
 
 def verificar_dominio_email(email):
     try:
@@ -153,6 +455,26 @@ class Feriado(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     data = db.Column(db.Date, nullable=False, unique=True)
     descricao = db.Column(db.String(100), nullable=False)
+    fonte = db.Column(db.String(20), nullable=False, default="manual")  # "manual" | "auto"
+
+
+class FeriadoIgnorado(db.Model):
+    """Feriados que o admin excluiu/rejeitou e não devem ser readicionados
+    pelo sincronizador automático, nem contar como dia não útil."""
+    data = db.Column(db.Date, primary_key=True)
+
+
+class Configuracao(db.Model):
+    """Configurações globais de chave/valor da aplicação.
+
+    Chaves usadas hoje:
+      - ``uf_feriado``: UF que define os feriados estaduais ('SP', 'RJ', ...)
+        ou 'BR' implícito pela ausência;
+      - ``cidade_feriado``: cidade detectada (apenas informativa);
+      - ``regiao_fonte``: como a região foi definida ('geo' | 'manual').
+    """
+    chave = db.Column(db.String(50), primary_key=True)
+    valor = db.Column(db.String(255), nullable=False)
 
 class Usuario(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -270,34 +592,88 @@ with app.app_context():
         if "foi_ajustado" not in colunas_ponto:
             db.session.execute(text("ALTER TABLE registro_ponto ADD COLUMN foi_ajustado BOOLEAN DEFAULT FALSE;"))
 
+        colunas_feriado = [c["name"] for c in inspector.get_columns("feriado")]
+        if "fonte" not in colunas_feriado:
+            db.session.execute(text("ALTER TABLE feriado ADD COLUMN fonte VARCHAR(20) DEFAULT 'manual';"))
+
         db.session.commit()
     except Exception as e:
         db.session.rollback()
+
+    # Garante que os feriados nacionais + estaduais (ESTADO_FERIADO) estejam
+    # cadastrados no banco já na inicialização do app.
+    try:
+        _sincronizar_feriados_lib()
+    except Exception as e:
+        print(f"AVISO: falha ao sincronizar feriados na inicialização: {e}")
 
 # ==========================================
 #         SISTEMA DE NOTIFICAÇÕES
 # ==========================================
 
-# Definimos os 4 pontos obrigatórios da jornada diária
-PONTOS_OBRIGATORIOS = ["Entrada", "Almoço", "Retorno", "Saída"]
+PONTOS_PERMITIDOS = ["Entrada", "Saída"]
 
 def identificar_pontos_faltantes(registros_do_dia):
-    """Dado uma lista de registros de um único dia,
-
-    retorna uma lista com os tipos de ponto que faltaram bater.
     """
-    # p.tipo garante que vai ler o tipo correto do seu model RegistroPonto
-    tipos_batidos = [
+    Dado uma lista de registros de um único dia (em ordem cronológica),
+    retorna o próximo tipo que o funcionário deve bater.
+
+    - Se não há registros ou o último é "Saída" -> faltante: "Entrada"
+    - Se o último é "Entrada" -> faltante: "Saída"
+    """
+    tipos = [
         getattr(p, "tipo", getattr(p, "tipo_ponto", ""))
         for p in registros_do_dia
     ]
-    faltantes = [p for p in PONTOS_OBRIGATORIOS if p not in tipos_batidos]
-    return faltantes
+    # Considera apenas entradas/saídas (ignora dados antigos do tipo Almoço/Retorno)
+    seq = [t for t in tipos if t in PONTOS_PERMITIDOS]
+    if not seq or seq[-1] == "Saída":
+        return ["Entrada"]
+    return ["Saída"]
+
+
+def dia_ponto_incompleto(registros_do_dia):
+    """
+    No novo modelo de pares Entrada/Saída ilimitados, considera-se o dia
+    INCOMPLETO quando existe uma Entrada sem a correspondente Saída de fechamento
+    (ou seja, sobra uma Entrada "em aberto" no registro do dia).
+
+    Retorna True se o dia está aberto (faltou bater a Saída correspondente),
+    False caso contrário (dia completo ou sem registros).
+    """
+    tipos = [
+        getattr(p, "tipo", getattr(p, "tipo_ponto", ""))
+        for p in registros_do_dia
+    ]
+    seq = [t for t in tipos if t in PONTOS_PERMITIDOS]
+    if not seq:
+        return False
+    # Aberto se a última batida foi uma Entrada sem Saída de fechamento
+    return seq[-1] == "Entrada"
+
+
+def _parse_hora(valor):
+    """Converte uma string de hora (HH:MM ou HH:MM:SS) para datetime.time."""
+    if not valor:
+        return None
+    valor = valor.strip()
+    for fmt in ("%H:%M:%S", "%H:%M"):
+        try:
+            return datetime.strptime(valor, fmt).time()
+        except ValueError:
+            continue
+    return None
 
 
 def calcular_saldo_dia(registros_do_dia, data_obj):
     """
     Calcula o tempo trabalhado no dia e o saldo em relação à carga horária diária.
+
+    O tempo é calculado pareando Entradas e Saídas em ordem cronológica:
+      trabalhado = Σ (Saída[i] - Entrada[i])
+    Se sobrar uma Entrada sem Saída correspondente e for o dia atual,
+    o tempo parcial é calculado até o momento atual.
+
     Retorna um dict com:
       - total_trabalhado_seg: segundos totais trabalhados
       - total_trabalhado_fmt: string formatada (ex: "07:15h")
@@ -307,7 +683,6 @@ def calcular_saldo_dia(registros_do_dia, data_obj):
       - is_faltante: True se trabalhou menos que a carga diária
       - tem_registro: True se houve ao menos 1 batida no dia
     """
-    FMT = "%H:%M:%S"
     carga_seg = int(CARGA_HORARIA_DIARIA.total_seconds())
 
     tempo_trabalhado = timedelta()
@@ -325,50 +700,35 @@ def calcular_saldo_dia(registros_do_dia, data_obj):
             "tem_registro": False,
         }
 
-    # Monta dict tipo -> hora
-    tipos = {}
+    # Separa entradas e saídas em ordem cronológica de registro
+    entradas = []
+    saidas = []
     for p in registros_do_dia:
         tipo = getattr(p, "tipo", getattr(p, "tipo_ponto", ""))
         hora = getattr(p, "hora", None)
-        if tipo and hora:
-            tipos[tipo] = hora
+        if not tipo or not hora:
+            continue
+        if tipo == "Entrada":
+            entradas.append(hora)
+        elif tipo == "Saída":
+            saidas.append(hora)
 
-    entrada = tipos.get("Entrada")
-    almoco = tipos.get("Almoço")
-    retorno = tipos.get("Retorno")
-    saida = tipos.get("Saída")
+    # Pareia Entrada[i] -> Saída[i]
+    for i in range(min(len(entradas), len(saidas))):
+        t1 = _parse_hora(entradas[i])
+        t2 = _parse_hora(saidas[i])
+        if t1 and t2 and t2 > t1:
+            tempo_trabalhado += datetime.combine(date.today(), t2) - datetime.combine(date.today(), t1)
 
-    # Entrada -> Almoço
-    if entrada and almoco:
-        try:
-            t1 = datetime.strptime(entrada, FMT)
-            t2 = datetime.strptime(almoco, FMT)
-            if t2 > t1:
-                tempo_trabalhado += t2 - t1
-        except ValueError:
-            pass
-
-    # Retorno -> Saída
-    if retorno and saida:
-        try:
-            t3 = datetime.strptime(retorno, FMT)
-            t4 = datetime.strptime(saida, FMT)
-            if t4 > t3:
-                tempo_trabalhado += t4 - t3
-        except ValueError:
-            pass
-
-    # Se tem entrada mas não tem almoço nem saída, calcula parcial (apenas para hoje)
+    # Se sobrou uma Entrada sem Saída e é hoje, calcula parcial até o momento
     hoje_obj = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
-    if entrada and not almoco and not retorno and not saida and data_obj == hoje_obj:
-        try:
-            t1 = datetime.strptime(entrada, FMT)
+    if len(entradas) > len(saidas) and data_obj == hoje_obj:
+        t1 = _parse_hora(entradas[-1])
+        if t1:
             agora = datetime.now(ZoneInfo("America/Sao_Paulo"))
-            t_entrada_hoje = datetime.combine(data_obj, t1.time()).replace(tzinfo=ZoneInfo("America/Sao_Paulo"))
+            t_entrada_hoje = datetime.combine(data_obj, t1).replace(tzinfo=ZoneInfo("America/Sao_Paulo"))
             if agora > t_entrada_hoje:
                 tempo_trabalhado += agora - t_entrada_hoje
-        except ValueError:
-            pass
 
     total_seg = int(tempo_trabalhado.total_seconds())
     horas, mins = divmod(total_seg // 60, 60)
@@ -394,43 +754,64 @@ def calcular_saldo_dia(registros_do_dia, data_obj):
     }
 
 def obter_notificacoes_usuario(user_id):
+    """Gera a lista de notificações/banners para o painel do usuário.
+
+    Otimizada para evitar centenas de queries por request:
+      - Cache de resultado por 30s (invalidado ao bater ponto).
+      - Janela de 30 dias para o cálculo de faltas.
+      - Usa o cache de feriados (_carregar_feriados) em vez de consultar o
+        banco dia a dia.
+    """
     if not user_id:
         return []
+
+    # ── 1. Cache: retorna resultado recente se disponível ──
+    cached = _NOTIF_CACHE.get(user_id)
+    agora = time.time()
+    if cached and (agora - cached["momento"]) < _NOTIF_CACHE_TTL:
+        return cached["notifs"]
 
     hoje = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
     notificacoes = []
 
     try:
-        # Busca todos os pontos do usuário
+        # ── 2. Uma única query: todos os pontos do usuário ──
         registros = RegistroPonto.query.filter_by(usuario_id=user_id).all()
 
-        # Agrupa registros por data e guarda quais datas tiveram ponto
-        pontos_por_data = {}
+        # Agrupa registros por data em memória
+        pontos_por_data: dict[date, list] = {}
         primeiro_registro_data = hoje
 
         for r in registros:
             try:
-                # Converte string 'DD/MM/AAAA' para objeto date
                 d_obj = datetime.strptime(r.data, "%d/%m/%Y").date()
-
-                if d_obj not in pontos_por_data:
-                    pontos_por_data[d_obj] = []
-                pontos_por_data[d_obj].append(r)
-
-                if d_obj < primeiro_registro_data:
-                    primeiro_registro_data = d_obj
             except (ValueError, TypeError):
-                pass
+                continue
+            pontos_por_data.setdefault(d_obj, []).append(r)
+            if d_obj < primeiro_registro_data:
+                primeiro_registro_data = d_obj
 
-        # 1. VERIFICAÇÃO DE DIAS ÚTEIS COM FALTAS TOTAIS
-        # Busca a data de cadastro do usuário ou usa 30 dias atrás se não houver
+        # ── 3. Faltas totais (janela de 30 dias) ──
+        # Calcula o limite: janela de 30 dias ou primeiro registro/cadastro,
+        # o que vier antes.
         usuario_obj = Usuario.query.get(user_id)
-        data_inicio_calculo = usuario_obj.data_cadastro.date() if usuario_obj and usuario_obj.data_cadastro else (hoje - timedelta(days=30))
-        
-        limite_busca = min(primeiro_registro_data, data_inicio_calculo)
-        curr = hoje - timedelta(days=1)
-        faltas_count = 0
+        data_inicio = (
+            usuario_obj.data_cadastro.date()
+            if usuario_obj and usuario_obj.data_cadastro
+            else hoje - timedelta(days=NOTIF_JANELA_DIAS)
+        )
+        limite_busca = max(
+            hoje - timedelta(days=NOTIF_JANELA_DIAS),
+            min(primeiro_registro_data, data_inicio),
+        )
 
+        _, subdiv = _regiao_feriados()
+        # Pré-carrega feriados dos anos envolvidos para não reconsultar
+        for ano in range(limite_busca.year, hoje.year + 1):
+            _carregar_feriados(ano, subdiv)
+
+        faltas_count = 0
+        curr = hoje - timedelta(days=1)
         while curr >= limite_busca:
             if eh_dia_util(curr) and curr not in pontos_por_data:
                 faltas_count += 1
@@ -445,12 +826,12 @@ def obter_notificacoes_usuario(user_id):
                 "link": url_for("meu_historico"),
             })
 
-        # 2. VERIFICAÇÃO DE PONTOS INCOMPLETOS EM DIAS ANTERIORES
+        # ── 4. Pontos incompletos (apenas janela de 30 dias) ──
+        janela_inicio = hoje - timedelta(days=NOTIF_JANELA_DIAS)
         dias_incompletos = 0
         for d_obj, regs_do_dia in pontos_por_data.items():
-            if d_obj < hoje and eh_dia_util(d_obj):
-                faltantes = identificar_pontos_faltantes(regs_do_dia)
-                if faltantes:
+            if janela_inicio <= d_obj < hoje and eh_dia_util(d_obj):
+                if dia_ponto_incompleto(regs_do_dia):
                     dias_incompletos += 1
 
         if dias_incompletos > 0:
@@ -462,17 +843,10 @@ def obter_notificacoes_usuario(user_id):
                 "link": url_for("meu_historico"),
             })
 
-        # 3. VERIFICAÇÃO DO PONTO DE HOJE
+        # ── 5. Ponto de hoje (usando registros já carregados, sem query) ──
         if eh_dia_util(hoje):
-            data_hoje_str = hoje.strftime("%d/%m/%Y")
-            pontos_hoje = [
-                p.tipo
-                for p in RegistroPonto.query.filter_by(
-                    usuario_id=user_id, data=data_hoje_str
-                ).all()
-            ]
-
-            if "Entrada" not in pontos_hoje:
+            tipos_hoje = [p.tipo for p in pontos_por_data.get(hoje, [])]
+            if "Entrada" not in tipos_hoje:
                 notificacoes.append({
                     "id": "ponto_hoje",
                     "tipo": "warning",
@@ -484,6 +858,9 @@ def obter_notificacoes_usuario(user_id):
     except Exception as e:
         print(f"Erro ao gerar notificações: {e}")
         return []
+
+    # ── 6. Salva no cache ──
+    _NOTIF_CACHE[user_id] = {"momento": agora, "notifs": notificacoes}
 
     return notificacoes
 
@@ -633,6 +1010,45 @@ def redefinir_senha_forca():
     
     return render_template("redefinir_senha_forca.html")
 
+@app.route("/alterar_senha", methods=["POST"])
+@login_required
+def alterar_senha():
+    senha_atual = request.form.get("senha_atual", "")
+    nova_senha = request.form.get("nova_senha", "")
+    confirmar_senha = request.form.get("confirmar_senha", "")
+
+    if not check_password_hash(current_user.senha_hash, senha_atual):
+        flash("A senha atual está incorreta.", "danger")
+        return redirect(request.referrer or url_for("index"))
+
+    if nova_senha != confirmar_senha:
+        flash("A confirmação da nova senha não confere.", "danger")
+        return redirect(request.referrer or url_for("index"))
+
+    # Validação completa de senha (mesma regra do cadastro/reset)
+    if len(nova_senha) < 8:
+        flash("A senha deve ter pelo menos 8 caracteres.", "danger")
+        return redirect(request.referrer or url_for("index"))
+    if not re.search(r"[A-Z]", nova_senha):
+        flash("A senha deve conter pelo menos uma letra maiúscula.", "danger")
+        return redirect(request.referrer or url_for("index"))
+    if not re.search(r"[a-z]", nova_senha):
+        flash("A senha deve conter pelo menos uma letra minúscula.", "danger")
+        return redirect(request.referrer or url_for("index"))
+    if not re.search(r"\d", nova_senha):
+        flash("A senha deve conter pelo menos um número.", "danger")
+        return redirect(request.referrer or url_for("index"))
+    if not re.search(r"[@#*]", nova_senha):
+        flash("A senha deve conter pelo menos um caractere especial (@, # ou *).", "danger")
+        return redirect(request.referrer or url_for("index"))
+
+    current_user.senha_hash = generate_password_hash(nova_senha, method="scrypt")
+    db.session.commit()
+    registrar_log(current_user.id, "Alterou a própria senha")
+    flash("Senha alterada com sucesso!", "success")
+    return redirect(request.referrer or url_for("index"))
+
+
 @app.route("/admin/lancar-ponto-manual", methods=["POST"])
 @admin_required
 def admin_lancar_ponto_manual():
@@ -684,6 +1100,7 @@ def admin_lancar_ponto_manual():
         msg_acao = f"Lançou manualmente o ponto ({tipo}) de {usuario_alvo.nome} para o dia {data_formatada} às {hora_formatada}."
 
     db.session.commit()
+    _invalidar_notif_cache(int(usuario_alvo.id))
 
     desc_log = msg_acao
     if justificativa:
@@ -853,8 +1270,6 @@ def index():
     pontos_hoje_objs = RegistroPonto.query.filter_by(
         usuario_id=current_user.id, data=data_hoje
     ).order_by(RegistroPonto.id.asc()).all()
-    
-    pontos_batidos = [p.tipo for p in pontos_hoje_objs]
 
     ultimo_ponto_obj = (
         RegistroPonto.query.filter_by(usuario_id=current_user.id)
@@ -871,13 +1286,26 @@ def index():
     if current_user.is_admin:
         total_solicitacoes_pendentes = SolicitacaoCorrecao.query.filter_by(status="Pendente").count()
 
+    # Horas dos pontos de hoje para o JS recalcular o saldo ao vivo (fuso SP)
+    # Lista ordenada de pontos do dia (somente Entrada/Saída)
+    lista_pontos_hoje = []
+    for p in pontos_hoje_objs:
+        tipo = getattr(p, "tipo", "")
+        if tipo in PONTOS_PERMITIDOS:
+            lista_pontos_hoje.append({"tipo": tipo, "hora": getattr(p, "hora", None)})
+
+    # Próximo ponto a ser batido (Entrada ou Saída) baseado no último do dia
+    faltantes_hoje = identificar_pontos_faltantes(pontos_hoje_objs)
+    proximo_tipo = faltantes_hoje[0] if faltantes_hoje else "Entrada"
+
     return render_template(
         "index.html",
-        pontos_batidos=pontos_batidos,
         ultimo_ponto=ultimo_ponto,
         data_hoje=data_hoje,
-        registros_hoje=pontos_hoje_objs,
-        total_solicitacoes_pendentes=total_solicitacoes_pendentes
+        total_solicitacoes_pendentes=total_solicitacoes_pendentes,
+        pontos_today=lista_pontos_hoje,
+        proximo_tipo=proximo_tipo,
+        carga_diaria_min=480
     )
 
 @app.route("/registrar/<tipo>", methods=["POST"])
@@ -887,15 +1315,9 @@ def registrar(tipo):
     data_atual = agora.strftime("%d/%m/%Y")
     hora_atual = agora.strftime("%H:%M:%S")
 
-    # Validação para evitar pontos duplicados do mesmo tipo no mesmo dia
-    ponto_existente = RegistroPonto.query.filter_by(
-        usuario_id=current_user.id,
-        data=data_atual,
-        tipo=tipo
-    ).first()
-
-    if ponto_existente:
-        flash(f"Você já registrou o ponto de {tipo} hoje às {ponto_existente.hora}.", "warning")
+    # Apenas Entrada e Saída são permitidas; pode bater quantas vezes precisar no dia
+    if tipo not in PONTOS_PERMITIDOS:
+        flash("Tipo de ponto inválido.", "danger")
         return redirect(url_for("index"))
 
     novo_ponto = RegistroPonto(
@@ -907,8 +1329,39 @@ def registrar(tipo):
     )
     db.session.add(novo_ponto)
     db.session.commit()
+    _invalidar_notif_cache(current_user.id)
 
     flash(f"Ponto ({tipo}) registrado às {hora_atual} com sucesso!", "success")
+    return redirect(url_for("index"))
+
+@app.route("/registrar/auto", methods=["POST"])
+@login_required
+def registrar_auto():
+    # Registra automaticamente o próximo ponto (Entrada ou Saída) baseado no último
+    agora = datetime.now(ZoneInfo("America/Sao_Paulo"))
+    data_atual = agora.strftime("%d/%m/%Y")
+
+    registros_hoje = RegistroPonto.query.filter_by(
+        usuario_id=current_user.id, data=data_atual
+    ).order_by(RegistroPonto.id.asc()).all()
+
+    faltantes = identificar_pontos_faltantes(registros_hoje)
+    # Nunca fica sem um próximo ponto: sempre será "Entrada" ou "Saída"
+    proximo = faltantes[0] if faltantes else "Entrada"
+    hora_atual = agora.strftime("%H:%M:%S")
+
+    novo_ponto = RegistroPonto(
+        data=data_atual,
+        tipo=proximo,
+        hora=hora_atual,
+        usuario_id=current_user.id,
+        foi_ajustado=False,
+    )
+    db.session.add(novo_ponto)
+    db.session.commit()
+    _invalidar_notif_cache(current_user.id)
+
+    flash(f"Ponto ({proximo}) registrado às {hora_atual} com sucesso!", "success")
     return redirect(url_for("index"))
 
 @app.route("/meu_historico")
@@ -955,14 +1408,17 @@ def meu_historico():
         if not eh_dia_util(d_obj) and not registros_do_dia:
             continue
 
-        faltantes = identificar_pontos_faltantes(registros_do_dia)
         saldo = calcular_saldo_dia(registros_do_dia, d_obj)
-        
+
+        # No modelo de pares ilimitados, o dia está incompleto quando existe
+        # uma Entrada em aberto (sem a Saída correspondente de fechamento),
+        # ou quando não houve nenhuma batida no dia.
+        incompleto = dia_ponto_incompleto(registros_do_dia) or not registros_do_dia
+
         historico_analisado.append({
             "data": data_str,
             "registros": registros_do_dia,
-            "faltantes": faltantes,
-            "incompleto": len(faltantes) > 0,
+            "incompleto": incompleto,
             "saldo": saldo,
         })
 
@@ -1033,18 +1489,20 @@ def exportar_historico_ponto():
     hoje = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
     
     # Lógica de cálculo (adaptada de admin_exportar_ponto)
-    dias_registrados = defaultdict(dict)
+    dias_registrados = defaultdict(list)
     primeira_data = hoje
     for r in registros:
         try:
             d_obj = datetime.strptime(r.data, "%d/%m/%Y").date()
-            dias_registrados[d_obj][r.tipo] = r.hora
+            if r.tipo in PONTOS_PERMITIDOS:
+                dias_registrados[d_obj].append((r.tipo, r.hora))
             if d_obj < primeira_data:
                 primeira_data = d_obj
         except ValueError:
             pass
 
-    tabela_linhas = [["Dia", "Entrada", "Almoço", "Retorno", "Saída", "Total / Status"]]
+    # Ordena por dia, depois pela ordem de registro (id preserva a ordem cronológica)
+    tabela_linhas = [["Dia", "Movimentações", "Total / Status"]]
     total_segundos_trabalhados = 0
     total_segundos_extras = 0
     total_segundos_faltantes = 0
@@ -1055,35 +1513,48 @@ def exportar_historico_ponto():
     curr = primeira_data if registros else hoje
     while curr <= hoje:
         dia_str = curr.strftime("%d/%m/%Y")
-        reg = dias_registrados.get(curr, {})
-        if reg:
-            e = reg.get("Entrada", "--:--")
-            a = reg.get("Almoço", "--:--")
-            r_ponto = reg.get("Retorno", "--:--")
-            s = reg.get("Saída", "--:--")
+        regs = dias_registrados.get(curr, [])
+
+        if regs:
+            # Constrói texto de movimentações: "E 08:00 · S 12:00 · E 13:00 · S 18:00"
+            mov = []
+            entradas = []
+            saidas = []
+            for tipo, hora in regs:
+                if tipo == "Entrada":
+                    mov.append(f"E {hora}")
+                    entradas.append(hora)
+                elif tipo == "Saída":
+                    mov.append(f"S {hora}")
+                    saidas.append(hora)
+            mov_texto = "  ".join(mov)
+
             tempo_trabalhado = timedelta()
-            if e != "--:--" and a != "--:--":
-                t1, t2 = datetime.strptime(e, FMT), datetime.strptime(a, FMT)
-                if t2 > t1: tempo_trabalhado += t2 - t1
-            if r_ponto != "--:--" and s != "--:--":
-                t3, t4 = datetime.strptime(r_ponto, FMT), datetime.strptime(s, FMT)
-                if t4 > t3: tempo_trabalhado += t4 - t3
+            for i in range(min(len(entradas), len(saidas))):
+                t1, t2 = datetime.strptime(entradas[i], FMT), datetime.strptime(saidas[i], FMT)
+                if t2 > t1:
+                    tempo_trabalhado += t2 - t1
+
             tot = int(tempo_trabalhado.total_seconds())
             total_segundos_trabalhados += tot
-            if curr < hoje or s != "--:--":
+
+            # Dia encerrado se a última movimentação do dia for uma Saída
+            dia_encerrado = bool(regs) and regs[-1][0] == "Saída"
+            if curr < hoje or dia_encerrado:
                 if tot > segundos_carga_diaria:
                     total_segundos_extras += (tot - segundos_carga_diaria)
                 elif eh_dia_util(curr) and tot < segundos_carga_diaria:
                     total_segundos_faltantes += (segundos_carga_diaria - tot)
+
             hrs, mins = divmod(tot // 60, 60)
-            tabela_linhas.append([dia_str, e, a, r_ponto, s, f"{hrs:02d}:{mins:02d}h"])
+            tabela_linhas.append([dia_str, mov_texto, f"{hrs:02d}:{mins:02d}h"])
         elif eh_dia_util(curr):
             if curr < hoje:
                 total_faltas_dias += 1
                 total_segundos_faltantes += segundos_carga_diaria
-                tabela_linhas.append([dia_str, "--:--", "--:--", "--:--", "--:--", "FALTA"])
+                tabela_linhas.append([dia_str, "--:--", "FALTA"])
             else:
-                tabela_linhas.append([dia_str, "--:--", "--:--", "--:--", "--:--", "Em Aberto"])
+                tabela_linhas.append([dia_str, "--:--", "Em Aberto"])
         curr += timedelta(days=1)
 
     # Exportação baseada no formato
@@ -1348,6 +1819,15 @@ def build_admin_logs_recentes(limit=5):
 def render_admin_shell(initial_view="painel", **context):
     if "departamentos" not in context:
         context["departamentos"] = Departamento.query.order_by(Departamento.nome.asc()).all()
+    regiao_uf, regiao_cidade, regiao_fonte = _regiao_display()
+    if "regiao_uf" not in context:
+        context["regiao_uf"] = regiao_uf
+    if "regiao_cidade" not in context:
+        context["regiao_cidade"] = regiao_cidade
+    if "regiao_fonte" not in context:
+        context["regiao_fonte"] = regiao_fonte
+    if "ufs_brasil" not in context:
+        context["ufs_brasil"] = UFS_BRASIL
     return render_template("admin.html", initial_view=initial_view, **context)
 
 @app.route("/admin")
@@ -1374,6 +1854,8 @@ def admin_panel():
 
     # Calcular fluxo semanal (últimos 5 dias)
     hoje = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
+    # Garante feriados automáticos (nacionais + regionais) presentes no banco
+    _sincronizar_feriados_lib()
     dias_semana = [(hoje - timedelta(days=i)) for i in range(4, -1, -1)]
     labels_semana = [d.strftime("%d/%m") for d in dias_semana]
     dados_semana = []
@@ -1389,7 +1871,8 @@ def admin_panel():
         conformes=conformes,
         incompletos=incompletos,
         labels_semana=labels_semana,
-        dados_semana=dados_semana
+        dados_semana=dados_semana,
+        feriados=_feriados_do_mes(hoje)
     )
 
 @app.route("/admin/fragment/<string:view_name>")
@@ -1424,55 +1907,23 @@ def admin_fragment(view_name):
             count = RegistroPonto.query.filter_by(data=d.strftime("%d/%m/%Y")).count()
             dados_semana.append(count)
         
+        # Garante feriados automáticos (nacionais + regionais) presentes no banco
+        _sincronizar_feriados_lib()
+
         # Feriados do mês atual
-        mes_atual = hoje.month
-        ano_atual = hoje.year
-        _, last_day = calendar.monthrange(ano_atual, mes_atual)
-        start_date = date(ano_atual, mes_atual, 1)
-        end_date = date(ano_atual, mes_atual, last_day)
-        
-        feriados_db = Feriado.query.filter(Feriado.data >= start_date, Feriado.data <= end_date).all()
-        
-        # Obter feriados da biblioteca
-        estado = os.environ.get("ESTADO_FERIADO", "BR")
-        subdiv = estado if estado != 'BR' else None
-        
-        # Usar uma classe simples para o template
-        class FeriadoObj:
-            def __init__(self, data, descricao, id=None):
-                self.data = data
-                self.descricao = descricao
-                self.id = id
-        
-        feriados = []
-        # Adicionar feriados do DB
-        for f in feriados_db:
-            feriados.append(FeriadoObj(f.data, f.descricao, f.id))
-            
-        # Adicionar feriados da lib (se não estiverem no DB)
-        try:
-            br_holidays = holidays.country_holidays('BR', subdiv=subdiv)
-            datas_db = {f.data for f in feriados_db}
-            for dt, name in br_holidays.items():
-                if dt.year == ano_atual and dt.month == mes_atual:
-                    if dt not in datas_db:
-                        feriados.append(FeriadoObj(dt, name))
-        except Exception:
-            pass
-        
-        # Ordenar por data
-        feriados.sort(key=lambda x: x.data)
+        feriados = _feriados_do_mes(hoje)
         
         # Calcular Banco de Horas por usuário
         usuarios_banco_horas = []
         for u in usuarios:
             registros_user = RegistroPonto.query.filter_by(usuario_id=u.id).all()
             
-            dias_registrados = defaultdict(dict)
+            dias_registrados = defaultdict(list)
             for r in registros_user:
                 try:
                     d_obj = datetime.strptime(r.data, "%d/%m/%Y").date()
-                    dias_registrados[d_obj][r.tipo] = r.hora
+                    if r.tipo in PONTOS_PERMITIDOS:
+                        dias_registrados[d_obj].append((r.tipo, r.hora))
                 except ValueError:
                     pass
             
@@ -1491,22 +1942,19 @@ def admin_fragment(view_name):
             
             curr = primeira_data
             while curr <= hoje:
-                reg = dias_registrados.get(curr, {})
-                if reg:
-                    e = reg.get("Entrada", "--:--")
-                    a = reg.get("Almoço", "--:--")
-                    r_ponto = reg.get("Retorno", "--:--")
-                    s = reg.get("Saída", "--:--")
+                regs = dias_registrados.get(curr, [])
+                if regs:
+                    entradas = [h for t, h in regs if t == "Entrada"]
+                    saidas = [h for t, h in regs if t == "Saída"]
                     tempo_trabalhado = timedelta()
-                    if e != "--:--" and a != "--:--":
-                        t1, t2 = datetime.strptime(e, FMT), datetime.strptime(a, FMT)
-                        if t2 > t1: tempo_trabalhado += t2 - t1
-                    if r_ponto != "--:--" and s != "--:--":
-                        t3, t4 = datetime.strptime(r_ponto, FMT), datetime.strptime(s, FMT)
-                        if t4 > t3: tempo_trabalhado += t4 - t3
+                    for i in range(min(len(entradas), len(saidas))):
+                        t1, t2 = datetime.strptime(entradas[i], FMT), datetime.strptime(saidas[i], FMT)
+                        if t2 > t1:
+                            tempo_trabalhado += t2 - t1
                     tot = int(tempo_trabalhado.total_seconds())
                     total_segundos_trabalhados += tot
-                    if curr < hoje or s != "--:--":
+                    dia_encerrado = bool(regs) and regs[-1][0] == "Saída"
+                    if curr < hoje or dia_encerrado:
                         if tot > segundos_carga_diaria:
                             total_segundos_extras += (tot - segundos_carga_diaria)
                         elif eh_dia_util(curr) and tot < segundos_carga_diaria:
@@ -1552,15 +2000,8 @@ def admin_fragment(view_name):
                     if not verificar_conformidade_clt(d_anterior, saida_ant, d_atual, entrada_atual):
                         alertas_clt.append({"nome": u.nome, "msg": f"Interjornada < 11h em {d_atual}"})
                         break
-            
-            # Verificar intervalo almoço (Intrajornada)
-            for d in dias_ordenados:
-                almoco = dias_agrupados[d].get("Almoço")
-                retorno = dias_agrupados[d].get("Retorno")
-                if almoco and retorno:
-                    if not verificar_intervalo_almoco(almoco, retorno):
-                        alertas_clt.append({"nome": u.nome, "msg": f"Intervalo almoço < 1h em {d}"})
-                        break
+
+        regiao_uf, regiao_cidade, regiao_fonte = _regiao_display()
 
         return render_template(
             "admin_fragment_painel.html",
@@ -1574,7 +2015,11 @@ def admin_fragment(view_name):
             usuarios_banco_horas=usuarios_banco_horas,
             alertas_clt=alertas_clt,
             feriados=feriados,
-            data_hoje=hoje
+            data_hoje=hoje,
+            regiao_uf=regiao_uf,
+            regiao_cidade=regiao_cidade,
+            regiao_fonte=regiao_fonte,
+            ufs_brasil=UFS_BRASIL,
         )
 
     if view_name == "usuarios":
@@ -1759,6 +2204,7 @@ def responder_solicitacao(id, acao):
         flash("Solicitação RECUSADA.", "warning")
 
     db.session.commit()
+    _invalidar_notif_cache(solicitacao.usuario_id)
     return redirect(url_for("admin_solicitacoes"))
 
 @app.route("/admin/usuarios")
@@ -1830,6 +2276,7 @@ def excluir_usuario(user_id):
         
         db.session.delete(user)
         db.session.commit()
+        _invalidar_notif_cache(user_id)
         
         registrar_log(current_user.id, f"Excluiu usuário {user_nome}", user_id)
         
@@ -1917,13 +2364,14 @@ def admin_exportar_ponto(user_id):
     if data_fim:
         data_fim_obj = datetime.strptime(data_fim, "%Y-%m-%d").date()
 
-    dias_registrados = defaultdict(dict)
+    dias_registrados = defaultdict(list)
     primeira_data = hoje
 
     for r in registros:
         try:
             d_obj = datetime.strptime(r.data, "%d/%m/%Y").date()
-            dias_registrados[d_obj][r.tipo] = r.hora
+            if r.tipo in PONTOS_PERMITIDOS:
+                dias_registrados[d_obj].append((r.tipo, r.hora))
             if d_obj < primeira_data:
                 primeira_data = d_obj
         except ValueError:
@@ -1937,56 +2385,61 @@ def admin_exportar_ponto(user_id):
         if primeira_data > hoje:
             primeira_data = hoje
 
-    tabela_linhas = [["Dia", "Entrada", "Almoço", "Retorno", "Saída", "Total / Status"]]
-    
+    tabela_linhas = [["Dia", "Movimentações", "Total / Status"]]
+
     total_segundos_trabalhados = 0
     total_segundos_extras = 0
     total_segundos_faltantes = 0
     total_faltas_dias = 0
-    
+
     FMT = "%H:%M:%S"
     segundos_carga_diaria = int(CARGA_HORARIA_DIARIA.total_seconds())
 
     curr = primeira_data
     while curr <= hoje:
         dia_str = curr.strftime("%d/%m/%Y")
-        reg = dias_registrados.get(curr, {})
+        regs = dias_registrados.get(curr, [])
 
-        if reg:
-            e = reg.get("Entrada", "--:--")
-            a = reg.get("Almoço", "--:--")
-            r_ponto = reg.get("Retorno", "--:--") # Renomeado para não conflitar com variável 'r'
-            s = reg.get("Saída", "--:--")
+        if regs:
+            mov = []
+            entradas = []
+            saidas = []
+            for tipo, hora in regs:
+                if tipo == "Entrada":
+                    mov.append(f"E {hora}")
+                    entradas.append(hora)
+                elif tipo == "Saída":
+                    mov.append(f"S {hora}")
+                    saidas.append(hora)
+            mov_texto = "  ".join(mov)
 
             tempo_trabalhado = timedelta()
-
-            if e != "--:--" and a != "--:--":
-                t1, t2 = datetime.strptime(e, FMT), datetime.strptime(a, FMT)
-                if t2 > t1: tempo_trabalhado += t2 - t1
-
-            if r_ponto != "--:--" and s != "--:--":
-                t3, t4 = datetime.strptime(r_ponto, FMT), datetime.strptime(s, FMT)
-                if t4 > t3: tempo_trabalhado += t4 - t3
+            for i in range(min(len(entradas), len(saidas))):
+                t1, t2 = datetime.strptime(entradas[i], FMT), datetime.strptime(saidas[i], FMT)
+                if t2 > t1:
+                    tempo_trabalhado += t2 - t1
 
             tot = int(tempo_trabalhado.total_seconds())
             total_segundos_trabalhados += tot
 
-            if curr < hoje or s != "--:--":
+            # Dia encerrado se a última movimentação do dia for uma Saída
+            dia_encerrado = bool(regs) and regs[-1][0] == "Saída"
+            if curr < hoje or dia_encerrado:
                 if tot > segundos_carga_diaria:
                     total_segundos_extras += (tot - segundos_carga_diaria)
                 elif eh_dia_util(curr) and tot < segundos_carga_diaria:
                     total_segundos_faltantes += (segundos_carga_diaria - tot)
 
             hrs, mins = divmod(tot // 60, 60)
-            tabela_linhas.append([dia_str, e, a, r_ponto, s, f"{hrs:02d}:{mins:02d}h"])
+            tabela_linhas.append([dia_str, mov_texto, f"{hrs:02d}:{mins:02d}h"])
 
         elif eh_dia_util(curr):
             if curr < hoje:
                 total_faltas_dias += 1
                 total_segundos_faltantes += segundos_carga_diaria
-                tabela_linhas.append([dia_str, "--:--", "--:--", "--:--", "--:--", "FALTA"])
+                tabela_linhas.append([dia_str, "--:--", "FALTA"])
             else:
-                tabela_linhas.append([dia_str, "--:--", "--:--", "--:--", "--:--", "Em Aberto"])
+                tabela_linhas.append([dia_str, "--:--", "Em Aberto"])
 
         curr += timedelta(days=1)
 
@@ -2010,7 +2463,7 @@ def admin_exportar_ponto(user_id):
     elementos.append(Paragraph(f"<b>E-mail:</b> {usuario.email} | <b>Emissão:</b> {datetime.now(ZoneInfo('America/Sao_Paulo')).strftime('%d/%m/%Y às %H:%M')}", estilos["Normal"]))
     elementos.append(Spacer(1, 15))
 
-    tabela = Table(tabela_linhas, colWidths=[80, 85, 85, 85, 85, 90])
+    tabela = Table(tabela_linhas, colWidths=[80, 300, 90])
     estilo_tabela = [
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2c3e50")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
@@ -2019,7 +2472,7 @@ def admin_exportar_ponto(user_id):
         ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cccccc")),
     ]
     for i, linha in enumerate(tabela_linhas[1:], start=1):
-        if linha[5] == "FALTA":
+        if linha[2] == "FALTA":
             estilo_tabela.append(("TEXTCOLOR", (0, i), (-1, i), colors.HexColor("#d32f2f")))
             estilo_tabela.append(("FONTNAME", (0, i), (-1, i), "Helvetica-Bold"))
             estilo_tabela.append(("BACKGROUND", (0, i), (-1, i), colors.HexColor("#ffebee")))
@@ -2092,9 +2545,12 @@ def adicionar_feriado():
     descricao = request.form.get("descricao")
     try:
         data = datetime.strptime(data_str, "%Y-%m-%d").date()
-        feriado = Feriado(data=data, descricao=descricao)
+        feriado = Feriado(data=data, descricao=descricao, fonte="manual")
         db.session.add(feriado)
+        # Se o admin readicionou manualmente, deixa de ser "ignorado"
+        db.session.query(FeriadoIgnorado).filter_by(data=data).delete()
         db.session.commit()
+        _FERIADOS_CACHE.clear()
         flash("Feriado cadastrado com sucesso!", "success")
     except Exception as e:
         flash(f"Erro ao cadastrar feriado: {e}", "danger")
@@ -2105,9 +2561,108 @@ def adicionar_feriado():
 @admin_required
 def excluir_feriado(id):
     feriado = Feriado.query.get_or_404(id)
+    data_feriado = feriado.data
     db.session.delete(feriado)
+    # Marca como ignorado para o sync automático não readicionar
+    db.session.add(FeriadoIgnorado(data=data_feriado))
     db.session.commit()
+    _FERIADOS_CACHE.clear()
     flash("Feriado excluído com sucesso!", "success")
+    return redirect(url_for("admin_panel"))
+
+@app.route("/admin/feriados/sincronizar", methods=["POST"])
+@login_required
+@admin_required
+def sincronizar_feriados():
+    """Dispara manualmente a sincronização dos feriados da biblioteca
+    (nacionais + os da UF da região configurada)."""
+    try:
+        inseridos = _sincronizar_feriados_lib()
+        if inseridos:
+            flash(f"Sincronização concluída: {inseridos} feriado(s) adicionado(s).", "success")
+        else:
+            flash("Sincronização concluída: nenhum feriado novo encontrado.", "info")
+    except Exception as e:
+        flash(f"Erro ao sincronizar feriados: {e}", "danger")
+    return redirect(url_for("admin_panel"))
+
+@app.route("/api/localizacao", methods=["POST"])
+@login_required
+@admin_required
+def api_localizacao():
+    """Recebe as coordenadas do navegador do admin, resolve a UF/cidade via
+    reverse geocode (BigDataCloud) e passa a usar essa região nos feriados
+    do sistema (configuração global e persistida). As coordenadas em si não
+    são armazenadas — apenas a UF e a cidade resultantes."""
+    try:
+        dados = request.get_json(silent=True) or {}
+        lat = float(dados.get("lat"))
+        lng = float(dados.get("lng"))
+    except (TypeError, ValueError):
+        return jsonify(status="erro", msg="Coordenadas inválidas."), 400
+
+    if not (-90 <= lat <= 90) or not (-180 <= lng <= 180):
+        return jsonify(status="erro", msg="Coordenadas fora dos limites válidos."), 400
+
+    uf, cidade = _reverse_geocode(lat, lng)
+    if not uf:
+        return jsonify(
+            status="erro",
+            msg="Não foi possível identificar a região (ponto fora do Brasil ou serviço de localização indisponível).",
+        ), 422
+
+    try:
+        _set_config("uf_feriado", uf)
+        _set_config("cidade_feriado", cidade)
+        _set_config("regiao_fonte", "geo")
+        db.session.commit()
+        _invalidar_cache_regiao()
+        _sincronizar_feriados_lib()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify(status="erro", msg=f"Falha ao salvar a região: {e}"), 500
+
+    return jsonify(status="ok", uf=uf, cidade=cidade)
+
+@app.route("/admin/feriados/regiao", methods=["POST"])
+@login_required
+@admin_required
+def definir_regiao_feriados():
+    """Define manualmente a região (UF ou 'BR') usada nos feriados do sistema."""
+    uf = (request.form.get("uf") or "").strip().upper()
+
+    if uf == "BR":
+        # Remove a configuração -> volta para ESTADO_FERIADO (ou somente nacional)
+        for chave in ("uf_feriado", "cidade_feriado", "regiao_fonte"):
+            reg = Configuracao.query.get(chave)
+            if reg is not None:
+                db.session.delete(reg)
+        db.session.commit()
+        _invalidar_cache_regiao()
+        _sincronizar_feriados_lib()
+        flash("Feriados regionais definidos como nacionais (BR).", "success")
+        return redirect(url_for("admin_panel"))
+
+    if uf not in UFS_BRASIL:
+        flash("Sigla de UF inválida.", "danger")
+        return redirect(url_for("admin_panel"))
+
+    try:
+        _set_config("uf_feriado", uf)
+        _set_config("regiao_fonte", "manual")
+        # Remove a cidade (não faz sentido para definição manual por UF)
+        reg_cidade = Configuracao.query.get("cidade_feriado")
+        if reg_cidade is not None:
+            db.session.delete(reg_cidade)
+        db.session.commit()
+        _invalidar_cache_regiao()
+        _sincronizar_feriados_lib()
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Erro ao definir a região: {e}", "danger")
+        return redirect(url_for("admin_panel"))
+
+    flash(f"Feriados regionais definidos para {uf} ({UFS_BRASIL[uf]}).", "success")
     return redirect(url_for("admin_panel"))
 
 @app.route('/admin/enviar-lembrete-geral', methods=['POST'])

@@ -302,8 +302,6 @@
         }
 
         .badge-entrada { background: rgba(16, 185, 129, 0.2) !important; color: #34d399 !important; border: 1px solid rgba(16, 185, 129, 0.3); }
-        .badge-almoco { background: rgba(245, 158, 11, 0.2) !important; color: #fbbf24 !important; border: 1px solid rgba(245, 158, 11, 0.3); }
-        .badge-retorno { background: rgba(14, 165, 233, 0.2) !important; color: #38bdf8 !important; border: 1px solid rgba(14, 165, 233, 0.3); }
         .badge-saida { background: rgba(239, 68, 68, 0.2) !important; color: #f87171 !important; border: 1px solid rgba(239, 68, 68, 0.3); }
         .badge-ajustado { background: rgba(148, 163, 184, 0.08) !important; color: var(--text-muted) !important; border: 1px solid var(--card-border); }
     </style>
@@ -397,8 +395,6 @@
                         <select class="form-select" id="tipo" name="tipo">
                             <option value="">Todos</option>
                             <option value="Entrada" {% if request.args.get('tipo') == 'Entrada' %}selected{% endif %}>Entrada</option>
-                            <option value="Almoço" {% if request.args.get('tipo') == 'Almoço' %}selected{% endif %}>Almoço</option>
-                            <option value="Retorno" {% if request.args.get('tipo') == 'Retorno' %}selected{% endif %}>Retorno</option>
                             <option value="Saída" {% if request.args.get('tipo') == 'Saída' %}selected{% endif %}>Saída</option>
                         </select>
                     </div>
@@ -450,10 +446,6 @@
                             {% set t = reg.tipo if reg.tipo is defined else reg['tipo'] %}
                             {% if t == 'Entrada' %}
                                 <span class="badge badge-entrada px-3 py-2 rounded-pill fw-semibold">Entrada</span>
-                            {% elif t == 'Almoço' %}
-                                <span class="badge badge-almoco px-3 py-2 rounded-pill fw-semibold">Almoço</span>
-                            {% elif t == 'Retorno' %}
-                                <span class="badge badge-retorno px-3 py-2 rounded-pill fw-semibold">Retorno</span>
                             {% elif t == 'Saída' %}
                                 <span class="badge badge-saida px-3 py-2 rounded-pill fw-semibold">Saída</span>
                             {% else %}

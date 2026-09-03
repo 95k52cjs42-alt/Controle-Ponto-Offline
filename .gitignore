@@ -5,4 +5,8 @@ __pycache__/
 *.pyc
 instance/*.db
 instance/*.sqlite
+instance/*.bak*
 registro_ponto.csv
+static/uploads/
+.vscode/
+.htmlhintrc
