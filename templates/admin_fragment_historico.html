@@ -56,7 +56,8 @@
                     <th class="text-center">Data</th>
                     <th class="text-center">Tipo</th>
                     <th class="text-center">Horário</th>
-                    <th class="text-end pe-3">Status</th>
+                    <th class="text-center">Status</th>
+                    <th class="text-center">Ações</th>
                 </tr>
             </thead>
             <tbody>
@@ -93,7 +94,7 @@
                         {{ reg.hora }}
                     </td>
 
-                    <td class="text-end pe-3">
+                    <td class="text-center">
                         {% if reg.foi_ajustado %}
                             <span class="badge badge-ajustado px-2 py-1 rounded-3 small">
                                 <i class="bi bi-pencil-fill me-1 text-primary"></i>Ajustado
@@ -101,6 +102,15 @@
                         {% else %}
                             <span class="small" style="color: var(--text-muted);">-</span>
                         {% endif %}
+                    </td>
+
+                    <td class="text-center">
+                        <form method="POST" action="{{ url_for('admin_excluir_ponto', ponto_id=reg.id) }}" class="d-inline"
+                              onsubmit="return confirm('Tem certeza que deseja excluir este registro de ponto?');">
+                            <button type="submit" class="btn btn-link text-danger p-0 border-0 shadow-none" title="Excluir ponto">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </form>
                     </td>
                 </tr>
                 {% endfor %}
