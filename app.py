@@ -1346,8 +1346,13 @@ def registrar(tipo):
         foi_ajustado=False
     )
     db.session.add(novo_ponto)
-    db.session.commit()
-    _invalidar_notif_cache(current_user.id)
+    try:
+        db.session.commit()
+        _invalidar_notif_cache(current_user.id)
+    except Exception:
+        db.session.rollback()
+        flash("Erro ao registrar ponto. Tente novamente.", "danger")
+        return redirect(url_for("index"))
 
     flash(f"Ponto ({tipo}) registrado às {hora_atual} com sucesso!", "success")
     return redirect(url_for("index"))
@@ -1393,8 +1398,13 @@ def registrar_auto():
         foi_ajustado=False,
     )
     db.session.add(novo_ponto)
-    db.session.commit()
-    _invalidar_notif_cache(current_user.id)
+    try:
+        db.session.commit()
+        _invalidar_notif_cache(current_user.id)
+    except Exception:
+        db.session.rollback()
+        flash("Erro ao registrar ponto automaticamente. Tente novamente.", "danger")
+        return redirect(url_for("index"))
 
     flash(f"Ponto ({proximo}) registrado às {hora_atual} com sucesso!", "success")
     return redirect(url_for("index"))
