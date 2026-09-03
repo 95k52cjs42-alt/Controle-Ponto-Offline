@@ -138,9 +138,39 @@
         <div class="dashboard-card mb-4">
             <div class="d-flex justify-content-between align-items-center mb-3">
                 <h5 class="fw-bold m-0"><i class="bi bi-calendar-check text-primary me-2"></i>Feriados do Mês</h5>
-                <button type="button" class="btn btn-sm btn-outline-primary rounded-3" data-bs-toggle="modal" data-bs-target="#modalInformarFeriado">
-                    <i class="bi bi-plus-lg"></i> Novo
+                <div class="d-flex gap-2">
+                    <form method="POST" action="{{ url_for('sincronizar_feriados') }}" class="d-inline" title="Adicionar automaticamente os feriados nacionais e da região configurada">
+                        <button type="submit" class="btn btn-sm btn-outline-secondary rounded-3">
+                            <i class="bi bi-arrow-repeat"></i> Sincronizar
+                        </button>
+                    </form>
+                    <button type="button" class="btn btn-sm btn-outline-primary rounded-3" data-bs-toggle="modal" data-bs-target="#modalInformarFeriado">
+                        <i class="bi bi-plus-lg"></i> Novo
+                    </button>
+                </div>
+            </div>
+            <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+                <span class="badge rounded-pill py-1 px-3" id="regiaoBadge" style="background: rgba(37, 99, 235, 0.15); color: var(--text-main); border: 1px solid var(--card-border); font-weight: 500;">
+                    <i class="bi bi-geo-alt me-1"></i>
+                    <span id="regiaoBadgeTexto">
+                        {% if regiao_fonte == 'env' %}{{ regiao_uf }} (definido no servidor)
+                        {% elif regiao_uf == 'BR' %}Feriados nacionais (BR)
+                        {% else %}{{ regiao_uf }}{% if regiao_cidade %} – {{ regiao_cidade }}{% endif %}{% if regiao_fonte == 'manual' %} (manual){% endif %}{% endif %}
+                    </span>
+                </span>
+                <button type="button" class="btn btn-sm btn-outline-secondary rounded-3" id="btnDetectarRegiao" title="Detectar a região pela sua localização atual">
+                    <i class="bi bi-crosshair"></i> Detectar região
                 </button>
+                <form method="POST" action="{{ url_for('definir_regiao_feriados') }}" class="d-inline-flex align-items-center gap-1">
+                    <select id="selectRegiaoUf" name="uf" class="form-select form-select-sm" style="width: auto;" title="Definir manualmente a região dos feriados">
+                        <option value="BR" {% if regiao_uf == 'BR' %}selected{% endif %}>BR – Nacional</option>
+                        {% for sigla, nome in ufs_brasil.items() %}
+                            <option value="{{ sigla }}" {% if regiao_uf == sigla %}selected{% endif %}>{{ sigla }} – {{ nome }}</option>
+                        {% endfor %}
+                    </select>
+                    <button type="submit" class="btn btn-sm btn-outline-secondary rounded-3" title="Aplicar região"><i class="bi bi-check-lg"></i></button>
+                </form>
+                <input type="hidden" id="regiaoFonte" value="{{ regiao_fonte }}">
             </div>
             {% if feriados %}
                 <div class="list-group list-group-flush border-0">

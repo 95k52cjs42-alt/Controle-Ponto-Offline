@@ -41,11 +41,6 @@
             --badge-ponto-text: #e2e8f0;
             --badge-ponto-border: #2d3d54;
 
-            --badge-normal-bg: rgba(16, 185, 129, 0.15);
-            --badge-normal-text: #34d399;
-
-            --badge-falta-bg: rgba(239, 68, 68, 0.2);
-            --badge-falta-text: #fca5a5;
         }
 
         /* TEMA CLARO */
@@ -74,11 +69,6 @@
             --badge-ponto-text: #334155;
             --badge-ponto-border: #e2e8f0;
 
-            --badge-normal-bg: #e6f4ea;
-            --badge-normal-text: #1e7e34;
-
-            --badge-falta-bg: #ffebee;
-            --badge-falta-text: #c62828;
         }
 
         :root {
@@ -213,17 +203,6 @@
             border-radius: 0 var(--radius-md) var(--radius-md) 0; 
         }
 
-        /* Badges de Estado */
-        .badge-normal { 
-            background: var(--badge-normal-bg); 
-            color: var(--badge-normal-text); 
-        }
-
-        .badge-falta { 
-            background: var(--badge-falta-bg); 
-            color: var(--badge-falta-text); 
-        }
-
         .badge-ponto { 
             background: var(--badge-ponto-bg); 
             color: var(--badge-ponto-text); 
@@ -276,6 +255,25 @@
             </div>
         </div>
 
+        <!-- Flash Messages (feedback de ações) -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="mb-4 d-flex flex-column gap-2">
+                    {% for category, message in messages %}
+                        {% set cat = 'warning' if category == 'message' else category %}
+                        {% set cat = 'info' if cat not in ['danger', 'success', 'warning'] else cat %}
+                        <div class="alert alert-{{ cat }} alert-dismissible fade show border-0 shadow-sm rounded-4 mb-0 d-flex justify-content-between align-items-center" role="alert">
+                            <div class="d-flex align-items-center gap-2">
+                                <i class="bi {{ 'bi-exclamation-triangle-fill' if cat == 'warning' else 'bi-x-circle-fill' if cat == 'danger' else 'bi-check-circle-fill' if cat == 'success' else 'bi-info-circle-fill' }}"></i>
+                                <span>{{ message }}</span>
+                            </div>
+                            <button type="button" class="btn-close ms-2" data-bs-dismiss="alert" aria-label="Fechar"></button>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
+
         <!-- Banner de Notificação (Alerta Global) -->
         {% if notificacoes_usuario %}
             <div class="mb-4">
@@ -313,8 +311,6 @@
                     <select name="tipo_ponto" class="form-select">
                         <option value="">Todos</option>
                         <option value="Entrada" {% if tipo_ponto == 'Entrada' %}selected{% endif %}>Entrada</option>
-                        <option value="Almoço" {% if tipo_ponto == 'Almoço' %}selected{% endif %}>Almoço</option>
-                        <option value="Retorno" {% if tipo_ponto == 'Retorno' %}selected{% endif %}>Retorno</option>
                         <option value="Saída" {% if tipo_ponto == 'Saída' %}selected{% endif %}>Saída</option>
                     </select>
                 </div>
@@ -334,7 +330,6 @@
                     <tr class="small text-uppercase">
                         <th class="ps-3">Data</th>
                         <th>Batidas Realizadas</th>
-                        <th>Status / Faltantes</th>
                         <th class="text-center">Saldo do Dia</th>
                         <th class="text-end pe-3">Ação</th>
                     </tr>
@@ -359,24 +354,6 @@
                                         <span class="text-muted small italic">Nenhum ponto batido</span>
                                     {% endfor %}
                                 </div>
-                            </td>
-
-                            <!-- Status / O que faltou -->
-                            <td>
-                                {% if item.incompleto %}
-                                    <div class="d-flex flex-wrap align-items-center gap-1">
-                                        <span class="text-danger small fw-bold me-1"><i class="bi bi-x-circle-fill"></i> Faltou:</span>
-                                        {% for f in item.faltantes %}
-                                            <span class="badge badge-falta px-2 py-1 rounded-pill small">
-                                                {{ f }}
-                                            </span>
-                                        {% endfor %}
-                                    </div>
-                                {% else %}
-                                    <span class="badge badge-normal px-3 py-2 rounded-pill fw-semibold">
-                                        <i class="bi bi-check-circle-fill me-1"></i> Completo
-                                    </span>
-                                {% endif %}
                             </td>
 
                             <!-- Saldo do Dia (minutos faltantes/excedentes) -->
@@ -417,7 +394,7 @@
                         {% endfor %}
                     {% else %}
                         <tr>
-                            <td colspan="5" class="text-center py-5 text-muted custom-card rounded-4">
+                            <td colspan="4" class="text-center py-5 text-muted custom-card rounded-4">
                                 <i class="bi bi-inbox fs-2 d-block mb-2 text-secondary"></i>
                                 Nenhum registro encontrado para este período.
                             </td>
@@ -458,6 +435,15 @@
                 themeBtn.setAttribute('title', 'Mudar para Tema Escuro');
             }
         }
+
+        // Auto-dismiss dos alerts de flash messages após alguns segundos
+        setTimeout(function() {
+            document.querySelectorAll('.container .alert.alert-dismissible').forEach(function(alert) {
+                if (alert && typeof bootstrap !== 'undefined' && bootstrap.Alert) {
+                    new bootstrap.Alert(alert).close();
+                }
+            });
+        }, 6000);
     </script>
 </body>
 </html>

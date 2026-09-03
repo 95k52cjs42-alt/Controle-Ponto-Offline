@@ -37,6 +37,8 @@
             --soft-btn-bg: #f8fafc;
             --btn-main-bg: #1e293b;
             --btn-main-text: #ffffff;
+            --btn-auto-bg: linear-gradient(135deg, #334155, #1e293b);
+            --btn-auto-text: #ffffff;
 
             --radius-xl: 28px;
             --radius-md: 18px;
@@ -64,6 +66,8 @@
             --soft-btn-bg: #334155;
             --btn-main-bg: #38bdf8;
             --btn-main-text: #0f172a;
+            --btn-auto-bg: linear-gradient(135deg, #7dd3fc, #38bdf8);
+            --btn-auto-text: #0f172a;
         }
 
         body {
@@ -189,9 +193,32 @@
         .btn-ponto:disabled i { color: var(--text-muted) !important; }
 
         .btn-entrada { background: var(--mint-green); color: var(--mint-text); }
-        .btn-almoco  { background: var(--peach-orange); color: var(--peach-text); }
-        .btn-retorno { background: var(--sky-blue); color: var(--sky-text); }
         .btn-saida   { background: var(--lavender-purple); color: var(--lavender-text); }
+
+        .btn-auto {
+            background: var(--btn-auto-bg);
+            color: var(--btn-auto-text);
+            padding: 1rem 1.25rem;
+            font-size: 1.15rem;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            border-radius: var(--radius-md);
+            flex-direction: row;
+            justify-content: center;
+            gap: 10px;
+            box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
+        }
+        .btn-auto:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 22px rgba(0, 0, 0, 0.15);
+            filter: brightness(1.03);
+        }
+        .btn-auto:hover:not(:disabled) i {
+            transform: none;
+        }
+        .btn-auto i {
+            font-size: 1.35rem;
+        }
 
         .btn-main {
             background: var(--btn-main-bg);
@@ -244,12 +271,326 @@
             background: var(--soft-btn-bg);
             color: var(--text-dark);
         }
+
+        /* Cápsula de perfil do usuário (canto superior direito) */
+        .user-pill {
+            width: 44px; height: 44px; border: none; border-radius: 14px;
+            background: var(--lavender-purple); color: var(--lavender-text);
+            display: flex; align-items: center; justify-content: center;
+            transition: all 0.3s ease; cursor: pointer; padding: 0; overflow: hidden;
+        }
+        .user-pill:hover { transform: scale(1.08); opacity: 0.9; }
+        .user-pill img { border-radius: 10px; }
+        .user-menu-wrap { position: relative; }
+        .user-menu-wrap .dropdown-menu {
+            min-width: 230px; background: var(--pastel-card);
+            border: 1px solid var(--border-soft); border-radius: var(--radius-md);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.12); padding: 0.4rem;
+            color: var(--text-dark);
+        }
+        .user-menu-wrap .dropdown-header {
+            display: flex; align-items: center; gap: 0.6rem;
+            padding: 0.5rem 0.5rem 0.6rem; margin-bottom: 0.25rem;
+            color: var(--text-dark);
+        }
+        .user-menu-wrap .dropdown-header .um-name { font-weight: 700; color: var(--text-dark); font-size: .92rem; }
+        .user-menu-wrap .dropdown-header .um-email { color: var(--text-muted); font-size: .75rem; }
+        .user-menu-wrap .dropdown-item {
+            display: flex; align-items: center; gap: 0.55rem;
+            padding: 0.5rem 0.6rem; font-size: .88rem; border-radius: 10px; font-weight: 500;
+            color: var(--text-dark) !important;
+        }
+        .user-menu-wrap .dropdown-item i { font-size: 1rem; color: var(--text-muted); width: 20px; text-align: center; }
+        .user-menu-wrap .dropdown-item:hover { background: var(--soft-btn-bg); color: var(--text-dark) !important; }
+        .user-menu-wrap .dropdown-item.text-danger,
+        .user-menu-wrap .dropdown-item.text-danger i { color: #e11d48 !important; }
+        .user-menu-wrap .dropdown-item.text-danger:hover { background: #fee2e2; color: #be123c !important; }
+        .user-menu-wrap .dropdown-divider { margin: 0.25rem 0; border-color: var(--border-soft); }
+        .user-pill::after { display: none; }
+
+        /* Modo escuro: ajustes da cápsula de perfil */
+        [data-theme="dark"] .user-menu-wrap .dropdown-menu {
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+            background: var(--pastel-card);
+        }
+        [data-theme="dark"] .user-menu-wrap .dropdown-header,
+        [data-theme="dark"] .user-menu-wrap .dropdown-header .um-name,
+        [data-theme="dark"] .user-menu-wrap .dropdown-item { color: var(--text-dark) !important; }
+        [data-theme="dark"] .user-menu-wrap .dropdown-header .um-email,
+        [data-theme="dark"] .user-menu-wrap .dropdown-item i { color: var(--text-muted); }
+        [data-theme="dark"] .user-menu-wrap .dropdown-item:hover { background: var(--soft-btn-bg); color: var(--text-dark) !important; }
+        [data-theme="dark"] .user-menu-wrap .dropdown-item.text-danger,
+        [data-theme="dark"] .user-menu-wrap .dropdown-item.text-danger i { color: #fb7185 !important; }
+        [data-theme="dark"] .user-menu-wrap .dropdown-item.text-danger:hover {
+            background: rgba(244, 63, 94, 0.15); color: #fecaca !important;
+        }
+
+        /* ===== Perfil modals (app palette) ===== */
+        #modalFotoPerfil .modal-content,
+        #modalAlterarSenha .modal-content {
+            background: var(--pastel-card);
+            border: 1px solid var(--border-soft);
+            border-radius: var(--radius-md);
+            color: var(--text-dark);
+        }
+        #modalFotoPerfil .modal-header, #modalFotoPerfil .modal-footer,
+        #modalAlterarSenha .modal-header, #modalAlterarSenha .modal-footer { border-color: var(--border-soft); }
+        #modalFotoPerfil .modal-title, #modalAlterarSenha .modal-title { color: var(--text-dark); }
+        #modalFotoPerfil .form-control, #modalAlterarSenha .form-control {
+            background: var(--soft-btn-bg);
+            border: 1px solid var(--border-soft);
+            color: var(--text-dark);
+        }
+        #modalFotoPerfil .form-control::placeholder, #modalAlterarSenha .form-control::placeholder { color: var(--text-muted); }
+        #modalFotoPerfil .form-control:focus, #modalAlterarSenha .form-control:focus {
+            background: var(--soft-btn-bg);
+            border-color: var(--btn-main-bg);
+            box-shadow: 0 0 0 0.2rem rgba(30, 41, 59, 0.12);
+        }
+        #modalFotoPerfil .form-label, #modalAlterarSenha .form-label { color: var(--text-dark); }
+        #modalFotoPerfil .modal-footer .btn-light, #modalAlterarSenha .modal-footer .btn-light {
+            background: var(--soft-btn-bg);
+            border-color: var(--border-soft);
+            color: var(--text-dark);
+        }
+        #modalFotoPerfil .modal-footer .btn-light:hover, #modalAlterarSenha .modal-footer .btn-light:hover {
+            background: var(--border-soft); color: var(--text-dark);
+        }
+        #modalFotoPerfil .btn-close, #modalAlterarSenha .btn-close { opacity: 0.9; }
+        [data-theme="dark"] #modalFotoPerfil .btn-close,
+        [data-theme="dark"] #modalAlterarSenha .btn-close { filter: invert(1); }
+        /* Modo escuro: contorno das janelas modais mais escuro */
+        [data-theme="dark"] #modalFotoPerfil .modal-content,
+        [data-theme="dark"] #modalAlterarSenha .modal-content {
+            border-color: #0f172a;
+        }
+        [data-theme="dark"] #modalFotoPerfil .modal-header,
+        [data-theme="dark"] #modalFotoPerfil .modal-footer,
+        [data-theme="dark"] #modalAlterarSenha .modal-header,
+        [data-theme="dark"] #modalAlterarSenha .modal-footer { border-color: #0f172a; }
+        [data-theme="dark"] #modalFotoPerfil .form-control,
+        [data-theme="dark"] #modalAlterarSenha .form-control { border-color: #0f172a; }
+
+        /* === ESTILOS DO BOTAO "REGISTRAR PONTO" === */
+        #btnAuto { transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
+
+        /* ---- TEMA 1 · Minimal (outline sóbrio) ---- */
+        .btn-t1 {
+            background: transparent !important;
+            color: #1e293b !important;
+            border: 2px solid #1e293b;
+            font-family: 'Outfit', sans-serif;
+            font-weight: 700;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            box-shadow: none;
+        }
+        .btn-t1:hover:not(:disabled) { background: rgba(30, 41, 59, 0.06) !important; }
+        [data-theme="dark"] .btn-t1 {
+            background: transparent !important;
+            color: #38bdf8 !important;
+            border: 2px solid #38bdf8;
+            box-shadow: none;
+        }
+        [data-theme="dark"] .btn-t1:hover:not(:disabled) { background: rgba(56, 189, 248, 0.10) !important; }
+
+        /* ---- TEMA 2 · Neon (fundo escuro + glow ciano) ---- */
+        .btn-t2 {
+            background: #0f172a !important;
+            color: #22d3ee !important;
+            border: 1.5px solid #22d3ee;
+            font-family: 'Courier New', monospace;
+            font-weight: 700;
+            letter-spacing: 1.5px;
+            box-shadow: 0 0 14px rgba(34, 211, 238, 0.4), inset 0 0 10px rgba(34, 211, 238, 0.15);
+        }
+        .btn-t2:hover:not(:disabled) {
+            box-shadow: 0 0 26px rgba(34, 211, 238, 0.65), inset 0 0 14px rgba(34, 211, 238, 0.25);
+            border-color: #67e8f9;
+        }
+        [data-theme="dark"] .btn-t2 {
+            background: #020617 !important;
+            color: #67e8f9 !important;
+            border: 1.5px solid #67e8f9;
+            box-shadow: 0 0 16px rgba(103, 232, 249, 0.45), inset 0 0 10px rgba(103, 232, 249, 0.15);
+        }
+        [data-theme="dark"] .btn-t2:hover:not(:disabled) {
+            box-shadow: 0 0 30px rgba(103, 232, 249, 0.7), inset 0 0 14px rgba(103, 232, 249, 0.28);
+            border-color: #a5f3fc;
+        }
+
+        /* ---- TEMA 3 · Outline Pop (borda colorida grossa) ---- */
+        .btn-t3 {
+            background: transparent !important;
+            color: #059669 !important;
+            border: 3px solid #059669;
+            font-family: 'Outfit', sans-serif;
+            font-weight: 800;
+            letter-spacing: 0.5px;
+            box-shadow: none;
+        }
+        .btn-t3:hover:not(:disabled) { background: rgba(5, 150, 105, 0.07) !important; }
+        [data-theme="dark"] .btn-t3 {
+            background: transparent !important;
+            color: #34d399 !important;
+            border: 3px solid #34d399;
+            box-shadow: none;
+        }
+        [data-theme="dark"] .btn-t3:hover:not(:disabled) { background: rgba(52, 211, 153, 0.10) !important; }
+
+        /* ---- FORMATURAS DO BOTAO ---- */
+        /* F1 · Retângulo padrão (horizontal) */
+        .btn-shape-rect {
+            padding: 1rem 1.25rem;
+            border-radius: 14px;
+            flex-direction: row;
+            justify-content: center;
+            gap: 10px;
+        }
+        .btn-shape-rect i { font-size: 1.35rem; }
+        /* F2 · Alto (vertical, ícone em cima) */
+        .btn-shape-tall {
+            padding: 1.5rem 1rem;
+            border-radius: 18px;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+        }
+        .btn-shape-tall i { font-size: 2.2rem; }
+        .btn-shape-tall #btnAutoLabel { font-size: 1.1rem; }
+        /* F3 · Cápsula (pill) */
+        .btn-shape-capsule {
+            padding: 0.9rem 1.75rem;
+            border-radius: 999px;
+            flex-direction: row;
+            justify-content: center;
+            gap: 10px;
+        }
+        .btn-shape-capsule i { font-size: 1.3rem; }
+        /* F4 · Largo (uppercase espaçado) */
+        .btn-shape-wide {
+            padding: 1.1rem 2rem;
+            border-radius: 12px;
+            flex-direction: row;
+            justify-content: center;
+            gap: 12px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+        }
+        .btn-shape-wide i { font-size: 1.4rem; }
+        /* ---- EFEITO DE PULSO DO BOTAO (TESTE - 4 estilos) ---- */
+        /* Cores do pulso por tema (claro/escuro) */
+        .btn-t1 { --pulse-c: #1e293b; --pulse-cs: 30,41,59; --float-glow-o: 0; }
+        [data-theme="dark"] .btn-t1 { --pulse-c: #38bdf8; --pulse-cs: 56,189,248; --float-glow-o: 0.45; }
+        .btn-t3 { --pulse-c: #059669; --pulse-cs: 5,150,105; --float-glow-o: 0; }
+        [data-theme="dark"] .btn-t3 { --pulse-c: #34d399; --pulse-cs: 52,211,153; --float-glow-o: 0.45; }
+
+        /* Gatilhos: efeito aplicado aos temas 1 e 3 (estética outline) */
+        .btn-pulse-none { animation: none !important; }
+        .btn-pulse-glow.btn-t1, .btn-pulse-glow.btn-t3    { animation: btnPulseGlow 2.4s ease-in-out infinite; }
+        .btn-pulse-scale.btn-t1, .btn-pulse-scale.btn-t3  { animation: btnPulseScale 2.2s ease-in-out infinite; }
+        .btn-pulse-hybrid.btn-t1, .btn-pulse-hybrid.btn-t3 { animation: btnPulseHybrid 1.8s ease-in-out infinite; }
+        .btn-pulse-blink.btn-t1, .btn-pulse-blink.btn-t3  { animation: btnPulseBlink 2s ease-in-out infinite; }
+        .btn-pulse-shine.btn-t1, .btn-pulse-shine.btn-t3  { position: relative; overflow: hidden; }
+        .btn-pulse-gradient.btn-t1, .btn-pulse-gradient.btn-t3 { animation: btnGradientShift 6s ease-in-out infinite; }
+        .btn-pulse-float.btn-t1, .btn-pulse-float.btn-t3  { animation: btnFloat 3.2s ease-in-out infinite; }
+
+        /* Pausa no hover (não compete com o feedback de clique); para quando desabilitado */
+        .btn-auto.btn-pulse-glow:not(:disabled):hover,
+        .btn-auto.btn-pulse-scale:not(:disabled):hover,
+        .btn-auto.btn-pulse-hybrid:not(:disabled):hover,
+        .btn-auto.btn-pulse-blink:not(:disabled):hover,
+        .btn-auto.btn-pulse-gradient:not(:disabled):hover,
+        .btn-auto.btn-pulse-float:not(:disabled):hover { animation-play-state: paused; }
+        .btn-auto.btn-pulse-shine:not(:disabled):hover::before { animation-play-state: paused; }
+        .btn-auto:disabled { animation: none !important; }
+        .btn-auto.btn-pulse-shine:disabled::before { animation: none !important; }
+
+        @keyframes btnPulseGlow {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(var(--pulse-cs), 0); }
+            50%      { box-shadow: 0 0 22px 4px rgba(var(--pulse-cs), 0.42), 0 6px 18px rgba(0,0,0,0.12); }
+        }
+        @keyframes btnPulseScale {
+            0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(var(--pulse-cs), 0); }
+            50%      { transform: scale(1.035); box-shadow: 0 0 16px 2px rgba(var(--pulse-cs), 0.30), 0 8px 20px rgba(0,0,0,0.12); }
+        }
+        @keyframes btnPulseHybrid {
+            0%, 100% { transform: scale(1.0); box-shadow: 0 0 0 0 rgba(var(--pulse-cs), 0); }
+            50%      { transform: scale(1.045); box-shadow: 0 0 28px 6px rgba(var(--pulse-cs), 0.5), 0 8px 22px rgba(0,0,0,0.14); }
+        }
+        @keyframes btnPulseBlink {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(var(--pulse-cs), 0); border-color: var(--pulse-c); }
+            50%      { box-shadow: 0 0 14px 2px rgba(var(--pulse-cs), 0.55); }
+        }
+
+        /* Shine sweep: brilho deslizante que atravessa o botão */
+        .btn-auto.btn-pulse-shine::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 55%;
+            height: 100%;
+            background: linear-gradient(115deg, transparent, rgba(var(--pulse-cs), 0.30), transparent);
+            transform: translateX(-130%) skewX(-20deg);
+            pointer-events: none;
+            z-index: 2;
+            border-radius: inherit;
+            animation: btnShineSweep 3s ease-in-out infinite;
+            will-change: transform;
+        }
+        @keyframes btnShineSweep {
+            0%, 45% { transform: translateX(-130%) skewX(-20deg); }
+            90%, 100% { transform: translateX(260%) skewX(-20deg); }
+        }
+
+        /* Gradiente animado: shift suave de tonalidade mantendo a estética */
+        @keyframes btnGradientShift {
+            0%, 100% { filter: hue-rotate(0deg); }
+            50%      { filter: hue-rotate(28deg); }
+        }
+
+        /* Flutuar: botão levita suavemente com sombra que responde */
+        /* O glow colorido nas bordas só se manifesta no modo escuro (--float-glow-o: 0 no claro) */
+        @keyframes btnFloat {
+            0%, 100% { transform: translateY(0); box-shadow: 0 6px 18px rgba(0,0,0,0.12), 0 0 6px 1px rgba(var(--pulse-cs), var(--float-glow-o)); }
+            50%      { transform: translateY(-7px); box-shadow: 0 14px 26px rgba(0,0,0,0.18), 0 0 18px 3px rgba(var(--pulse-cs), var(--float-glow-o)); }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .btn-auto.btn-pulse-glow, .btn-auto.btn-pulse-scale,
+            .btn-auto.btn-pulse-hybrid, .btn-auto.btn-pulse-blink,
+            .btn-auto.btn-pulse-gradient, .btn-auto.btn-pulse-float { animation: none !important; }
+            .btn-auto.btn-pulse-shine::before { animation: none !important; }
+        }
+
     </style>
 </head>
 <body class="d-flex align-items-center justify-content-center py-5">
 
-    <!-- Toasts de Notificação -->
+    <!-- Toasts de Notificação + Flash Messages -->
     <div class="toast-container position-fixed top-0 end-0 p-3" style="z-index: 1090;">
+        <!-- Flash Messages (do Flask: sucesso, erro, etc.) -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                {% set toast_bg = 'bg-danger' if category == 'danger' else 'bg-success' if category == 'success' else 'bg-warning text-dark' if category == 'warning' else 'bg-info' if category == 'info' else 'bg-primary' %}
+                {% set toast_icon = 'bi-x-circle-fill' if category == 'danger' else 'bi-check-circle-fill' if category == 'success' else 'bi-exclamation-triangle-fill' if category == 'warning' else 'bi-info-circle-fill' %}
+                {% set close_class = '' if category == 'warning' else 'btn-close-white' %}
+                <div class="toast align-items-center text-white border-0 shadow-lg mb-2 {{ toast_bg }}" role="alert" aria-live="assertive" aria-atomic="true" data-bs-delay="8000">
+                    <div class="d-flex">
+                        <div class="toast-body fw-semibold">
+                            <i class="bi {{ toast_icon }} me-1"></i>
+                            {{ message }}
+                        </div>
+                        <button type="button" class="btn-close {{ close_class }} me-2 m-auto" data-bs-dismiss="toast" aria-label="Fechar"></button>
+                    </div>
+                </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <!-- Toasts de Notificação (banco de dados) -->
         {% if notificacoes_usuario %}
             {% for n in notificacoes_usuario %}
                 {% if n.tipo == 'danger' %}
@@ -259,7 +600,7 @@
                             <strong class="d-block"><i class="bi bi-exclamation-triangle-fill me-1"></i> {{ n.titulo }}</strong>
                             {{ n.mensagem }}
                             <div class="mt-2 pt-2 border-top border-light">
-                                <a href="{{ n.link if n.link else '#' }}" class="btn btn-light btn-sm fw-bold text-danger">Ver no Histórico</a>
+                                <a href="{{ n.link|default('#', true) }}" class="btn btn-light btn-sm fw-bold text-danger">Ver no Histórico</a>
                             </div>
                         </div>
                         <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
@@ -276,9 +617,9 @@
             <!-- Topo com Boas-Vindas, Notificação e Botão de Tema -->
             <div class="d-flex justify-content-between align-items-center mb-4">
                 <div>
-                    <span class="badge rounded-pill text-secondary bg-body-tertiary border px-3 py-1 mb-1 fw-normal">
+                    <p class="mb-1 small" style="color: var(--text-muted);">
                         👋 Bem-vindo(a) de volta
-                    </span>
+                    </p>
                     <h4 class="fw-bold m-0" style="color: var(--text-dark);">
                         {% if current_user and current_user.is_authenticated and current_user.nome %}
                             {{ current_user.nome }}
@@ -308,7 +649,7 @@
                             {% if notificacoes_usuario %}
                                 {% for n in notificacoes_usuario %}
                                 <li>
-                                    <a class="dropdown-item rounded-3 p-2 my-1 text-wrap small" href="{{ n.link if n.link else '#' }}">
+                                    <a class="dropdown-item rounded-3 p-2 my-1 text-wrap small" href="{{ n.link|default('#', true) }}">
                                         <strong>{{ n.titulo }}</strong><br>
                                         <span class="text-muted">{{ n.mensagem }}</span>
                                     </a>
@@ -319,6 +660,39 @@
                             {% endif %}
                         </ul>
                     </div>
+
+                        <!-- Cápsula de Perfil do Usuário -->
+                        <div class="dropdown user-menu-wrap">
+                            <a href="#" class="user-pill text-decoration-none" data-bs-toggle="dropdown" aria-expanded="false" title="Menu do usuário">
+                                {% if current_user and current_user.is_authenticated and current_user.foto_url %}
+                                    <img src="{{ current_user.foto_url }}" alt="Foto" class="w-100 h-100 object-fit-cover">
+                                {% else %}
+                                    <i class="bi bi-person-fill fs-5"></i>
+                                {% endif %}
+                            </a>
+                            <ul class="dropdown-menu dropdown-menu-end mt-2">
+                                <li>
+                                    <div class="dropdown-header">
+                                        {% if current_user and current_user.is_authenticated and current_user.foto_url %}
+                                            <img src="{{ current_user.foto_url }}" alt="Foto" class="rounded-circle object-fit-cover" style="width:38px;height:38px;border:2px solid var(--btn-main-bg);">
+                                        {% else %}
+                                            <div class="rounded-circle d-flex align-items-center justify-content-center fw-bold text-white" style="width:38px;height:38px;background:var(--btn-main-bg);">
+                                                {{ current_user.nome[0]|upper if current_user and current_user.is_authenticated and current_user.nome else 'U' }}
+                                            </div>
+                                        {% endif %}
+                                        <div>
+                                            <div class="um-name">{{ current_user.nome if current_user and current_user.is_authenticated and current_user.nome else 'Usuário' }}</div>
+                                            <div class="um-email">{{ current_user.email if current_user and current_user.is_authenticated and current_user.email else '' }}</div>
+                                        </div>
+                                    </div>
+                                </li>
+                                <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#modalFotoPerfil"><i class="bi bi-camera"></i> Alterar Foto</a></li>
+                                <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#modalAlterarSenha"><i class="bi bi-key"></i> Alterar Senha</a></li>
+                                <li><hr class="dropdown-divider"></li>
+                                <li><a class="dropdown-item text-danger" href="{{ url_for('logout') }}"><i class="bi bi-box-arrow-right"></i> Sair</a></li>
+                            </ul>
+                        </div>
+
                 </div>
             </div>
 
@@ -326,49 +700,31 @@
             <div class="clock-box text-center mb-4">
                 <span class="small fw-semibold text-uppercase" id="data-extenso" style="color: #adb5bd !important;">--</span>
                 <div class="clock-display my-1" id="clock">00:00:00</div>
-                <span class="badge bg-body-tertiary border text-secondary rounded-pill px-3 py-1 shadow-sm small">
+                <div class="mt-2 small fw-bold" style="color: var(--text-muted, #6c757d);">
                     <i class="bi bi-clock-history me-1 text-primary"></i> ÚLTIMO: {{ ultimo_ponto|default('--:--') }}
-                </span>
+                </div>
+                <div class="mt-3 p-3 rounded-4 text-start" style="background:var(--pastel-card, rgba(0,0,0,0.03));border:1px solid var(--border-soft, rgba(0,0,0,0.08));">
+                    <div class="d-flex justify-content-between align-items-center small">
+                        <span style="color:var(--text-muted);"><i class="bi bi-stopwatch me-1"></i>Tempo de hoje</span>
+                        <span class="fw-bold" id="tempoHoje">--:--</span>
+                    </div>
+                    <hr class="my-2 opacity-25">
+                    <div class="d-flex justify-content-between align-items-center small">
+                        <span style="color:var(--text-muted);">Saldo vs 8h</span>
+                        <span class="fw-bold" id="saldoHoje">--:--</span>
+                    </div>
+                </div>
             </div>
 
-            <!-- Grid de Registro de Ponto -->
-            {% set pb = pontos_batidos|default([]) %}
-            <div class="row g-3 mb-4">
-                <div class="col-6">
-                    <form action="{{ url_for('registrar', tipo='Entrada') }}" method="POST">
-                        <button type="submit" class="btn-ponto btn-entrada" {% if 'Entrada' in pb %}disabled{% endif %}>
-                            <i class="bi bi-sun-fill"></i>
-                            <span>Entrada</span>
-                        </button>
-                    </form>
-                </div>
-
-                <div class="col-6">
-                    <form action="{{ url_for('registrar', tipo='Almoço') }}" method="POST">
-                        <button type="submit" class="btn-ponto btn-almoco" {% if 'Entrada' not in pb or 'Almoço' in pb %}disabled{% endif %}>
-                            <i class="bi bi-cup-hot-fill"></i>
-                            <span>Almoço</span>
-                        </button>
-                    </form>
-                </div>
-
-                <div class="col-6">
-                    <form action="{{ url_for('registrar', tipo='Retorno') }}" method="POST">
-                        <button type="submit" class="btn-ponto btn-retorno" {% if 'Almoço' not in pb or 'Retorno' in pb %}disabled{% endif %}>
-                            <i class="bi bi-briefcase-fill"></i>
-                            <span>Retorno</span>
-                        </button>
-                    </form>
-                </div>
-
-                <div class="col-6">
-                    <form action="{{ url_for('registrar', tipo='Saída') }}" method="POST">
-                        <button type="submit" class="btn-ponto btn-saida" {% if 'Retorno' not in pb or 'Saída' in pb %}disabled{% endif %}>
-                            <i class="bi bi-moon-stars-fill"></i>
-                            <span>Saída</span>
-                        </button>
-                    </form>
-                </div>
+            <!-- Botão Único de Registro -->
+            {% set pt = proximo_tipo|default('Entrada') %}
+            <div class="mb-4">
+                <form action="{{ url_for('registrar_auto') }}" method="POST">
+                    <button type="submit" id="btnAuto" class="btn-ponto btn-auto btn-t3 btn-shape-tall btn-pulse-float w-100">
+                        <i class="bi bi-clock-fill"></i>
+                        <span id="btnAutoLabel">{{ pt }}</span>
+                    </button>
+                </form>
             </div>
 
             <!-- Botões Secundários -->
@@ -396,11 +752,78 @@
                     </a>
                 {% endif %}
 
-                <a href="{{ url_for('logout') }}" class="small fw-semibold text-center mt-3 small" style="color: #adb5bd">
+                <a href="{{ url_for('logout') }}" class="small fw-semibold text-center mt-3" style="color: #adb5bd">
                     Encerrar Sessão
                 </a>
             </div>
 
+        </div>
+    </div>
+
+
+    <!-- Modal Alterar Foto de Perfil -->
+    <div class="modal fade" id="modalFotoPerfil" tabindex="-1" aria-labelledby="modalFotoPerfilLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-sm">
+            <div class="modal-content" style="background:var(--pastel-card);border:1px solid var(--border-soft);border-radius:var(--radius-md);color:var(--text-dark);">
+                <div class="modal-header border-bottom py-2">
+                    <h6 class="modal-title fw-bold" id="modalFotoPerfilLabel"><i class="bi bi-person-circle me-1"></i> Foto de Perfil</h6>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <form action="{{ url_for('upload_foto_perfil') }}" method="POST" enctype="multipart/form-data">
+                    <div class="modal-body text-center py-3">
+                        <div class="mb-3">
+                            {% if current_user and current_user.is_authenticated and current_user.foto_url %}
+                                <img src="{{ current_user.foto_url }}" class="rounded-circle object-fit-cover mb-2" style="width:90px;height:90px;border:2px solid var(--btn-main-bg);">
+                            {% else %}
+                                <div class="rounded-circle d-inline-flex align-items-center justify-content-center fw-bold fs-2 text-white mb-2" style="width:90px;height:90px;background:var(--btn-main-bg);">
+                                    {{ current_user.nome[0]|upper if current_user and current_user.is_authenticated and current_user.nome else 'U' }}
+                                </div>
+                            {% endif %}
+                        </div>
+                        <label for="fotoInput" class="form-label small">Selecione uma imagem (PNG, JPG, JPEG, GIF)</label>
+                        <input class="form-control form-control-sm" type="file" id="fotoInput" name="foto" accept="image/*" required>
+                    </div>
+                    <div class="modal-footer border-top py-2">
+                        <button type="button" class="btn btn-light btn-sm" data-bs-dismiss="modal">Cancelar</button>
+                        <button type="submit" class="btn btn-primary btn-sm" style="background:var(--btn-main-bg);border-color:var(--btn-main-bg);"><i class="bi bi-upload me-1"></i> Enviar Foto</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Alterar Senha -->
+    <div class="modal fade" id="modalAlterarSenha" tabindex="-1" aria-labelledby="modalAlterarSenhaLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-sm">
+            <div class="modal-content" style="background:var(--pastel-card);border:1px solid var(--border-soft);border-radius:var(--radius-md);color:var(--text-dark);">
+                <div class="modal-header border-bottom py-2">
+                    <h6 class="modal-title fw-bold" id="modalAlterarSenhaLabel"><i class="bi bi-key me-1"></i> Alterar Senha</h6>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <form action="{{ url_for('alterar_senha') }}" method="POST">
+                    <div class="modal-body py-3">
+                        <div class="mb-3">
+                            <label for="senhaAtual" class="form-label small fw-semibold">Senha atual</label>
+                            <input type="password" class="form-control form-control-sm" id="senhaAtual" name="senha_atual" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="novaSenha" class="form-label small fw-semibold">Nova senha</label>
+                            <input type="password" class="form-control form-control-sm" id="novaSenha" name="nova_senha" required>
+                        </div>
+                        <div class="mb-2">
+                            <label for="confirmarSenha" class="form-label small fw-semibold">Confirmar nova senha</label>
+                            <input type="password" class="form-control form-control-sm" id="confirmarSenha" name="confirmar_senha" required>
+                        </div>
+                        <div class="small mt-2" style="color:var(--text-muted);">
+                            A senha deve ter pelo menos 8 caracteres, uma letra maiúscula, uma minúscula, um número e um dos símbolos @, # ou *.
+                        </div>
+                    </div>
+                    <div class="modal-footer border-top py-2">
+                        <button type="button" class="btn btn-light btn-sm" data-bs-dismiss="modal">Cancelar</button>
+                        <button type="submit" class="btn btn-primary btn-sm" style="background:var(--btn-main-bg);border-color:var(--btn-main-bg);"><i class="bi bi-check-lg me-1"></i> Salvar</button>
+                    </div>
+                </form>
+            </div>
         </div>
     </div>
 
@@ -427,6 +850,93 @@
         setInterval(updateClock, 1000);
         updateClock();
 
+        // 1.5 LÓGICA DO SALDO EM TEMPO REAL (fuso America/Sao_Paulo)
+        (function () {
+            const pontos = {{ pontos_today|tojson }};
+            const cargaMin = {{ carga_diaria_min|default(480) }};
+            const tz = 'America/Sao_Paulo';
+
+            function parseHora(h) {
+                if (!h) return null;
+                const parts = String(h).split(':').map(Number);
+                return (parts[0] || 0) * 3600 + (parts[1] || 0) * 60 + (parts[2] || 0);
+            }
+
+            function fmtHMS(seg) {
+                const neg = seg < 0;
+                seg = Math.abs(seg);
+                const h = Math.floor(seg / 3600);
+                const m = Math.floor((seg % 3600) / 60);
+                const s = Math.floor(seg % 60);
+                return (neg ? '-' : '') + String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+            }
+
+            function agoraSpSeg() {
+                const parts = new Intl.DateTimeFormat('pt-BR', {
+                    timeZone: tz, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+                }).formatToParts(new Date());
+                const get = function (t) {
+                    const x = parts.find(function (p) { return p.type === t; });
+                    return x ? parseInt(x.value, 10) : 0;
+                };
+                const h24 = get('hour') % 24;
+                return h24 * 3600 + get('minute') * 60 + get('second');
+            }
+
+            function calcular() {
+                // Separa entradas e saídas preservando a ordem de registro
+                var entradas = [];
+                var saidas = [];
+                for (var i = 0; i < pontos.length; i++) {
+                    var p = pontos[i];
+                    if (p.tipo === 'Entrada') entradas.push(parseHora(p.hora));
+                    else if (p.tipo === 'Saída') saidas.push(parseHora(p.hora));
+                }
+                var agora = agoraSpSeg();
+                var trabalhado = 0;
+
+                // Pareia Entrada[i] -> Saída[i]
+                var pares = Math.min(entradas.length, saidas.length);
+                for (var i = 0; i < pares; i++) {
+                    if (saidas[i] !== null && entradas[i] !== null && saidas[i] > entradas[i]) {
+                        trabalhado += (saidas[i] - entradas[i]);
+                    }
+                }
+
+                // Se sobrou uma Entrada sem Saída, calcula até agora (parcial)
+                if (entradas.length > saidas.length) {
+                    var ultimaEntrada = entradas[entradas.length - 1];
+                    if (ultimaEntrada !== null && agora > ultimaEntrada) {
+                        trabalhado += (agora - ultimaEntrada);
+                    }
+                }
+
+                return { trabalhado: trabalhado, saldoSeg: trabalhado - cargaMin * 60 };
+            }
+
+            function render() {
+                var tEl = document.getElementById('tempoHoje');
+                var sEl = document.getElementById('saldoHoje');
+                if (!tEl || !sEl) return;
+
+                // No modelo de pares ilimitados não existe "almoço" fixo;
+                // o saldo é calculado pareando cada Entrada com sua Saída.
+                var c = calcular();
+                tEl.textContent = fmtHMS(c.trabalhado) + 'h';
+
+                if (c.saldoSeg >= 0) {
+                    sEl.textContent = '+' + fmtHMS(c.saldoSeg) + 'h';
+                    sEl.style.color = '#198754';
+                } else {
+                    sEl.textContent = fmtHMS(c.saldoSeg) + 'h';
+                    sEl.style.color = '#dc3545';
+                }
+            }
+
+            render();
+            setInterval(render, 1000);
+        })();
+
         // 2. LÓGICA DE ALTERNAR MODO ESCURO / MODO CLARO
         const themeToggleBtn = document.getElementById('themeToggleBtn');
         const themeIcon = document.getElementById('themeIcon');
@@ -445,11 +955,16 @@
         function applyTheme(theme) {
             if (theme === 'dark') {
                 htmlElement.setAttribute('data-theme', 'dark');
+                htmlElement.setAttribute('data-bs-theme', 'dark');
+
                 themeIcon.classList.remove('bi-moon-stars-fill');
                 themeIcon.classList.add('bi-sun-fill');
                 localStorage.setItem('theme', 'dark');
+
             } else {
                 htmlElement.removeAttribute('data-theme');
+                htmlElement.removeAttribute('data-bs-theme');
+
                 themeIcon.classList.remove('bi-sun-fill');
                 themeIcon.classList.add('bi-moon-stars-fill');
                 localStorage.setItem('theme', 'light');
@@ -464,6 +979,7 @@
                 toast.show();
             });
         });
+
     </script>
 </body>
 </html>
