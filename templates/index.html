@@ -220,6 +220,17 @@
             font-size: 1.35rem;
         }
 
+        /* Estado de loading do botao registrar ponto */
+        #btnAuto.btn-loading {
+            pointer-events: none;
+            opacity: 0.75;
+        }
+        #btnAuto.btn-loading .spinner-border {
+            width: 1.35rem;
+            height: 1.35rem;
+            border-width: 0.2em;
+        }
+
         .btn-main {
             background: var(--btn-main-bg);
             color: var(--btn-main-text);
@@ -971,7 +982,25 @@
             }
         }
 
-        // 3. ATIVAÇÃO DOS TOASTS
+        // 3. ANTI-DUPLO-CLIQUE NO BOTAO REGISTRAR PONTO
+        (function() {
+            var form = document.querySelector('form[action*="/registrar"]');
+            if (!form) return;
+            form.addEventListener('submit', function(e) {
+                var btn = document.getElementById('btnAuto');
+                if (!btn || btn.disabled) { e.preventDefault(); return; }
+                btn.disabled = true;
+                btn.classList.add('btn-loading');
+                var label = document.getElementById('btnAutoLabel');
+                var icone = btn.querySelector('i.bi');
+                if (icone) {
+                    icone.className = 'spinner-border spinner-border-sm me-2';
+                }
+                if (label) label.textContent = 'Registrando...';
+            });
+        })();
+
+        // 4. ATIVAÇÃO DOS TOASTS
         document.addEventListener("DOMContentLoaded", function () {
             var toastElList = [].slice.call(document.querySelectorAll('.toast'));
             toastElList.map(function (toastEl) {

@@ -1320,6 +1320,24 @@ def registrar(tipo):
         flash("Tipo de ponto inválido.", "danger")
         return redirect(url_for("index"))
 
+    # Anti-duplicata: evita duplo-clique - bloqueia QUALQUER ponto criado nos últimos 5s
+    # (o frontend também desabilita o botão; esta é a camada de segurança do servidor)
+    try:
+        threshold = agora - timedelta(seconds=5)
+        ultimo = RegistroPonto.query.filter(
+            RegistroPonto.usuario_id == current_user.id,
+            RegistroPonto.data == data_atual
+        ).order_by(RegistroPonto.id.desc()).first()
+        if ultimo:
+            dup_hora = ultimo.hora
+            dup_h, dup_m, dup_s = (int(x) for x in dup_hora.split(":"))
+            dup_dt = agora.replace(hour=dup_h, minute=dup_m, second=int(dup_s), microsecond=0)
+            if dup_dt >= threshold:
+                flash("Ponto já registrado recentemente. Por favor, aguarde.", "warning")
+                return redirect(url_for("index"))
+    except Exception:
+        pass
+
     novo_ponto = RegistroPonto(
         data=data_atual,
         tipo=tipo,
@@ -1349,6 +1367,23 @@ def registrar_auto():
     # Nunca fica sem um próximo ponto: sempre será "Entrada" ou "Saída"
     proximo = faltantes[0] if faltantes else "Entrada"
     hora_atual = agora.strftime("%H:%M:%S")
+
+    # Anti-duplicata: evita duplo-clique - bloqueia QUALQUER ponto criado nos últimos 5s
+    try:
+        threshold = agora - timedelta(seconds=5)
+        ultimo = RegistroPonto.query.filter(
+            RegistroPonto.usuario_id == current_user.id,
+            RegistroPonto.data == data_atual
+        ).order_by(RegistroPonto.id.desc()).first()
+        if ultimo:
+            dup_hora = ultimo.hora
+            dup_h, dup_m, dup_s = (int(x) for x in dup_hora.split(":"))
+            dup_dt = agora.replace(hour=dup_h, minute=dup_m, second=int(dup_s), microsecond=0)
+            if dup_dt >= threshold:
+                flash("Ponto já registrado recentemente. Por favor, aguarde.", "warning")
+                return redirect(url_for("index"))
+    except Exception:
+        pass
 
     novo_ponto = RegistroPonto(
         data=data_atual,
