@@ -1351,13 +1351,23 @@ def index():
 
     pontos_hoje_objs = RegistroPonto.query.filter_by(
         usuario_id=current_user.id, data=data_hoje
-    ).order_by(RegistroPonto.id.asc()).all()
+    ).order_by(RegistroPonto.hora.asc()).all()
 
+    # Último ponto: primeiro busca o ponto mais recente de HOJE (por hora),
+    # para que ajustes/correções com ID alto não distorçam o resultado.
     ultimo_ponto_obj = (
-        RegistroPonto.query.filter_by(usuario_id=current_user.id)
-        .order_by(RegistroPonto.id.desc())
+        RegistroPonto.query.filter_by(usuario_id=current_user.id, data=data_hoje)
+        .order_by(RegistroPonto.hora.desc())
         .first()
     )
+    # Fallback: se hoje ainda não houve batida, mostra o último registro global
+    # (com a data) para o card não ficar vazio de manhã.
+    if not ultimo_ponto_obj:
+        ultimo_ponto_obj = (
+            RegistroPonto.query.filter_by(usuario_id=current_user.id)
+            .order_by(RegistroPonto.id.desc())
+            .first()
+        )
 
     if ultimo_ponto_obj:
         ultimo_ponto = f"{ultimo_ponto_obj.tipo} às {ultimo_ponto_obj.hora} ({ultimo_ponto_obj.data})"
@@ -1448,7 +1458,7 @@ def registrar_auto():
 
     registros_hoje = RegistroPonto.query.filter_by(
         usuario_id=current_user.id, data=data_atual
-    ).order_by(RegistroPonto.id.asc()).all()
+    ).order_by(RegistroPonto.hora.asc()).all()
 
     faltantes = identificar_pontos_faltantes(registros_hoje)
     # Nunca fica sem um próximo ponto: sempre será "Entrada" ou "Saída"
@@ -1530,7 +1540,13 @@ def meu_historico():
     for d_obj in datas_intervalo:
         data_str = d_obj.strftime("%d/%m/%Y")
         registros_do_dia = dias_registrados.get(d_obj, [])
-        
+        # Ordena por hora (ordem cronológica): o agrupamento global vem em ordem de
+        # inserção (id.desc) e pode ficar invertido após correções/adições tardias.
+        registros_do_dia = sorted(
+            registros_do_dia,
+            key=lambda r: _parse_hora(getattr(r, "hora", None)) or datetime.min.time()
+        )
+
         # Se NÃO for dia útil e NÃO houver registros, pula o dia
         if not eh_dia_util(d_obj) and not registros_do_dia:
             continue
@@ -2282,6 +2298,16 @@ def admin_fragment(view_name):
                     registros_filtrados.append(r)
             registros = registros_filtrados
 
+        # Ordena cronologicamente (data DESC, hora DESC) para exibição correta:
+        # correções tardias têm ID alto mas hora antiga.
+        def _chave_crono(r):
+            try:
+                d = datetime.strptime(r.data, "%d/%m/%Y") if r.data else datetime.min
+            except (ValueError, TypeError):
+                d = datetime.min
+            return (d, r.hora or "")
+        registros = sorted(registros, key=_chave_crono, reverse=True)
+
         usuarios = Usuario.query.order_by(Usuario.nome.asc()).all()
         total_solicitacoes_pendentes = SolicitacaoCorrecao.query.filter_by(status="Pendente").count()
         return render_template(
@@ -2352,6 +2378,16 @@ def admin_historico():
             except ValueError:
                 registros_filtrados.append(r)
         registros = registros_filtrados
+
+    # Ordena cronologicamente (data DESC, hora DESC) para exibição correta:
+    # correções tardias têm ID alto mas hora antiga.
+    def _chave_crono(r):
+        try:
+            d = datetime.strptime(r.data, "%d/%m/%Y") if r.data else datetime.min
+        except (ValueError, TypeError):
+            d = datetime.min
+        return (d, r.hora or "")
+    registros = sorted(registros, key=_chave_crono, reverse=True)
 
     usuarios = Usuario.query.order_by(Usuario.nome.asc()).all()
     total_solicitacoes_pendentes = SolicitacaoCorrecao.query.filter_by(status="Pendente").count()
@@ -2539,6 +2575,11 @@ def admin_logs():
 def admin_exportar_afd():
     # Geração de arquivo simplificada conforme layout AFD (Portaria 671)
     registros = RegistroPonto.query.order_by(RegistroPonto.id.asc()).all()
+    # Re-ordena cronologicamente: correções tardias podem ter ID alto mas hora antiga
+    registros = sorted(
+        registros,
+        key=lambda r: (datetime.strptime(r.data, "%d/%m/%Y") if r.data else datetime.min, r.hora or "")
+    )
     
     output = io.StringIO()
     # NSR (Número Sequencial de Registro)
@@ -2613,6 +2654,11 @@ def admin_exportar_ponto(user_id):
                 primeira_data = d_obj
         except ValueError:
             pass
+
+    # Ordena registros de cada dia por hora (cronológica): correções tardias podem
+    # ter ID alto mas hora anterior à de batidas anteriores do mesmo dia.
+    for d in dias_registrados:
+        dias_registrados[d].sort(key=lambda x: x[1])
 
     # Aplica filtro de período
     if data_inicio_obj:
