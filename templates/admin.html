@@ -1006,28 +1006,6 @@
                             </select>
                         </div>
 
-                        <!-- Modo: Adicionar ou Substituir -->
-                        <div class="mb-3">
-                            <label class="form-label text-muted small fw-semibold">Ação</label>
-                            <div class="d-flex gap-2">
-                                <div class="form-check flex-fill p-0">
-                                    <input class="form-check-input d-none" type="radio" name="modo" id="modoAdicionar" value="adicionar" checked>
-                                    <label class="d-block text-center p-2 rounded-3 w-100" for="modoAdicionar" style="cursor: pointer; border: 2px solid var(--blue-accent); background: rgba(37, 99, 235, 0.1); color: var(--blue-accent); font-weight: 600; font-size: 0.82rem; transition: all 0.2s;">
-                                        <i class="bi bi-plus-circle me-1"></i> Adicionar Novo
-                                    </label>
-                                </div>
-                                <div class="form-check flex-fill p-0">
-                                    <input class="form-check-input d-none" type="radio" name="modo" id="modoSubstituir" value="substituir">
-                                    <label class="d-block text-center p-2 rounded-3 w-100" for="modoSubstituir" style="cursor: pointer; border: 2px solid var(--card-border); background: transparent; color: var(--text-muted); font-weight: 600; font-size: 0.82rem; transition: all 0.2s;">
-                                        <i class="bi bi-pencil-square me-1"></i> Substituir Existente
-                                    </label>
-                                </div>
-                            </div>
-                            <small class="text-muted d-block mt-1" id="modoDescricao">
-                                <i class="bi bi-info-circle me-1"></i>Cria um novo registro, preservando os existentes do mesmo tipo.
-                            </small>
-                        </div>
-
                         <div class="mb-3">
                             <label for="justificativaLancarPonto" class="form-label text-muted small fw-semibold">Justificativa / Observação (opcional)</label>
                             <textarea class="form-control" id="justificativaLancarPonto" name="justificativa" rows="2" placeholder="Motivo do lançamento manual..." style="background: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main); border-radius: var(--radius-btn); padding: 0.65rem; resize: none;"></textarea>
@@ -1652,58 +1630,8 @@
                 const hours = String(now.getHours()).padStart(2, '0');
                 const minutes = String(now.getMinutes()).padStart(2, '0');
                 document.getElementById('horaLancarPonto').value = `${hours}:${minutes}`;
-
-                // Resetar toggle "Modo" para "Adicionar Novo" (padrão)
-                const radioAdicionar = document.getElementById('modoAdicionar');
-                if (radioAdicionar) {
-                    radioAdicionar.checked = true;
-                    atualizarVisualModo('adicionar');
-                }
             });
         }
-
-        // Toggle visual do modo (Adicionar Novo / Substituir Existente)
-        function atualizarVisualModo(modo) {
-            const labelAdicionar = document.querySelector('label[for="modoAdicionar"]');
-            const labelSubstituir = document.querySelector('label[for="modoSubstituir"]');
-            const descricao = document.getElementById('modoDescricao');
-
-            if (modo === 'substituir') {
-                if (labelAdicionar) {
-                    labelAdicionar.style.borderColor = 'var(--card-border)';
-                    labelAdicionar.style.background = 'transparent';
-                    labelAdicionar.style.color = 'var(--text-muted)';
-                }
-                if (labelSubstituir) {
-                    labelSubstituir.style.borderColor = '#f59e0b';
-                    labelSubstituir.style.background = 'rgba(245, 158, 11, 0.1)';
-                    labelSubstituir.style.color = '#f59e0b';
-                }
-                if (descricao) {
-                    descricao.innerHTML = '<i class="bi bi-exclamation-triangle text-warning me-1"></i>Substitui o registro existente do mesmo tipo no dia.';
-                }
-            } else {
-                if (labelAdicionar) {
-                    labelAdicionar.style.borderColor = 'var(--blue-accent)';
-                    labelAdicionar.style.background = 'rgba(37, 99, 235, 0.1)';
-                    labelAdicionar.style.color = 'var(--blue-accent)';
-                }
-                if (labelSubstituir) {
-                    labelSubstituir.style.borderColor = 'var(--card-border)';
-                    labelSubstituir.style.background = 'transparent';
-                    labelSubstituir.style.color = 'var(--text-muted)';
-                }
-                if (descricao) {
-                    descricao.innerHTML = '<i class="bi bi-info-circle me-1"></i>Cria um novo registro, preservando os existentes do mesmo tipo.';
-                }
-            }
-        }
-
-        document.querySelectorAll('input[name="modo"]').forEach(function (radio) {
-            radio.addEventListener('change', function () {
-                atualizarVisualModo(this.value);
-            });
-        });
 
         // Limpeza de backdrop dos modais por segurança
         document.querySelectorAll('[data-bs-dismiss="modal"]').forEach(element => {
