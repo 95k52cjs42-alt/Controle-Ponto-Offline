@@ -1083,7 +1083,6 @@ def admin_lancar_ponto_manual():
     tipo = request.form.get("tipo")
     hora_raw = request.form.get("hora")        # esperada no formato HH:MM
     justificativa = request.form.get("justificativa", "").strip()
-    modo = request.form.get("modo", "adicionar")  # "adicionar" (padrão) ou "substituir"
 
     if not usuario_id or not data_raw or not tipo or not hora_raw:
         flash("Todos os campos obrigatórios devem ser preenchidos.", "danger")
@@ -1104,19 +1103,31 @@ def admin_lancar_ponto_manual():
     # Garantir formato HH:MM:SS para hora
     hora_formatada = hora_raw if len(hora_raw) == 8 else f"{hora_raw}:00"
 
-    if modo == "substituir":
-        # Modo substituição: busca o registro existente do mesmo tipo e sobrescreve
-        ponto_existente = RegistroPonto.query.filter_by(
-            usuario_id=usuario_alvo.id,
-            data=data_formatada,
-            tipo=tipo
-        ).first()
+    # --- Lógica automática: decide se cria novo ou substitui ---
+    # Se já existe registro do mesmo tipo no dia, calcula a diferença de horário.
+    # Diferença <= 2h (120 min) → ajuste/correção → substitui
+    # Diferença >  2h (120 min) → ponto esquecido → cria novo
+    ponto_existente = RegistroPonto.query.filter_by(
+        usuario_id=usuario_alvo.id,
+        data=data_formatada,
+        tipo=tipo
+    ).first()
 
-        if ponto_existente:
+    if ponto_existente:
+        try:
+            h1, m1, _ = map(int, hora_formatada.split(":"))
+            h2, m2, _ = map(int, ponto_existente.hora.split(":"))
+            diff_minutos = abs((h1 * 60 + m1) - (h2 * 60 + m2))
+        except (ValueError, AttributeError):
+            diff_minutos = 9999  # se falhar o parse, assume distante → cria novo
+
+        if diff_minutos <= 120:
+            # Horário parecido → substitui (é um ajuste)
             ponto_existente.hora = hora_formatada
             ponto_existente.foi_ajustado = True
             msg_acao = f"Atualizou o ponto ({tipo}) de {usuario_alvo.nome} para o dia {data_formatada} às {hora_formatada}."
         else:
+            # Horário distante → cria novo (ponto esquecido / retorno de intervalo)
             novo_ponto = RegistroPonto(
                 usuario_id=usuario_alvo.id,
                 data=data_formatada,
@@ -1125,9 +1136,9 @@ def admin_lancar_ponto_manual():
                 foi_ajustado=True
             )
             db.session.add(novo_ponto)
-            msg_acao = f"Lançou manualmente o ponto ({tipo}) de {usuario_alvo.nome} para o dia {data_formatada} às {hora_formatada}."
+            msg_acao = f"Adicionou novo registro ({tipo}) de {usuario_alvo.nome} para o dia {data_formatada} às {hora_formatada}."
     else:
-        # Modo adição (padrão): SEMPRE cria um registro novo, preservando registros existentes
+        # Nenhum registro existente → cria novo
         novo_ponto = RegistroPonto(
             usuario_id=usuario_alvo.id,
             data=data_formatada,
@@ -1136,7 +1147,7 @@ def admin_lancar_ponto_manual():
             foi_ajustado=True
         )
         db.session.add(novo_ponto)
-        msg_acao = f"Adicionou novo registro ({tipo}) de {usuario_alvo.nome} para o dia {data_formatada} às {hora_formatada}."
+        msg_acao = f"Lançou manualmente o ponto ({tipo}) de {usuario_alvo.nome} para o dia {data_formatada} às {hora_formatada}."
 
     db.session.commit()
     _invalidar_notif_cache(int(usuario_alvo.id))
