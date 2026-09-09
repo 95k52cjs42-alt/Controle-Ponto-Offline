@@ -439,8 +439,12 @@
                                     <small class="text-muted">{{ sol.usuario.email }}</small>
                                 </td>
                                 <td>{{ sol.data_ponto }}</td>
-                                <td>
-                                    <div class="fw-bold">{{ sol.tipo_ponto }}</div>
+                                <td style="white-space: nowrap;">
+                                    {% if sol.hora_original %}
+                                        <div class="fw-bold">{{ sol.tipo_ponto }} de {{ sol.hora_original[:5] }} → {{ sol.hora_correta[:5] }}</div>
+                                    {% else %}
+                                        <div class="fw-bold">{{ sol.tipo_ponto }} (novo) → {{ sol.hora_correta[:5] }}</div>
+                                    {% endif %}
                                     <small class="text-muted"><i class="bi bi-clock me-1"></i>{{ sol.hora_correta }}</small>
                                 </td>
                                 <td>{{ sol.justificativa }}</td>

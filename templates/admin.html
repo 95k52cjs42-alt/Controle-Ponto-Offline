@@ -1038,6 +1038,13 @@
                             <label for="email" class="form-label text-muted small">E-mail</label>
                             <input type="email" class="form-control" name="email" required style="background: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main);">
                         </div>
+                        <div class="mb-3">
+                            <label for="tipo_contrato" class="form-label text-muted small">Tipo de Contrato</label>
+                            <select name="tipo_contrato" class="form-select" required style="background: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main);">
+                                <option value="CLT">CLT</option>
+                                <option value="PJ">PJ</option>
+                            </select>
+                        </div>
                     </div>
                     <div class="modal-footer border-0">
                         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
@@ -1218,17 +1225,29 @@
 
         function bindAdminSearch() {
             const searchInput = document.getElementById('userSearch');
-            if (!searchInput) return;
+            if (searchInput) {
+                searchInput.oninput = function() {
+                    const filter = this.value.toLowerCase();
+                    const items = document.querySelectorAll('.user-item');
+                    items.forEach(item => {
+                        const name = item.querySelector('.user-name')?.innerText.toLowerCase() || '';
+                        const email = item.querySelector('.user-email')?.innerText.toLowerCase() || '';
+                        item.style.display = (name.includes(filter) || email.includes(filter)) ? '' : 'none';
+                    });
+                };
+            }
 
-            searchInput.oninput = function() {
-                const filter = this.value.toLowerCase();
-                const items = document.querySelectorAll('.user-item');
-                items.forEach(item => {
-                    const name = item.querySelector('.user-name')?.innerText.toLowerCase() || '';
-                    const email = item.querySelector('.user-email')?.innerText.toLowerCase() || '';
-                    item.style.display = (name.includes(filter) || email.includes(filter)) ? '' : 'none';
-                });
-            };
+            const solicitacoesSearchInput = document.getElementById('solicitacoesSearch');
+            if (solicitacoesSearchInput) {
+                solicitacoesSearchInput.oninput = function() {
+                    const filter = this.value.toLowerCase();
+                    const rows = document.querySelectorAll('#solicitacoesTable tbody tr.solicitacao-row');
+                    rows.forEach(row => {
+                        const text = row.innerText.toLowerCase();
+                        row.style.display = text.includes(filter) ? '' : 'none';
+                    });
+                };
+            }
         }
         window.bindAdminSearch = bindAdminSearch;
 
@@ -1635,6 +1654,15 @@
             <form id="formConfigurarUsuario" method="POST">
                 <div class="modal-body py-3">
                     <div class="mb-3">
+                        <label class="form-label small fw-semibold text-muted">Tipo de Contrato</label>
+                        <select name="tipo_contrato" id="modalUserTipoContrato" class="form-select form-select-sm" style="background: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main);">
+                            <option value="CLT">CLT</option>
+                            <option value="PJ">PJ</option>
+                        </select>
+                        <div class="form-text small text-muted">PJ não gera alertas de faltas, banco de horas nem comparação com carga horária.</div>
+                    </div>
+
+                    <div class="mb-3">
                         <label class="form-label small fw-semibold text-muted">Departamento / Setor</label>
                         <select name="departamento_id" id="modalUserDepartamento" class="form-select form-select-sm" style="background: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main);">
                             <option value="none">Nenhum Departamento</option>
@@ -1677,6 +1705,7 @@
             form.action = `/admin/usuarios/${button.getAttribute('data-user-id')}/atualizar`;
             document.getElementById('modalUserName').textContent = button.getAttribute('data-user-nome');
             document.getElementById('modalUserDepartamento').value = button.getAttribute('data-user-departamento');
+            document.getElementById('modalUserTipoContrato').value = button.getAttribute('data-tipo-contrato') || 'CLT';
             
             const isAdmin = button.getAttribute('data-is-admin') === 'true';
             document.getElementById('alertAdminGeral').classList.toggle('d-none', !isAdmin);

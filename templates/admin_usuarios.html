@@ -178,6 +178,13 @@
                                 <label for="email" class="form-label text-muted small">E-mail</label>
                                 <input type="email" class="form-control" name="email" required style="background: var(--nav-btn-bg); border: 1px solid var(--card-border); color: var(--text-main);">
                             </div>
+                            <div class="mb-3">
+                                <label for="tipo_contrato" class="form-label text-muted small">Tipo de Contrato</label>
+                                <select name="tipo_contrato" class="form-select" required style="background: var(--nav-btn-bg); border: 1px solid var(--card-border); color: var(--text-main);">
+                                    <option value="CLT">CLT</option>
+                                    <option value="PJ">PJ</option>
+                                </select>
+                            </div>
                         </div>
                         <div class="modal-footer border-0">
                             <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
@@ -205,7 +212,13 @@
                         <div class="user-info">
                             <div class="user-avatar">{{ u.nome[0]|upper if u.nome else 'U' }}</div>
                             <div>
-                                <h6 class="fw-bold mb-0 user-name">{{ u.nome }}</h6>
+                                <h6 class="fw-bold mb-0 user-name">{{ u.nome }}
+                                    {% if u.tipo_contrato == 'PJ' %}
+                                        <span class="badge bg-primary rounded-pill ms-1 align-middle" style="font-size: 0.65rem;">PJ</span>
+                                    {% else %}
+                                        <span class="badge bg-secondary rounded-pill ms-1 align-middle" style="font-size: 0.65rem;">CLT</span>
+                                    {% endif %}
+                                </h6>
                                 <span class="text-muted small user-email">{{ u.email }}</span>
                             </div>
                         </div>

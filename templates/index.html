@@ -715,15 +715,11 @@
                     <i class="bi bi-clock-history me-1 text-primary"></i> ÚLTIMO: {{ ultimo_ponto|default('--:--') }}
                 </div>
                 <div class="mt-3 p-3 rounded-4 text-start" style="background:var(--pastel-card, rgba(0,0,0,0.03));border:1px solid var(--border-soft, rgba(0,0,0,0.08));">
-                    <div class="d-flex justify-content-between align-items-center small">
-                        <span style="color:var(--text-muted);"><i class="bi bi-stopwatch me-1"></i>Tempo de hoje</span>
-                        <span class="fw-bold" id="tempoHoje">--:--</span>
-                    </div>
-                    <hr class="my-2 opacity-25">
-                    <div class="d-flex justify-content-between align-items-center small">
-                        <span style="color:var(--text-muted);">Saldo vs 8h</span>
-                        <span class="fw-bold" id="saldoHoje">--:--</span>
-                    </div>
+                    {% if current_user and current_user.is_authenticated and current_user.tipo_contrato == 'PJ' %}
+                        {% include 'index_fragment_painel_pj.html' %}
+                    {% else %}
+                        {% include 'index_fragment_painel_clt.html' %}
+                    {% endif %}
                 </div>
             </div>
 
@@ -927,14 +923,18 @@
 
             function render() {
                 var tEl = document.getElementById('tempoHoje');
+                if (!tEl) return;
+
+                // O card "Saldo vs 8h" só existe para CLT (PJ mostra apenas horas trabalhadas).
                 var sEl = document.getElementById('saldoHoje');
-                if (!tEl || !sEl) return;
 
                 // No modelo de pares ilimitados não existe "almoço" fixo;
                 // o saldo é calculado pareando cada Entrada com sua Saída.
                 var c = calcular();
                 tEl.textContent = fmtHMS(c.trabalhado) + 'h';
 
+                // PJ: elemento ausente -> atualiza apenas o tempo trabalhado, sem comparação com carga.
+                if (!sEl) return;
                 if (c.saldoSeg >= 0) {
                     sEl.textContent = '+' + fmtHMS(c.saldoSeg) + 'h';
                     sEl.style.color = '#198754';

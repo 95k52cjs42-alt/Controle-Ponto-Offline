@@ -273,23 +273,36 @@
                         <label class="form-label fw-semibold small text-muted">Data do Ponto</label>
                         <input type="date" 
                                name="data_ponto" 
+                               id="campo-data-ponto"
                                class="form-control" 
                                value="{{ request.args.get('data', '') }}" 
                                max="{{ data_hoje }}" 
                                required>
                     </div>
 
-                    <!-- Tipo de Ponto -->
+                    <!-- Registro a corrigir (carregado dinamicamente conforme a data) -->
+                    <div class="col-md-6 mb-2">
+                        <label class="form-label fw-semibold small text-muted">Registro a Corrigir</label>
+                        <select name="registro_ponto_id" id="campo-registro" class="form-select" required>
+                            <option value="">Selecione a data acima primeiro...</option>
+                        </select>
+                        <small class="text-muted d-block mt-1">
+                            <i class="bi bi-info-circle me-1"></i>Escolha o ponto existente OU a opção de criar um novo.
+                        </small>
+                    </div>
+
+                    <!-- Tipo de Ponto (preenchido automaticamente ao escolher registro; manual para criar novo) -->
                     <div class="col-md-6 mb-2">
                         <label class="form-label fw-semibold small text-muted">Tipo de Ponto</label>
-                        <select name="tipo_ponto" class="form-select" required>
+                        <select name="tipo_ponto" id="campo-tipo" class="form-select" required>
+                            <option value="">Selecione o tipo</option>
                             <option value="Entrada">Entrada</option>
                             <option value="Saída">Saída</option>
                         </select>
                     </div>
 
                     <!-- Horário Correto -->
-                    <div class="col-md-12 mb-2">
+                    <div class="col-md-6 mb-2">
                         <label class="form-label fw-semibold small text-muted">Horário Correto</label>
                         <input type="time" name="hora_correta" class="form-control" required>
                     </div>
@@ -300,6 +313,9 @@
                         <textarea name="justificativa" class="form-control" rows="3" placeholder="Explique o motivo do ajuste..." required></textarea>
                     </div>
                 </div>
+
+                <!-- Campo oculto: hora original do registro selecionado (preenchido via JS) -->
+                <input type="hidden" name="hora_original" id="campo-hora-original" value="">
 
                 <button type="submit" class="btn btn-submit w-100 py-3 rounded-4 fw-semibold shadow-sm mt-2">
                     <i class="bi bi-send me-1"></i> Enviar Solicitação
@@ -327,7 +343,13 @@
                         {% for s in solicitacoes %}
                         <tr>
                             <td class="fw-medium">{{ s.data_ponto }}</td>
-                            <td>{{ s.tipo_ponto }}</td>
+                            <td>
+                                {% if s.hora_original %}
+                                    {{ s.tipo_ponto }} de {{ s.hora_original[:5] }} → {{ s.hora_correta[:5] }}
+                                {% else %}
+                                    {{ s.tipo_ponto }} (novo) → {{ s.hora_correta[:5] }}
+                                {% endif %}
+                            </td>
                             <td>{{ s.hora_correta }}</td>
                             <td>
                                 {% if s.status == 'Pendente' %}
@@ -379,6 +401,107 @@
                 themeIcon.className = 'bi bi-moon-stars';
                 themeBtn.setAttribute('title', 'Mudar para Tema Escuro');
             }
+        }
+
+        // ============================================================
+        // CARREGAMENTO DINÂMICO DOS PONTOS DO DIA (para a correção)
+        // ============================================================
+        const campoData = document.getElementById('campo-data-ponto');
+        const campoRegistro = document.getElementById('campo-registro');
+        const campoTipo = document.getElementById('campo-tipo');
+        const campoHoraOriginal = document.getElementById('campo-hora-original');
+
+        // Sempre que a data mudar, busca os pontos existentes via AJAX
+        campoData.addEventListener('change', carregarPontosDoDia);
+
+        async function carregarPontosDoDia() {
+            const data = campoData.value;
+            // limpa o select e os campos ocultos
+            campoRegistro.innerHTML = '<option value="">Selecione a data acima primeiro...</option>';
+            campoTipo.value = '';
+            campoHoraOriginal.value = '';
+            campoRegistro.disabled = true;
+
+            if (!data) return;
+
+            try {
+                const resp = await fetch('/api/pontos-do-dia/' + data);
+                if (!resp.ok) throw new Error('Falha ao buscar pontos');
+                const pontos = await resp.json();
+
+                campoRegistro.innerHTML = '';
+                if (pontos.length === 0) {
+                    // Sem registros: única opção real é criar um novo ponto
+                    const optCriar = document.createElement('option');
+                    optCriar.value = 'novo';
+                    optCriar.textContent = '＋ Criar novo ponto (não estava registrado)';
+                    optCriar.selected = true;
+                    campoRegistro.appendChild(optCriar);
+                    campoTipo.value = '';
+                    campoHoraOriginal.value = '';
+                } else {
+                    // Primeira opção é "criar novo" mesmo com registros existentes
+                    const optCriar = document.createElement('option');
+                    optCriar.value = 'novo';
+                    optCriar.textContent = '＋ Criar novo ponto (ponto esquecido)';
+                    campoRegistro.appendChild(optCriar);
+                    // Separador visual
+                    const optPular = document.createElement('option');
+                    optPular.disabled = true;
+                    optPular.textContent = '── Pontos registrados ──';
+                    campoRegistro.appendChild(optPular);
+                    // Registros existentes
+                    pontos.forEach(function (p) {
+                        const opt = document.createElement('option');
+                        opt.value = String(p.id);
+                        opt.textContent = p.tipo + ' às ' + p.hora_display;
+                        opt.dataset.tipo = p.tipo;
+                        opt.dataset.hora = p.hora;
+                        campoRegistro.appendChild(opt);
+                    });
+                    // Nenhum selecionado por padrão -> o usuário precisa escolher explicitamente
+                    campoRegistro.value = '';
+                }
+
+                campoRegistro.disabled = false;
+            } catch (err) {
+                console.error(err);
+                campoRegistro.innerHTML = '<option value="">Erro ao carregar registros. Tente novamente.</option>';
+            }
+        }
+
+        // Ao escolher um registro, preenche o tipo (select visível) e a hora original (campo oculto)
+        campoRegistro.addEventListener('change', function () {
+            const opt = campoRegistro.selectedOptions[0];
+            if (!opt) return;
+
+            if (opt.value === 'novo') {
+                campoTipo.value = '';
+                campoHoraOriginal.value = '';
+                campoTipo.focus();
+            } else if (opt.dataset && opt.dataset.tipo) {
+                campoTipo.value = opt.dataset.tipo;
+                campoHoraOriginal.value = opt.dataset.hora;
+            }
+        });
+
+        // Validação no submit: exige que um registro tenha sido escolhido e um tipo definido
+        document.querySelector('form').addEventListener('submit', function (ev) {
+            if (!campoRegistro.value) {
+                ev.preventDefault();
+                alert('Selecione primeiro a data e o registro a corrigir.');
+                return;
+            }
+            if (!campoTipo.value) {
+                ev.preventDefault();
+                alert('Informe o tipo de ponto (Entrada ou Saída) para o novo registro.');
+                return;
+            }
+        });
+
+        // Se a página abriu com uma data preenchida (ex: link com ?data=...), carrega automaticamente
+        if (campoData.value) {
+            carregarPontosDoDia();
         }
     </script>
 </body>

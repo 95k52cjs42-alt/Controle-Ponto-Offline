@@ -486,6 +486,7 @@ class Usuario(UserMixin, db.Model):
     precisa_redefinir_senha = db.Column(db.Boolean, default=False)
     foto_url = db.Column(db.String(255), nullable=True)
     departamento_id = db.Column(db.Integer, db.ForeignKey('departamento.id'), nullable=True)
+    tipo_contrato = db.Column(db.String(10), nullable=False, default="CLT")
     permissoes = db.Column(db.Text, nullable=True) # Guarda JSON ex: {"pode_ver_dashboard": true, ...}
     data_cadastro = db.Column(db.DateTime, default=lambda: datetime.now(ZoneInfo("America/Sao_Paulo")))
     pontos = db.relationship("RegistroPonto", backref="usuario", lazy=True)
@@ -541,6 +542,7 @@ class SolicitacaoCorrecao(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     data_ponto = db.Column(db.String(10), nullable=False)  # DD/MM/YYYY
     tipo_ponto = db.Column(db.String(20), nullable=False)
+    hora_original = db.Column(db.String(8), nullable=True)   # HH:MM:SS – hora registrada (para localizar o registro específico)
     hora_correta = db.Column(db.String(8), nullable=False)
     justificativa = db.Column(db.Text, nullable=False)
     status = db.Column(db.String(20), default="Pendente")
@@ -587,10 +589,17 @@ with app.app_context():
             db.session.execute(text("ALTER TABLE usuario ADD COLUMN departamento_id INTEGER;"))
         if "permissoes" not in colunas_usuario:
             db.session.execute(text("ALTER TABLE usuario ADD COLUMN permissoes TEXT;"))
+        if "tipo_contrato" not in colunas_usuario:
+            db.session.execute(text("ALTER TABLE usuario ADD COLUMN tipo_contrato VARCHAR(10) DEFAULT 'CLT';"))
+            # Usuários já existentes mantêm como CLT por padrão
 
         colunas_ponto = [c["name"] for c in inspector.get_columns("registro_ponto")]
         if "foi_ajustado" not in colunas_ponto:
             db.session.execute(text("ALTER TABLE registro_ponto ADD COLUMN foi_ajustado BOOLEAN DEFAULT FALSE;"))
+
+        colunas_solicitacao = [c["name"] for c in inspector.get_columns("solicitacao_correcao")]
+        if "hora_original" not in colunas_solicitacao:
+            db.session.execute(text("ALTER TABLE solicitacao_correcao ADD COLUMN hora_original VARCHAR(8);"))
 
         colunas_feriado = [c["name"] for c in inspector.get_columns("feriado")]
         if "fonte" not in colunas_feriado:
@@ -944,28 +953,45 @@ def cadastro():
             flash("O domínio do e-mail é inválido ou não possui registros MX.", "danger")
             return render_template("register.html", nome=nome, email=email)
 
-        # Preparar dados para confirmação (sem salvar no banco ainda)
-        token_data = {
-            'nome': nome,
-            'email': email,
-            'senha_hash': generate_password_hash(senha, method="scrypt")
-        }
-        s = Serializer(app.config['SECRET_KEY'])
-        token = s.dumps(token_data)
-        
-        confirm_url = url_for('confirm_email', token=token, _external=True)
-        
-        try:
-            resend.Emails.send({
-                "from": "onboarding@resend.dev",
-                "to": email,
-                "subject": "Confirme seu e-mail",
-                "html": f"<p>Olá {nome}, clique no link para confirmar seu e-mail: <a href='{confirm_url}'>{confirm_url}</a></p>"
-            })
-            flash("Link de confirmação enviado! Verifique seu e-mail para concluir o cadastro.", "success")
-        except Exception as e:
-            flash(f"Erro ao enviar e-mail: {str(e)}", "danger")
-            return render_template("register.html", nome=nome, email=email)
+        # Verificar se a confirmação de e-mail está obrigatória (configurável no admin)
+        verificacao_obrigatoria = _get_config("email_confirmacao_obrigatoria", "false").lower() == "true"
+
+        if verificacao_obrigatoria:
+            # Fluxo com confirmação: gerar token e enviar e-mail
+            token_data = {
+                'nome': nome,
+                'email': email,
+                'senha_hash': generate_password_hash(senha, method="scrypt")
+            }
+            s = Serializer(app.config['SECRET_KEY'])
+            token = s.dumps(token_data)
+
+            confirm_url = url_for('confirm_email', token=token, _external=True)
+
+            try:
+                resend.Emails.send({
+                    "from": "onboarding@resend.dev",
+                    "to": email,
+                    "subject": "Confirme seu e-mail",
+                    "html": f"<p>Olá {nome}, clique no link para confirmar seu e-mail: <a href='{confirm_url}'>{confirm_url}</a></p>"
+                })
+                flash("Link de confirmação enviado! Verifique seu e-mail para concluir o cadastro.", "success")
+            except Exception as e:
+                flash(f"Erro ao enviar e-mail: {str(e)}", "danger")
+                return render_template("register.html", nome=nome, email=email)
+        else:
+            # Fluxo direto: criar usuário imediatamente sem confirmação de e-mail
+            is_first = Usuario.query.count() == 0
+            novo_usuario = Usuario(
+                nome=nome,
+                email=email,
+                senha_hash=generate_password_hash(senha, method="scrypt"),
+                is_admin=is_first,
+                email_confirmado=True,
+            )
+            db.session.add(novo_usuario)
+            db.session.commit()
+            flash("Cadastro realizado com sucesso! Faça login para acessar o sistema.", "success")
 
         return redirect(url_for("login"))
 
@@ -1154,12 +1180,16 @@ def admin_cadastrar_usuario():
     
     # Criar usuário temporário para gerar o token
     senha_temporaria = secrets.token_urlsafe(32)
+    tipo_contrato = request.form.get("tipo_contrato", "CLT").strip().upper()
+    if tipo_contrato not in ("CLT", "PJ"):
+        tipo_contrato = "CLT"
     novo_usuario = Usuario(
         nome=nome,
         email=email,
         senha_hash=generate_password_hash(senha_temporaria, method="scrypt"),
         precisa_redefinir_senha=True,
-        email_confirmado=True
+        email_confirmado=True,
+        tipo_contrato=tipo_contrato
     )
     db.session.add(novo_usuario)
     db.session.commit()
@@ -1509,6 +1539,7 @@ def solicitar_correcao():
         tipo_ponto = request.form.get("tipo_ponto")
         hora = request.form.get("hora_correta")
         justificativa = request.form.get("justificativa", "").strip()
+        hora_original = request.form.get("hora_original", "").strip() or None
 
         if not data_raw or not tipo_ponto or not hora or not justificativa:
             flash("Preencha todos os campos para solicitar a correção.", "warning")
@@ -1529,9 +1560,14 @@ def solicitar_correcao():
         if len(hora) == 5:
             hora += ":00"
 
+        # Se hora_original veio no formato HH:MM (5 chars), completa para HH:MM:SS
+        if hora_original and len(hora_original) == 5:
+            hora_original += ":00"
+
         solicitacao = SolicitacaoCorrecao(
             data_ponto=data_formatada,
             tipo_ponto=tipo_ponto,
+            hora_original=hora_original,
             hora_correta=hora,
             justificativa=justificativa,
             usuario_id=current_user.id
@@ -1552,12 +1588,41 @@ def solicitar_correcao():
         data_hoje=hoje.strftime("%Y-%m-%d")
     )
 
+@app.route("/api/pontos-do-dia/<data_iso>")
+@login_required
+def api_pontos_do_dia(data_iso):
+    """Retorna em JSON os registros de ponto do usuário logado para a data informada (YYYY-MM-DD)."""
+    try:
+        data_obj = datetime.strptime(data_iso, "%Y-%m-%d").date()
+    except ValueError:
+        return jsonify({"erro": "Data inválida"}), 400
+
+    data_br = data_obj.strftime("%d/%m/%Y")
+
+    registros = RegistroPonto.query.filter_by(
+        usuario_id=current_user.id,
+        data=data_br
+    ).order_by(RegistroPonto.hora.asc()).all()
+
+    resultado = [
+        {
+            "id": r.id,
+            "tipo": r.tipo,
+            "hora": r.hora,
+            "hora_display": r.hora[:5] if len(r.hora) >= 5 else r.hora,
+        }
+        for r in registros
+    ]
+    return jsonify(resultado)
+
 @app.route("/exportar-ponto")
 @login_required
 def exportar_historico_ponto():
     formato = request.args.get('format', 'pdf')
     user_id = current_user.id
     usuario = current_user
+    # PJ não possui carga horária fixa: sem horas extras, faltantes ou banco de horas
+    is_pj = getattr(usuario, "tipo_contrato", "CLT") == "PJ"
     registros = RegistroPonto.query.filter_by(usuario_id=user_id).all()
     hoje = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
     
@@ -1575,7 +1640,21 @@ def exportar_historico_ponto():
             pass
 
     # Ordena por dia, depois pela ordem de registro (id preserva a ordem cronológica)
-    tabela_linhas = [["Dia", "Movimentações", "Total / Status"]]
+    # Nº máx. de pares Entrada/Saída num único dia do período (len(regs)//2 arredondado p/ cima
+    # cobre batidas ímpares). A primeira coluna ("Dia") e a última ("Total / Status") são fixas;
+    # as colunas de movimentação são geradas dinamicamente: Entrada 1, Saída 1, Entrada 2, ...
+    max_pares = 1
+    for d_obj in range(primeira_data.toordinal(), hoje.toordinal() + 1):
+        regs_dia = dias_registrados.get(date.fromordinal(d_obj), [])
+        pares = (len(regs_dia) + 1) // 2
+        if pares > max_pares:
+            max_pares = pares
+    cabecalho = ["Dia"]
+    for n in range(1, max_pares + 1):
+        cabecalho.append(f"Entrada {n}")
+        cabecalho.append(f"Saída {n}")
+    cabecalho.append("Total / Status")
+    tabela_linhas = [cabecalho]
     total_segundos_trabalhados = 0
     total_segundos_extras = 0
     total_segundos_faltantes = 0
@@ -1589,18 +1668,13 @@ def exportar_historico_ponto():
         regs = dias_registrados.get(curr, [])
 
         if regs:
-            # Constrói texto de movimentações: "E 08:00 · S 12:00 · E 13:00 · S 18:00"
-            mov = []
             entradas = []
             saidas = []
             for tipo, hora in regs:
                 if tipo == "Entrada":
-                    mov.append(f"E {hora}")
                     entradas.append(hora)
                 elif tipo == "Saída":
-                    mov.append(f"S {hora}")
                     saidas.append(hora)
-            mov_texto = "  ".join(mov)
 
             tempo_trabalhado = timedelta()
             for i in range(min(len(entradas), len(saidas))):
@@ -1614,20 +1688,39 @@ def exportar_historico_ponto():
             # Dia encerrado se a última movimentação do dia for uma Saída
             dia_encerrado = bool(regs) and regs[-1][0] == "Saída"
             if curr < hoje or dia_encerrado:
-                if tot > segundos_carga_diaria:
-                    total_segundos_extras += (tot - segundos_carga_diaria)
-                elif eh_dia_util(curr) and tot < segundos_carga_diaria:
-                    total_segundos_faltantes += (segundos_carga_diaria - tot)
+                # PJ não possui carga horária fixa: sem horas extras ou faltantes
+                if not is_pj:
+                    if tot > segundos_carga_diaria:
+                        total_segundos_extras += (tot - segundos_carga_diaria)
+                    elif eh_dia_util(curr) and tot < segundos_carga_diaria:
+                        total_segundos_faltantes += (segundos_carga_diaria - tot)
 
+            # Uma célula por movimentação (Entrada 1 / Saída 1 / Entrada 2 / Saída 2 / ...).
+            # Na ordem padrão esperada (Entrada, Saída, Entrada, ...), a posição i é do tipo
+            # da coluna i do cabeçalho; se o tipo fugir da alternância (correção manual), o
+            # horário ganha o prefixo "E"/"S" para não gerar relatório ambíguo.
+            linha = [dia_str]
+            for i, (tipo, hora) in enumerate(regs):
+                esperado = "Entrada" if i % 2 == 0 else "Saída"
+                cel = hora[:5]
+                if tipo != esperado:
+                    cel = f"E {cel}" if tipo == "Entrada" else f"S {cel}"
+                linha.append(cel)
+            while len(linha) < len(cabecalho) - 1:
+                linha.append("")
             hrs, mins = divmod(tot // 60, 60)
-            tabela_linhas.append([dia_str, mov_texto, f"{hrs:02d}:{mins:02d}h"])
+            linha.append(f"{hrs:02d}:{mins:02d}h")
+            tabela_linhas.append(linha)
         elif eh_dia_util(curr):
-            if curr < hoje:
-                total_faltas_dias += 1
-                total_segundos_faltantes += segundos_carga_diaria
-                tabela_linhas.append([dia_str, "--:--", "FALTA"])
-            else:
-                tabela_linhas.append([dia_str, "--:--", "Em Aberto"])
+            # PJ não possui faltas: dias sem registros são ocultados do relatório
+            if not is_pj:
+                vazios = [""] * (len(cabecalho) - 2)
+                if curr < hoje:
+                    total_faltas_dias += 1
+                    total_segundos_faltantes += segundos_carga_diaria
+                    tabela_linhas.append([dia_str, *vazios, "FALTA"])
+                else:
+                    tabela_linhas.append([dia_str, *vazios, "Em Aberto"])
         curr += timedelta(days=1)
 
     # Exportação baseada no formato
@@ -1639,11 +1732,15 @@ def exportar_historico_ponto():
         
         # Cabeçalho
         elementos.append(Paragraph(f"Folha de Ponto - {usuario.nome}", estilos["Heading1"]))
-        elementos.append(Paragraph(f"E-mail: {usuario.email} | Emissão: {datetime.now().strftime('%d/%m/%Y às %H:%M')}", estilos["Normal"]))
+        elementos.append(Paragraph(f"E-mail: {usuario.email} | Contrato: {'PJ' if is_pj else 'CLT'} | Emissão: {datetime.now().strftime('%d/%m/%Y às %H:%M')}", estilos["Normal"]))
         elementos.append(Spacer(1, 12))
         
-        # Tabela
-        tabela = Table(tabela_linhas, repeatRows=1)
+        # Tabela (larguras dinâmicas: Dias e Total fixos, batidas dividem o restante)
+        largura_util = pdf.leftMargin + (letter[0] - pdf.leftMargin - pdf.rightMargin)
+        col_batidas = max(1, max_pares * 2)
+        larg_batida = max(38.0, (largura_util - 64 - 66) / col_batidas)
+        colWidths = [64] + [larg_batida] * col_batidas + [66]
+        tabela = Table(tabela_linhas, colWidths=colWidths, repeatRows=1)
         estilo_tabela = TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2c3e50')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
@@ -1666,24 +1763,28 @@ def exportar_historico_ponto():
         h_t = total_segundos_trabalhados // 3600
         m_t = (total_segundos_trabalhados % 3600) // 60
         
-        h_e = total_segundos_extras // 3600
-        m_e = (total_segundos_extras % 3600) // 60
-        
-        h_f = total_segundos_faltantes // 3600
-        m_f = (total_segundos_faltantes % 3600) // 60
-        
-        balanco = total_segundos_extras - total_segundos_faltantes
-        h_b = abs(balanco) // 3600
-        m_b = (abs(balanco) % 3600) // 60
-        
         elementos.append(Paragraph(f"<b>Horas Totais Trabalhadas:</b> {h_t:02d}:{m_t:02d}h", estilos["Normal"]))
-        elementos.append(Paragraph(f"<b>(+) Total Horas Extras:</b> <font color='green'>{h_e:02d}:{m_e:02d}h</font>", estilos["Normal"]))
-        elementos.append(Paragraph(f"<b>(-) Total Horas Faltantes:</b> <font color='red'>{h_f:02d}:{m_f:02d}h ({total_faltas_dias} dia(s) ausente)</font>", estilos["Normal"]))
-        
-        cor_balanco = 'red' if balanco < 0 else 'green'
-        texto_balanco = f"BALANÇO FINAL (BANCO DE HORAS): <font color='{cor_balanco}'>{'-' if balanco < 0 else ''}{h_b:02d}:{m_b:02d}h ({'A Repor' if balanco < 0 else 'Crédito'})</font>"
-        
-        elementos.append(Paragraph(f"<b>{texto_balanco}</b>", estilos["Normal"]))
+
+        # PJ não possui horas extras, faltantes ou banco de horas
+        if not is_pj:
+            h_e = total_segundos_extras // 3600
+            m_e = (total_segundos_extras % 3600) // 60
+
+            h_f = total_segundos_faltantes // 3600
+            m_f = (total_segundos_faltantes % 3600) // 60
+
+            balanco = total_segundos_extras - total_segundos_faltantes
+            h_b = abs(balanco) // 3600
+            m_b = (abs(balanco) % 3600) // 60
+
+            elementos.append(Paragraph(f"<b>(+) Total Horas Extras:</b> <font color='green'>{h_e:02d}:{m_e:02d}h</font>", estilos["Normal"]))
+            elementos.append(Paragraph(f"<b>(-) Total Horas Faltantes:</b> <font color='red'>{h_f:02d}:{m_f:02d}h ({total_faltas_dias} dia(s) ausente)</font>", estilos["Normal"]))
+
+            cor_balanco = 'red' if balanco < 0 else 'green'
+            texto_balanco = f"BALANÇO FINAL (BANCO DE HORAS): <font color='{cor_balanco}'>{'-' if balanco < 0 else ''}{h_b:02d}:{m_b:02d}h ({'A Repor' if balanco < 0 else 'Crédito'})</font>"
+
+            elementos.append(Paragraph(f"<b>{texto_balanco}</b>", estilos["Normal"]))
+
         
         pdf.build(elementos)
         buffer.seek(0)
@@ -1800,6 +1901,11 @@ def atualizar_usuario_admin(user_id):
         user.departamento_id = None
     elif departamento_id:
         user.departamento_id = int(departamento_id)
+
+    # Atualizar Tipo de Contrato (CLT / PJ)
+    tipo_contrato = request.form.get("tipo_contrato", "").strip().upper()
+    if tipo_contrato in ("CLT", "PJ"):
+        user.tipo_contrato = tipo_contrato
     
     # Atualizar Permissões Granulares (RBAC)
     import json
@@ -1902,6 +2008,19 @@ def render_admin_shell(initial_view="painel", **context):
     if "ufs_brasil" not in context:
         context["ufs_brasil"] = UFS_BRASIL
     return render_template("admin.html", initial_view=initial_view, **context)
+
+@app.route("/admin/toggle-verificacao-email", methods=["POST"])
+@login_required
+@admin_required
+def toggle_verificacao_email():
+    """Alterna a verificação de e-mail obrigatória no cadastro público."""
+    ativa = _get_config("email_confirmacao_obrigatoria", "false").lower() == "true"
+    _set_config("email_confirmacao_obrigatoria", "false" if ativa else "true")
+    db.session.commit()
+    registrar_log(current_user.id, f"{'Reativou' if not ativa else 'Desativou'} a verificação de e-mail no cadastro")
+    status = "ativada" if not ativa else "desativada"
+    flash(f"Verificação de e-mail no cadastro {status}.", "success")
+    return redirect(url_for("admin_panel"))
 
 @app.route("/admin")
 @login_required
@@ -2099,7 +2218,8 @@ def admin_fragment(view_name):
         usuarios = Usuario.query.all()
         departamentos = Departamento.query.order_by(Departamento.nome.asc()).all()
         total_solicitacoes_pendentes = SolicitacaoCorrecao.query.filter_by(status="Pendente").count()
-        return render_template("admin_fragment_usuarios.html", usuarios=usuarios, departamentos=departamentos, total_solicitacoes_pendentes=total_solicitacoes_pendentes)
+        email_verificacao_ativa = _get_config("email_confirmacao_obrigatoria", "false").lower() == "true"
+        return render_template("admin_fragment_usuarios.html", usuarios=usuarios, departamentos=departamentos, total_solicitacoes_pendentes=total_solicitacoes_pendentes, email_verificacao_ativa=email_verificacao_ativa)
 
     if view_name == "historico":
         usuario_id = request.args.get("usuario_id", type=int)
@@ -2249,11 +2369,21 @@ def responder_solicitacao(id, acao):
     if acao == "aprovar":
         solicitacao.status = "Aprovada"
         
-        ponto_existente = RegistroPonto.query.filter_by(
-            usuario_id=solicitacao.usuario_id,
-            data=solicitacao.data_ponto,
-            tipo=solicitacao.tipo_ponto
-        ).first()
+        # Se hora_original foi informada, busca o registro específico (mesma data, tipo E hora).
+        # Isso resolve o bug quando existem 2 Entradas ou 2 Saídas no mesmo dia.
+        if solicitacao.hora_original:
+            ponto_existente = RegistroPonto.query.filter_by(
+                usuario_id=solicitacao.usuario_id,
+                data=solicitacao.data_ponto,
+                tipo=solicitacao.tipo_ponto,
+                hora=solicitacao.hora_original
+            ).first()
+        else:
+            ponto_existente = RegistroPonto.query.filter_by(
+                usuario_id=solicitacao.usuario_id,
+                data=solicitacao.data_ponto,
+                tipo=solicitacao.tipo_ponto
+            ).first()
 
         if ponto_existente:
             ponto_existente.hora = solicitacao.hora_correta
@@ -2422,6 +2552,8 @@ def admin_exportar_ponto(user_id):
     # 2. Buscar o usuário específico pelo ID
     # IMPORTANTE: Verifique se o nome da sua classe de usuário é 'Usuario' ou 'User'
     usuario = Usuario.query.get_or_404(user_id)
+    # PJ não possui carga horária fixa: sem horas extras, faltantes ou banco de horas
+    is_pj = getattr(usuario, "tipo_contrato", "CLT") == "PJ"
 
     # 3. Buscar registros desse usuário (com filtro opcional por período)
     query_registros = RegistroPonto.query.filter_by(usuario_id=user_id)
@@ -2458,7 +2590,20 @@ def admin_exportar_ponto(user_id):
         if primeira_data > hoje:
             primeira_data = hoje
 
-    tabela_linhas = [["Dia", "Movimentações", "Total / Status"]]
+    # Nº máx. de pares Entrada/Saída num único dia do período; colunas de movimentação geradas
+    # dinamicamente (Entrada 1, Saída 1, Entrada 2, Saída 2, ...)
+    max_pares = 1
+    for d_obj in range(primeira_data.toordinal(), hoje.toordinal() + 1):
+        regs_dia = dias_registrados.get(date.fromordinal(d_obj), [])
+        pares = (len(regs_dia) + 1) // 2
+        if pares > max_pares:
+            max_pares = pares
+    cabecalho = ["Dia"]
+    for n in range(1, max_pares + 1):
+        cabecalho.append(f"Entrada {n}")
+        cabecalho.append(f"Saída {n}")
+    cabecalho.append("Total / Status")
+    tabela_linhas = [cabecalho]
 
     total_segundos_trabalhados = 0
     total_segundos_extras = 0
@@ -2474,17 +2619,13 @@ def admin_exportar_ponto(user_id):
         regs = dias_registrados.get(curr, [])
 
         if regs:
-            mov = []
             entradas = []
             saidas = []
             for tipo, hora in regs:
                 if tipo == "Entrada":
-                    mov.append(f"E {hora}")
                     entradas.append(hora)
                 elif tipo == "Saída":
-                    mov.append(f"S {hora}")
                     saidas.append(hora)
-            mov_texto = "  ".join(mov)
 
             tempo_trabalhado = timedelta()
             for i in range(min(len(entradas), len(saidas))):
@@ -2498,21 +2639,37 @@ def admin_exportar_ponto(user_id):
             # Dia encerrado se a última movimentação do dia for uma Saída
             dia_encerrado = bool(regs) and regs[-1][0] == "Saída"
             if curr < hoje or dia_encerrado:
-                if tot > segundos_carga_diaria:
-                    total_segundos_extras += (tot - segundos_carga_diaria)
-                elif eh_dia_util(curr) and tot < segundos_carga_diaria:
-                    total_segundos_faltantes += (segundos_carga_diaria - tot)
+                # PJ não possui carga horária fixa: sem horas extras ou faltantes
+                if not is_pj:
+                    if tot > segundos_carga_diaria:
+                        total_segundos_extras += (tot - segundos_carga_diaria)
+                    elif eh_dia_util(curr) and tot < segundos_carga_diaria:
+                        total_segundos_faltantes += (segundos_carga_diaria - tot)
 
+            # Uma célula por movimentação; horário vira "E/S" se o tipo fugir da alternância
+            linha = [dia_str]
+            for i, (tipo, hora) in enumerate(regs):
+                esperado = "Entrada" if i % 2 == 0 else "Saída"
+                cel = hora[:5]
+                if tipo != esperado:
+                    cel = f"E {cel}" if tipo == "Entrada" else f"S {cel}"
+                linha.append(cel)
+            while len(linha) < len(cabecalho) - 1:
+                linha.append("")
             hrs, mins = divmod(tot // 60, 60)
-            tabela_linhas.append([dia_str, mov_texto, f"{hrs:02d}:{mins:02d}h"])
+            linha.append(f"{hrs:02d}:{mins:02d}h")
+            tabela_linhas.append(linha)
 
         elif eh_dia_util(curr):
-            if curr < hoje:
-                total_faltas_dias += 1
-                total_segundos_faltantes += segundos_carga_diaria
-                tabela_linhas.append([dia_str, "--:--", "FALTA"])
-            else:
-                tabela_linhas.append([dia_str, "--:--", "Em Aberto"])
+            # PJ não possui faltas: dias sem registros são ocultados do relatório
+            if not is_pj:
+                vazios = [""] * (len(cabecalho) - 2)
+                if curr < hoje:
+                    total_faltas_dias += 1
+                    total_segundos_faltantes += segundos_carga_diaria
+                    tabela_linhas.append([dia_str, *vazios, "FALTA"])
+                else:
+                    tabela_linhas.append([dia_str, *vazios, "Em Aberto"])
 
         curr += timedelta(days=1)
 
@@ -2533,10 +2690,15 @@ def admin_exportar_ponto(user_id):
 
     titulo_estilo = ParagraphStyle("T", parent=estilos["Heading1"], fontSize=18, alignment=1, spaceAfter=15)
     elementos.append(Paragraph(f"<b>Folha de Ponto - {usuario.nome}</b>", titulo_estilo))
-    elementos.append(Paragraph(f"<b>E-mail:</b> {usuario.email} | <b>Emissão:</b> {datetime.now(ZoneInfo('America/Sao_Paulo')).strftime('%d/%m/%Y às %H:%M')}", estilos["Normal"]))
+    elementos.append(Paragraph(f"<b>E-mail:</b> {usuario.email} | <b>Contrato:</b> {'PJ' if is_pj else 'CLT'} | <b>Emissão:</b> {datetime.now(ZoneInfo('America/Sao_Paulo')).strftime('%d/%m/%Y às %H:%M')}", estilos["Normal"]))
     elementos.append(Spacer(1, 15))
 
-    tabela = Table(tabela_linhas, colWidths=[80, 300, 90])
+    # Tabela (larguras dinâmicas: Dias e Total fixos, batidas dividem o restante)
+    largura_util = pdf.rightMargin + pdf.leftMargin + (letter[0] - pdf.rightMargin - pdf.leftMargin)
+    col_batidas = max(1, max_pares * 2)
+    larg_batida = max(38.0, (largura_util - 80 - 90) / col_batidas)
+    colWidths = [80] + [larg_batida] * col_batidas + [90]
+    tabela = Table(tabela_linhas, colWidths=colWidths)
     estilo_tabela = [
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2c3e50")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
@@ -2556,19 +2718,24 @@ def admin_exportar_ponto(user_id):
 
     dados_resumo = [
         ["Horas Totais Trabalhadas:", f"{hrs_t:02d}:{mins_t:02d}h"],
-        ["(+) Total Horas Extras:", f"{hrs_e:02d}:{mins_e:02d}h"],
-        ["(-) Total Horas Faltantes:", f"{hrs_f:02d}:{mins_f:02d}h ({total_faltas_dias} dia(s) ausente)"],
-        ["BALANÇO FINAL (BANCO DE HORAS):", texto_balanco],
     ]
+    # PJ não possui horas extras, faltantes ou banco de horas
+    if not is_pj:
+        dados_resumo.append(["(+) Total Horas Extras:", f"{hrs_e:02d}:{mins_e:02d}h"])
+        dados_resumo.append(["(-) Total Horas Faltantes:", f"{hrs_f:02d}:{mins_f:02d}h ({total_faltas_dias} dia(s) ausente)"])
+        dados_resumo.append(["BALANÇO FINAL (BANCO DE HORAS):", texto_balanco])
     
     tabela_resumo = Table(dados_resumo, colWidths=[310, 200])
-    tabela_resumo.setStyle(TableStyle([
+    resumo_estilos = [
         ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"),
         ("ALIGN", (0, 0), (0, -1), "RIGHT"),
         ("ALIGN", (1, 0), (1, -1), "LEFT"),
-        ("TEXTCOLOR", (1, 3), (1, 3), cor_balanco),
-        ("LINEABOVE", (0, 3), (-1, 3), 1, colors.HexColor("#000000")),
-    ]))
+    ]
+    # PJ não possui balanço de banco de horas: linha única, sem destaque especial
+    if not is_pj:
+        resumo_estilos.append(("TEXTCOLOR", (1, 3), (1, 3), cor_balanco))
+        resumo_estilos.append(("LINEABOVE", (0, 3), (-1, 3), 1, colors.HexColor("#000000")))
+    tabela_resumo.setStyle(TableStyle(resumo_estilos))
     elementos.append(tabela_resumo)
 
     if formato == "pdf":
