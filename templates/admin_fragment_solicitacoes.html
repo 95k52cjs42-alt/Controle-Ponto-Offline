@@ -2,10 +2,14 @@
     <h3 class="fw-bold mb-1">Solicitações de Ajuste</h3>
     <p class="text-muted small m-0">Revise e aprove os pedidos de correção de ponto enviados pelos colaboradores.</p>
 </div>
+<div class="search-container">
+    <i class="bi bi-search search-icon"></i>
+    <input type="text" id="solicitacoesSearch" class="search-input" placeholder="Pesquisar colaborador por nome ou e-mail...">
+</div>
 
 <div class="dashboard-card">
     <div class="table-responsive">
-        <table class="table table-custom table-hover align-middle">
+        <table id="solicitacoesTable" class="table table-custom table-hover align-middle">
             <thead>
                 <tr>
                     <th>Colaborador</th>
@@ -19,14 +23,18 @@
             <tbody>
                 {% if solicitacoes %}
                     {% for sol in solicitacoes %}
-                    <tr>
+                    <tr class="solicitacao-row">
                         <td>
                             <div class="fw-bold">{{ sol.usuario.nome }}</div>
                             <small class="text-muted">{{ sol.usuario.email }}</small>
                         </td>
                         <td style="white-space: nowrap;">{{ sol.data_ponto }}</td>
                         <td style="white-space: nowrap;">
-                            <div class="fw-bold">{{ sol.tipo_ponto }}</div>
+                            {% if sol.hora_original %}
+                                <div class="fw-bold">{{ sol.tipo_ponto }} de {{ sol.hora_original[:5] }} → {{ sol.hora_correta[:5] }}</div>
+                            {% else %}
+                                <div class="fw-bold">{{ sol.tipo_ponto }} (novo) → {{ sol.hora_correta[:5] }}</div>
+                            {% endif %}
                             <small class="text-muted"><i class="bi bi-clock me-1"></i>{{ sol.hora_correta }}</small>
                         </td>
                         <td>{{ sol.justificativa }}</td>
