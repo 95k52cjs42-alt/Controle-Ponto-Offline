@@ -303,6 +303,24 @@ def eh_dia_util(data_obj):
 
     return True
 
+
+def _calcular_5o_dia_util_mes(ano, mes):
+    """Retorna a data do 5º dia útil do mês informado.
+
+    Usada para decidir quando parar de notificar sobre meses anteriores:
+    após o 5º dia útil, o mês anterior é considerado ``fechado`` e as
+    notificações de faltas/pontos incompletos não devem mais incluí-lo.
+    """
+    candidato = date(ano, mes, 1)
+    contador = 0
+    while True:
+        if eh_dia_util(candidato):
+            contador += 1
+            if contador == 5:
+                return candidato
+        candidato += timedelta(days=1)
+
+
 class FeriadoObj:
     """Objeto simples para passar dados de feriado ao template."""
     def __init__(self, data, descricao, id=None, fonte="manual"):
@@ -767,7 +785,10 @@ def obter_notificacoes_usuario(user_id):
 
     Otimizada para evitar centenas de queries por request:
       - Cache de resultado por 30s (invalidado ao bater ponto).
-      - Janela de 30 dias para o cálculo de faltas.
+      - Janela de 30 dias para o cálculo de faltas (enquanto o mês ainda
+        não passou do 5º dia útil).
+      - Regra do 5º dia útil: após ele, o mês anterior é considerado
+        fechado e deixa de gerar notificações de faltas/pontos incompletos.
       - Usa o cache de feriados (_carregar_feriados) em vez de consultar o
         banco dia a dia.
     """
@@ -782,6 +803,15 @@ def obter_notificacoes_usuario(user_id):
 
     hoje = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
     notificacoes = []
+
+    # ── 0. Regra do 5º dia útil: após ele, ignora meses anteriores ──
+    # Antes do 5º dia útil o funcionário ainda pode regularizar pendências
+    # do mês passado; depois disso, o mês anterior é considerado fechado.
+    quinto_dia_util = _calcular_5o_dia_util_mes(hoje.year, hoje.month)
+    if hoje >= quinto_dia_util:
+        corte_notificacoes = date(hoje.year, hoje.month, 1)
+    else:
+        corte_notificacoes = hoje - timedelta(days=NOTIF_JANELA_DIAS)
 
     try:
         # ── 2. Uma única query: todos os pontos do usuário ──
@@ -800,17 +830,18 @@ def obter_notificacoes_usuario(user_id):
             if d_obj < primeiro_registro_data:
                 primeiro_registro_data = d_obj
 
-        # ── 3. Faltas totais (janela de 30 dias) ──
-        # Calcula o limite: janela de 30 dias ou primeiro registro/cadastro,
-        # o que vier antes.
+        # ── 3. Faltas totais (janela de 30 dias ou mês atual, após 5º dia útil) ──
+        # Calcula o limite: corte das notificações ou primeiro registro/cadastro,
+        # o que vier antes. Após o 5º dia útil do mês, o corte é o dia 1º do mês
+        # atual, então faltas de meses anteriores deixam de gerar notificação.
         usuario_obj = Usuario.query.get(user_id)
         data_inicio = (
             usuario_obj.data_cadastro.date()
             if usuario_obj and usuario_obj.data_cadastro
-            else hoje - timedelta(days=NOTIF_JANELA_DIAS)
+            else corte_notificacoes
         )
         limite_busca = max(
-            hoje - timedelta(days=NOTIF_JANELA_DIAS),
+            corte_notificacoes,
             min(primeiro_registro_data, data_inicio),
         )
 
@@ -835,8 +866,8 @@ def obter_notificacoes_usuario(user_id):
                 "link": url_for("meu_historico"),
             })
 
-        # ── 4. Pontos incompletos (apenas janela de 30 dias) ──
-        janela_inicio = hoje - timedelta(days=NOTIF_JANELA_DIAS)
+        # ── 4. Pontos incompletos (janela de 30 dias ou mês atual, após 5º dia útil) ──
+        janela_inicio = corte_notificacoes
         dias_incompletos = 0
         for d_obj, regs_do_dia in pontos_por_data.items():
             if janela_inicio <= d_obj < hoje and eh_dia_util(d_obj):
