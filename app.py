@@ -1083,6 +1083,7 @@ def admin_lancar_ponto_manual():
     tipo = request.form.get("tipo")
     hora_raw = request.form.get("hora")        # esperada no formato HH:MM
     justificativa = request.form.get("justificativa", "").strip()
+    modo = request.form.get("modo", "adicionar")  # "adicionar" (padrão) ou "substituir"
 
     if not usuario_id or not data_raw or not tipo or not hora_raw:
         flash("Todos os campos obrigatórios devem ser preenchidos.", "danger")
@@ -1103,18 +1104,30 @@ def admin_lancar_ponto_manual():
     # Garantir formato HH:MM:SS para hora
     hora_formatada = hora_raw if len(hora_raw) == 8 else f"{hora_raw}:00"
 
-    # Verificar se já existe um registro idêntico para o usuário nessa data e tipo
-    ponto_existente = RegistroPonto.query.filter_by(
-        usuario_id=usuario_alvo.id,
-        data=data_formatada,
-        tipo=tipo
-    ).first()
+    if modo == "substituir":
+        # Modo substituição: busca o registro existente do mesmo tipo e sobrescreve
+        ponto_existente = RegistroPonto.query.filter_by(
+            usuario_id=usuario_alvo.id,
+            data=data_formatada,
+            tipo=tipo
+        ).first()
 
-    if ponto_existente:
-        ponto_existente.hora = hora_formatada
-        ponto_existente.foi_ajustado = True
-        msg_acao = f"Atualizou o ponto ({tipo}) de {usuario_alvo.nome} para o dia {data_formatada} às {hora_formatada}."
+        if ponto_existente:
+            ponto_existente.hora = hora_formatada
+            ponto_existente.foi_ajustado = True
+            msg_acao = f"Atualizou o ponto ({tipo}) de {usuario_alvo.nome} para o dia {data_formatada} às {hora_formatada}."
+        else:
+            novo_ponto = RegistroPonto(
+                usuario_id=usuario_alvo.id,
+                data=data_formatada,
+                tipo=tipo,
+                hora=hora_formatada,
+                foi_ajustado=True
+            )
+            db.session.add(novo_ponto)
+            msg_acao = f"Lançou manualmente o ponto ({tipo}) de {usuario_alvo.nome} para o dia {data_formatada} às {hora_formatada}."
     else:
+        # Modo adição (padrão): SEMPRE cria um registro novo, preservando registros existentes
         novo_ponto = RegistroPonto(
             usuario_id=usuario_alvo.id,
             data=data_formatada,
@@ -1123,7 +1136,7 @@ def admin_lancar_ponto_manual():
             foi_ajustado=True
         )
         db.session.add(novo_ponto)
-        msg_acao = f"Lançou manualmente o ponto ({tipo}) de {usuario_alvo.nome} para o dia {data_formatada} às {hora_formatada}."
+        msg_acao = f"Adicionou novo registro ({tipo}) de {usuario_alvo.nome} para o dia {data_formatada} às {hora_formatada}."
 
     db.session.commit()
     _invalidar_notif_cache(int(usuario_alvo.id))
@@ -2368,27 +2381,34 @@ def responder_solicitacao(id, acao):
 
     if acao == "aprovar":
         solicitacao.status = "Aprovada"
-        
-        # Se hora_original foi informada, busca o registro específico (mesma data, tipo E hora).
-        # Isso resolve o bug quando existem 2 Entradas ou 2 Saídas no mesmo dia.
+
         if solicitacao.hora_original:
+            # Correção de registro EXISTENTE: busca o registro específico (mesma data, tipo E hora)
             ponto_existente = RegistroPonto.query.filter_by(
                 usuario_id=solicitacao.usuario_id,
                 data=solicitacao.data_ponto,
                 tipo=solicitacao.tipo_ponto,
                 hora=solicitacao.hora_original
             ).first()
-        else:
-            ponto_existente = RegistroPonto.query.filter_by(
-                usuario_id=solicitacao.usuario_id,
-                data=solicitacao.data_ponto,
-                tipo=solicitacao.tipo_ponto
-            ).first()
 
-        if ponto_existente:
-            ponto_existente.hora = solicitacao.hora_correta
-            ponto_existente.foi_ajustado = True
+            if ponto_existente:
+                ponto_existente.hora = solicitacao.hora_correta
+                ponto_existente.foi_ajustado = True
+                descricao_acao = f"Aprovou correção de {solicitacao.usuario.nome}: {solicitacao.tipo_ponto} em {solicitacao.data_ponto}"
+            else:
+                # Registro original não encontrado (pode ter sido excluído); cria novo
+                novo_ponto = RegistroPonto(
+                    data=solicitacao.data_ponto,
+                    tipo=solicitacao.tipo_ponto,
+                    hora=solicitacao.hora_correta,
+                    usuario_id=solicitacao.usuario_id,
+                    foi_ajustado=True
+                )
+                db.session.add(novo_ponto)
+                descricao_acao = f"Aprovou correção (registro original não encontrado, criou novo) de {solicitacao.usuario.nome}: {solicitacao.tipo_ponto} em {solicitacao.data_ponto}"
         else:
+            # Ponto ESQUECIDO / nunca registrado: SEMPRE cria um registro NOVO,
+            # preservando registros existentes do mesmo tipo no dia.
             novo_ponto = RegistroPonto(
                 data=solicitacao.data_ponto,
                 tipo=solicitacao.tipo_ponto,
@@ -2397,8 +2417,9 @@ def responder_solicitacao(id, acao):
                 foi_ajustado=True
             )
             db.session.add(novo_ponto)
+            descricao_acao = f"Aprovou novo registro (ponto esquecido) de {solicitacao.usuario.nome}: {solicitacao.tipo_ponto} em {solicitacao.data_ponto}"
 
-        registrar_log(current_user.id, f"Aprovou ajuste de {solicitacao.usuario.nome}: {solicitacao.tipo_ponto} em {solicitacao.data_ponto}", id)
+        registrar_log(current_user.id, descricao_acao, id)
         flash("Solicitação APROVADA e registro atualizado!", "success")
 
     elif acao == "recusar":
