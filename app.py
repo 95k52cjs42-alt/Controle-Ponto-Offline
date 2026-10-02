@@ -93,7 +93,18 @@ APP_ENV = os.environ.get("APP_ENV", os.environ.get("FLASK_ENV", "development")).
 IS_PRODUCTION = APP_ENV not in {"development", "dev", "test", "testing", "local"}
 SECRET_KEY = os.environ.get("SECRET_KEY", "").strip()
 if not SECRET_KEY:
-    raise RuntimeError("SECRET_KEY ausente: configure uma chave aleatória antes de iniciar.")
+    if TESTING:
+        SECRET_KEY = "testing-key"
+    else:
+        raise RuntimeError(
+            "\n" + "="*60 + "\n"
+            "ERRO: SECRET_KEY NÃO ENCONTRADA\n" + "="*60 + "\n"
+            "Para resolver este erro de deploy:\n\n"
+            "1. Se estiver no HEROKU: rode 'heroku config:set SECRET_KEY=$(python -c \"import secrets; print(secrets.token_hex(32))\")'\n"
+            "2. Se estiver no RENDER/RAILWAY: Adicione 'SECRET_KEY' nas Environment Variables.\n"
+            "3. Se estiver LOCAL: Adicione 'SECRET_KEY=chave_aleatoria' no seu arquivo .env\n\n"
+            "DICA: Você pode gerar uma chave agora com: flask generate-secret\n" + "="*60
+        )
 
 app = Flask(__name__)
 app.config.update(
@@ -1091,6 +1102,20 @@ def _apply_database_migrations():
         _sincronizar_feriados_lib()
     except Exception as exc:
         app.logger.warning("Falha ao sincronizar feriados na inicialização: %s", exc)
+
+
+
+@app.cli.command("generate-secret")
+def generate_secret():
+    """Gera uma chave secreta aleatória segura."""
+    import secrets
+    key = secrets.token_hex(32)
+    click.echo("\n" + "="*40)
+    click.echo("SUA NOVA SECRET_KEY GERADA:")
+    click.echo("="*40)
+    click.echo(key)
+    click.echo("="*40)
+    click.echo("Copie e cole este valor nas configurações do seu servidor.\n")
 
 
 if app.config.get("AUTO_INIT_DB", False):

@@ -10,7 +10,7 @@ APP_ENV=production
 PUBLIC_BASE_URL=https://ponto.example.com
 TRUSTED_HOSTS=ponto.example.com
 COOKIE_SECURE=true
-SECRET_KEY=<random 32+ character value>
+SECRET_KEY=2d757d696d5190632b338f929beaf23dd7043c4eb35d9ad3cdb1dff19e6937ea
 AUTO_INIT_DB=false
 TRUST_PROXY_HEADERS=true
 ```
