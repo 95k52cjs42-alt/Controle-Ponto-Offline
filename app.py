@@ -2,15 +2,20 @@ import io
 import os
 import re
 import time
+import hashlib
+import html
+import secrets
+import threading
+import click
 import holidays
 import calendar
 
-import secrets
-from collections import defaultdict
-from dotenv import load_dotenv
+from collections import defaultdict, deque
 from datetime import datetime, timedelta, date
 from functools import wraps
+from urllib.parse import parse_qsl, urlencode, urlsplit
 from zoneinfo import ZoneInfo
+from xml.sax.saxutils import escape as xml_escape
 
 import requests
 
@@ -23,8 +28,11 @@ from flask import (
     render_template,
     request,
     send_file,
+    send_from_directory,
     url_for,
     make_response,
+    session,
+    abort,
 )
 from flask_login import (
     LoginManager,
@@ -36,7 +44,10 @@ from flask_login import (
 )
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import check_password_hash, generate_password_hash
-from itsdangerous import URLSafeTimedSerializer as Serializer
+from werkzeug.exceptions import RequestEntityTooLarge
+from werkzeug.middleware.proxy_fix import ProxyFix
+from PIL import Image, ImageOps, UnidentifiedImageError
+from dotenv import load_dotenv
 import resend
 import dns.resolver
 
@@ -47,8 +58,101 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 load_dotenv()
+
+
+def _env_bool(name, default=False):
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on", "sim"}
+
+
+def _env_list(name, default=None):
+    raw = os.environ.get(name)
+    if raw is None:
+        return list(default or [])
+    return [item.strip().lower() for item in raw.split(",") if item.strip()]
+
+
+def _normalise_public_base_url(value):
+    value = (value or "").strip().rstrip("/")
+    if not value:
+        return ""
+    parsed = urlsplit(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.username or parsed.password:
+        raise RuntimeError("PUBLIC_BASE_URL deve ser uma URL HTTP/HTTPS absoluta sem credenciais.")
+    if parsed.query or parsed.fragment or parsed.path not in {"", "/"}:
+        raise RuntimeError("PUBLIC_BASE_URL deve conter somente esquema, host e porta.")
+    return value
+
+
+# A aplicação não possui segredo de fallback. O teste injeta uma chave própria
+# antes da importação deste módulo.
+TESTING = _env_bool("TESTING")
+APP_ENV = os.environ.get("APP_ENV", os.environ.get("FLASK_ENV", "development")).strip().lower()
+IS_PRODUCTION = APP_ENV not in {"development", "dev", "test", "testing", "local"}
+SECRET_KEY = os.environ.get("SECRET_KEY", "").strip()
+if not SECRET_KEY:
+    raise RuntimeError("SECRET_KEY ausente: configure uma chave aleatória antes de iniciar.")
+
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", "dev-key-apenas-para-desenvolvimento")
+app.config.update(
+    SECRET_KEY=SECRET_KEY,
+    TESTING=TESTING,
+    DEBUG=False,
+    MAX_CONTENT_LENGTH=3 * 1024 * 1024,
+    MAX_FORM_MEMORY_SIZE=256 * 1024,
+    MAX_FORM_PARTS=50,
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    REMEMBER_COOKIE_HTTPONLY=True,
+    REMEMBER_COOKIE_SAMESITE="Lax",
+    PERMANENT_SESSION_LIFETIME=timedelta(hours=8),
+    SESSION_REFRESH_EACH_REQUEST=False,
+    REMEMBER_COOKIE_DURATION=timedelta(hours=8),
+    WTF_CSRF_ENABLED=True,
+    PREFERRED_URL_SCHEME="http",
+)
+if APP_ENV == "development" and _env_bool("FLASK_DEBUG", False):
+    app.config["DEBUG"] = True
+if IS_PRODUCTION and _env_bool("FLASK_DEBUG", False):
+    raise RuntimeError("FLASK_DEBUG não pode ser habilitado em produção.")
+if IS_PRODUCTION and app.config["DEBUG"]:
+    raise RuntimeError("Debug não pode ser habilitado em produção.")
+
+# Links de e-mail são sempre baseados nesta URL, nunca no Host/Referer.
+if IS_PRODUCTION and len(SECRET_KEY) < 32:
+    raise RuntimeError("Produção exige SECRET_KEY com pelo menos 32 caracteres.")
+public_base_url = _normalise_public_base_url(os.environ.get("PUBLIC_BASE_URL", ""))
+if not public_base_url:
+    if IS_PRODUCTION:
+        raise RuntimeError("PUBLIC_BASE_URL ausente: configure a URL pública da aplicação.")
+    public_base_url = "http://localhost:5000"
+app.config["PUBLIC_BASE_URL"] = public_base_url
+app.config["PREFERRED_URL_SCHEME"] = urlsplit(public_base_url).scheme or "https"
+
+trusted_hosts = _env_list("TRUSTED_HOSTS")
+if not trusted_hosts:
+    if IS_PRODUCTION:
+        raise RuntimeError("TRUSTED_HOSTS ausente: configure os hosts públicos permitidos.")
+    trusted_hosts = ["localhost", "127.0.0.1"]
+base_host = urlsplit(public_base_url).netloc
+trusted_hosts = list(dict.fromkeys(trusted_hosts + [base_host, urlsplit(public_base_url).hostname]))
+if "*" in trusted_hosts:
+    raise RuntimeError("TRUSTED_HOSTS não pode conter '*'.")
+app.config["TRUSTED_HOSTS"] = trusted_hosts
+
+if IS_PRODUCTION and urlsplit(public_base_url).scheme != "https":
+    raise RuntimeError("Produção exige PUBLIC_BASE_URL com HTTPS.")
+cookie_secure = _env_bool("COOKIE_SECURE", public_base_url.startswith("https://"))
+if IS_PRODUCTION and not cookie_secure:
+    raise RuntimeError("Produção exige COOKIE_SECURE=true (HTTPS).")
+app.config["SESSION_COOKIE_SECURE"] = cookie_secure
+app.config["REMEMBER_COOKIE_SECURE"] = cookie_secure
+app.config["TRUST_PROXY_HEADERS"] = _env_bool("TRUST_PROXY_HEADERS", False)
+if app.config["TRUST_PROXY_HEADERS"]:
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
+
 resend.api_key = os.environ.get("RESEND_API_KEY")
 if not resend.api_key:
     print("AVISO: RESEND_API_KEY não configurada. E-mails não serão enviados.")
@@ -65,16 +169,48 @@ elif DATABASE_URL.startswith("postgresql://") and not DATABASE_URL.startswith("p
 
 app.config["SQLALCHEMY_DATABASE_URI"] = DATABASE_URL
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
-    "pool_size": 10,
-    "max_overflow": 20,
-    "pool_recycle": 300,
-    "pool_pre_ping": True,
+# O pool de arquivos do SQLite não aceita estes argumentos; isso também permite
+# importar a aplicação com uma configuração de teste isolada.
+if DATABASE_URL.startswith("sqlite"):
+    app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {}
+else:
+    app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+        "pool_size": 10,
+        "max_overflow": 20,
+        "pool_recycle": 300,
+        "pool_pre_ping": True,
+    }
+auto_init_db = _env_bool("AUTO_INIT_DB", not IS_PRODUCTION and not app.config.get("TESTING", False))
+if IS_PRODUCTION and auto_init_db:
+    raise RuntimeError("AUTO_INIT_DB deve ser false em produção; use o comando init-db no deploy.")
+app.config["AUTO_INIT_DB"] = auto_init_db
+app.config["UPLOAD_FOLDER"] = os.path.abspath(os.environ.get("UPLOAD_DIR", os.path.join(app.root_path, "static", "uploads", "perfil")))
+app.config["UPLOAD_MAX_BYTES"] = 2 * 1024 * 1024
+app.config["UPLOAD_MAX_DIMENSION"] = 4096
+app.config["UPLOAD_MAX_PIXELS"] = 16_000_000
+app.config["RESET_TOKEN_TTL_SECONDS"] = 30 * 60
+app.config["INVITE_TOKEN_TTL_SECONDS"] = 24 * 60 * 60
+app.config["CONFIRM_TOKEN_TTL_SECONDS"] = 24 * 60 * 60
+app.config["RATE_LIMIT_ENABLED"] = _env_bool("RATE_LIMIT_ENABLED", True)
+app.config["RATE_LIMITS"] = {
+    "login": (10, 300),
+    "forgot_password": (5, 900),
+    "cadastro": (5, 900),
+    "upload": (10, 900),
+    "reset_password": (10, 900),
+    "definir_senha_usuario": (10, 900),
+    "confirm_email": (10, 900),
+    "api_localizacao": (30, 900),
 }
+app.config["CSRF_FIELD_NAME"] = "_csrf_token"
+app.config["CSRF_HEADER_NAME"] = "X-CSRF-Token"
+app.config["MAIL_FROM"] = os.environ.get("MAIL_FROM", "onboarding@resend.dev")
 
 db = SQLAlchemy(app)
 login_manager = LoginManager(app)
 login_manager.login_view = "login"
+login_manager.login_message_category = "warning"
+login_manager.session_protection = "strong"
 
 CARGA_HORARIA_DIARIA = timedelta(hours=8)
 
@@ -111,6 +247,12 @@ _NOTIF_CACHE_TTL = 30  # segundos
 _FERIADOS_CACHE = {}
 _FERIADOS_CACHE_TTL = 300  # segundos (5 min)
 
+# Rate limit de processo simples. Em produção com múltiplos workers, deve-se
+# usar um armazenamento compartilhado (Redis) no proxy/WAF; esta camada protege
+# cada processo e não pretende sustituir esse controle de infraestrutura.
+_RATE_BUCKETS = {}
+_RATE_LIMIT_LOCK = threading.Lock()
+
 # API de reverse geocoding gratuita e sem chave (BigDataCloud)
 BIGDATACLOUD_URL = "https://api.bigdatacloud.net/data/reverse-geocode-client"
 
@@ -118,7 +260,7 @@ BIGDATACLOUD_URL = "https://api.bigdatacloud.net/data/reverse-geocode-client"
 def _get_config(chave, default=None):
     """Lê um valor da tabela de configurações (None se ausente)."""
     try:
-        reg = Configuracao.query.get(chave)
+        reg = db.session.get(Configuracao, chave)
         return reg.valor if reg is not None else default
     except Exception:
         return default
@@ -126,7 +268,7 @@ def _get_config(chave, default=None):
 
 def _set_config(chave, valor):
     """Grava/atualiza um valor na tabela de configurações."""
-    reg = Configuracao.query.get(chave)
+    reg = db.session.get(Configuracao, chave)
     if reg is not None:
         reg.valor = valor
     else:
@@ -434,9 +576,10 @@ def verificar_conformidade_clt(data_anterior, hora_saida, data_atual, hora_entra
 
 def verificar_dominio_email(email):
     try:
-        dominio = email.split('@')[1]
-        records = dns.resolver.resolve(dominio, 'MX')
-        return len(records) > 0
+        local, dominio = email.strip().lower().rsplit("@", 1)
+        if not local or not dominio or "." not in dominio:
+            return False
+        return len(dns.resolver.resolve(dominio, "MX")) > 0
     except Exception:
         return False
 
@@ -502,6 +645,7 @@ class Usuario(UserMixin, db.Model):
     is_admin = db.Column(db.Boolean, default=False)
     email_confirmado = db.Column(db.Boolean, default=False)
     precisa_redefinir_senha = db.Column(db.Boolean, default=False)
+    auth_version = db.Column(db.Integer, nullable=False, default=0)
     foto_url = db.Column(db.String(255), nullable=True)
     departamento_id = db.Column(db.Integer, db.ForeignKey('departamento.id'), nullable=True)
     tipo_contrato = db.Column(db.String(10), nullable=False, default="CLT")
@@ -509,6 +653,7 @@ class Usuario(UserMixin, db.Model):
     data_cadastro = db.Column(db.DateTime, default=lambda: datetime.now(ZoneInfo("America/Sao_Paulo")))
     pontos = db.relationship("RegistroPonto", backref="usuario", lazy=True)
     solicitacoes = db.relationship("SolicitacaoCorrecao", backref="usuario", lazy=True)
+    security_tokens = db.relationship("SecurityToken", back_populates="usuario", lazy=True, cascade="all, delete-orphan")
 
     def tem_permissao(self, permissao):
         if self.is_admin:
@@ -522,31 +667,348 @@ class Usuario(UserMixin, db.Model):
         except:
             return False
 
-    def get_reset_token(self, expires_sec=1800):
-        s = Serializer(app.config['SECRET_KEY'])
-        return s.dumps({'user_id': self.id})
+    def get_reset_token(self, expires_sec=None):
+        return issue_security_token(self.id, SecurityToken.PURPOSE_RESET, expires_sec or app.config["RESET_TOKEN_TTL_SECONDS"])[0]
 
     @staticmethod
     def verify_reset_token(token):
-        s = Serializer(app.config['SECRET_KEY'])
-        try:
-            user_id = s.loads(token, max_age=1800)['user_id']
-        except:
-            return None
-        return Usuario.query.get(user_id)
+        return peek_security_token(token, SecurityToken.PURPOSE_RESET)
 
-    def get_confirmation_token(self, expires_sec=1800):
-        s = Serializer(app.config['SECRET_KEY'])
-        return s.dumps({'user_id': self.id})
+    def get_confirmation_token(self, expires_sec=None):
+        return issue_security_token(self.id, SecurityToken.PURPOSE_CONFIRM, expires_sec or app.config["CONFIRM_TOKEN_TTL_SECONDS"])[0]
 
     @staticmethod
     def verify_confirmation_token(token):
-        s = Serializer(app.config['SECRET_KEY'])
+        return peek_security_token(token, SecurityToken.PURPOSE_CONFIRM)
+
+class SecurityToken(db.Model):
+    """Tokens opacos de uso único; somente o digest é persistido."""
+    __tablename__ = "security_token"
+    PURPOSE_RESET = "reset"
+    PURPOSE_INVITE = "invite"
+    PURPOSE_CONFIRM = "confirm"
+
+    id = db.Column(db.Integer, primary_key=True)
+    usuario_id = db.Column(db.Integer, db.ForeignKey("usuario.id"), nullable=True)
+    email = db.Column(db.String(100), nullable=True)
+    nome = db.Column(db.String(100), nullable=True)
+    senha_hash = db.Column(db.String(200), nullable=True)
+    purpose = db.Column(db.String(20), nullable=False)
+    token_hash = db.Column(db.String(64), nullable=False, unique=True, index=True)
+    expira_em = db.Column(db.DateTime, nullable=False)
+    usado_em = db.Column(db.DateTime, nullable=True)
+    criado_em = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(ZoneInfo("America/Sao_Paulo")))
+
+    usuario = db.relationship("Usuario", back_populates="security_tokens", foreign_keys=[usuario_id])
+
+
+def _local_now():
+    # Colunas DateTime sem timezone; mantemos o mesmo formato em SQLite/PostgreSQL.
+    return datetime.now(ZoneInfo("America/Sao_Paulo")).replace(tzinfo=None)
+
+
+def _token_digest(raw_token):
+    return hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+
+
+def issue_security_token(usuario_id, purpose, ttl_seconds, *, email=None, nome=None, senha_hash=None):
+    """Cria um token opaco, aleatório, expirável e de uso único."""
+    if purpose not in {SecurityToken.PURPOSE_RESET, SecurityToken.PURPOSE_INVITE, SecurityToken.PURPOSE_CONFIRM}:
+        raise ValueError("purpose de token inválido")
+    raw_token = secrets.token_urlsafe(48)
+    agora = _local_now()
+    if usuario_id is not None:
+        SecurityToken.query.filter_by(
+            usuario_id=usuario_id,
+            purpose=purpose,
+            usado_em=None,
+        ).update({"usado_em": agora}, synchronize_session=False)
+    elif email:
+        SecurityToken.query.filter_by(
+            email=email,
+            purpose=purpose,
+            usado_em=None,
+        ).update({"usado_em": agora}, synchronize_session=False)
+    row = SecurityToken(
+        usuario_id=usuario_id,
+        email=email,
+        nome=nome,
+        senha_hash=senha_hash,
+        purpose=purpose,
+        token_hash=_token_digest(raw_token),
+        expira_em=agora + timedelta(seconds=int(ttl_seconds)),
+    )
+    db.session.add(row)
+    db.session.commit()
+    return raw_token, row
+
+
+def _get_valid_security_token(raw_token, purpose):
+    if not raw_token or not isinstance(raw_token, str):
+        return None
+    if len(raw_token) < 40 or len(raw_token) > 200:
+        return None
+    return SecurityToken.query.filter_by(
+        token_hash=_token_digest(raw_token),
+        purpose=purpose,
+        usado_em=None,
+    ).filter(SecurityToken.expira_em > _local_now()).first()
+
+
+def peek_security_token(raw_token, purpose):
+    row = _get_valid_security_token(raw_token, purpose)
+    return row.usuario if row and row.usuario_id else None
+
+
+def consume_security_token(raw_token, purpose):
+    """Consome atomicamente um token; segunda tentativa devolve None."""
+    row = _get_valid_security_token(raw_token, purpose)
+    if not row:
+        return None
+    agora = _local_now()
+    updated = SecurityToken.query.filter(
+        SecurityToken.id == row.id,
+        SecurityToken.usado_em.is_(None),
+        SecurityToken.expira_em > agora,
+    ).update({"usado_em": agora}, synchronize_session=False)
+    db.session.commit()
+    return row if updated == 1 else None
+
+
+def revoke_user_sessions(usuario):
+    usuario.auth_version = int(usuario.auth_version or 0) + 1
+    db.session.add(usuario)
+    db.session.commit()
+
+
+def _email_link(endpoint, **values):
+    return f"{app.config['PUBLIC_BASE_URL']}{url_for(endpoint, **values)}"
+
+
+def _email_link_html(link, label="Clique no link abaixo"):
+    safe_link = html.escape(link, quote=True)
+    safe_label = html.escape(label)
+    return f'<p><a href="{safe_link}">{safe_label}</a></p>'
+
+
+def _send_email(to, subject, body):
+    try:
+        resend.Emails.send({
+            "from": app.config["MAIL_FROM"],
+            "to": to,
+            "subject": subject,
+            "html": body,
+        })
+        return True
+    except Exception as exc:
+        app.logger.warning("Falha ao enviar e-mail para %s: %s", to, exc)
+        return False
+
+
+DUMMY_PASSWORD_HASH = generate_password_hash(secrets.token_urlsafe(24), method="scrypt")
+
+
+def _password_problem(senha):
+    senha = senha or ""
+    if len(senha) < 8:
+        return "A senha deve ter pelo menos 8 caracteres."
+    if not re.search(r"[A-Z]", senha):
+        return "A senha deve conter pelo menos uma letra maiúscula."
+    if not re.search(r"[a-z]", senha):
+        return "A senha deve conter pelo menos uma letra minúscula."
+    if not re.search(r"\d", senha):
+        return "A senha deve conter pelo menos um número."
+    if not re.search(r"[@#*]", senha):
+        return "A senha deve conter pelo menos um caractere especial (@, # ou *)."
+    return None
+
+
+def _neutralise_export_value(value):
+    text = "" if value is None else str(value)
+    if text.startswith(("=", "+", "-", "@", "\t", "\r", "\n", " ")) or text.lstrip().startswith(("=", "+", "-", "@")):
+        return "'" + text
+    return text
+
+
+def _safe_export_rows(rows):
+    return [[_neutralise_export_value(value) for value in row] for row in rows]
+
+
+def _pdf_text(value):
+    return xml_escape(str(value or ""), {'"': '&quot;', "'": '&apos;'})
+
+
+def _safe_reportlab_image_path(image_path):
+    """Valida se o caminho de imagem existe dentro do diretório UPLOAD_FOLDER permitido."""
+    if not image_path or not isinstance(image_path, str):
+        return None
+    upload_dir = os.path.realpath(os.path.abspath(app.config["UPLOAD_FOLDER"]))
+    resolved = os.path.realpath(os.path.abspath(image_path))
+    if not resolved.startswith(upload_dir + os.sep) or not os.path.isfile(resolved):
+        return None
+    return resolved
+
+
+def _validate_profile_image(stream):
+    """Valida conteúdo/dimensões e regrava a imagem sem metadados arbitrários."""
+    position = stream.tell()
+    try:
+        stream.seek(0)
+        max_bytes = app.config["UPLOAD_MAX_BYTES"]
+        data = stream.read(max_bytes + 1)
+        if len(data) > max_bytes:
+            raise ValueError("A imagem excede o tamanho máximo de 2 MB.")
+        with Image.open(io.BytesIO(data)) as image:
+            if image.format not in {"PNG", "JPEG", "GIF"}:
+                raise ValueError("Formato de imagem inválido.")
+            width, height = image.size
+            max_dimension = app.config["UPLOAD_MAX_DIMENSION"]
+            if width < 1 or height < 1 or width > max_dimension or height > max_dimension:
+                raise ValueError("Dimensões da imagem inválidas.")
+            if width * height > app.config["UPLOAD_MAX_PIXELS"]:
+                raise ValueError("A imagem possui pixels demais.")
+            image.verify()
+        with Image.open(io.BytesIO(data)) as image:
+            safe_image = ImageOps.exif_transpose(image)
+            if image.format == "PNG":
+                safe_image = safe_image.convert("RGBA")
+                output_format = "PNG"
+            elif image.format == "GIF":
+                safe_image = safe_image.convert("P")
+                output_format = "GIF"
+            else:
+                safe_image = safe_image.convert("RGB")
+                output_format = "JPEG"
+            output = io.BytesIO()
+            safe_image.save(output, format=output_format)
+        stream.seek(0)
+        stream.truncate()
+        stream.write(output.getvalue())
+        stream.seek(0)
+        return output_format
+    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
+        raise ValueError("Arquivo de imagem inválido ou corrompido.") from exc
+    finally:
         try:
-            user_id = s.loads(token, max_age=1800)['user_id']
-        except:
-            return None
-        return Usuario.query.get(user_id)
+            stream.seek(position)
+        except (OSError, ValueError):
+            pass
+
+
+def _internal_path(candidate, fallback):
+    if not candidate:
+        return fallback
+    parsed = urlsplit(candidate)
+    if parsed.scheme or parsed.netloc or not parsed.path.startswith("/") or parsed.path.startswith("//"):
+        return fallback
+    if "\\" in candidate or any(ord(char) < 32 for char in candidate):
+        return fallback
+    return candidate
+
+
+def _internal_referrer_path(fallback):
+    if not request.referrer:
+        return fallback
+    parsed = urlsplit(request.referrer)
+    if parsed.scheme in {"http", "https"}:
+        allowed = {urlsplit(app.config["PUBLIC_BASE_URL"]).netloc}
+        allowed.update(app.config["TRUSTED_HOSTS"])
+        if parsed.netloc not in allowed:
+            return fallback
+        candidate = parsed.path
+        if parsed.query:
+            candidate += f"?{parsed.query}"
+        return _internal_path(candidate, fallback)
+    elif parsed.netloc:
+        return fallback
+    return _internal_path(request.referrer, fallback)
+
+
+def _rate_limit(name):
+    if not app.config.get("RATE_LIMIT_ENABLED", True):
+        return
+    limit, window = app.config["RATE_LIMITS"].get(name, (10, 300))
+    key = (name, request.remote_addr or "unknown")
+    now = time.monotonic()
+    with _RATE_LIMIT_LOCK:
+        bucket = _RATE_BUCKETS.setdefault(key, deque())
+        while bucket and now - bucket[0] >= window:
+            bucket.popleft()
+        if len(bucket) >= limit:
+            abort(429, description="Muitas tentativas. Aguarde antes de tentar novamente.")
+        bucket.append(now)
+
+
+def csrf_token():
+    token = session.get("_csrf_token")
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session["_csrf_token"] = token
+    return token
+
+
+def _csrf_is_valid():
+    expected = session.get("_csrf_token")
+    supplied = request.form.get(app.config["CSRF_FIELD_NAME"])
+    if not supplied:
+        supplied = request.headers.get(app.config["CSRF_HEADER_NAME"])
+    if not supplied and request.is_json:
+        payload = request.get_json(silent=True)
+        if isinstance(payload, dict):
+            supplied = payload.get(app.config["CSRF_FIELD_NAME"])
+    return bool(expected and supplied and secrets.compare_digest(expected, supplied))
+
+
+@app.before_request
+def enforce_csrf_and_rate_limits():
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+        if not _csrf_is_valid():
+            abort(403, description="Token CSRF inválido ou ausente.")
+    rate_endpoint = request.endpoint
+    if rate_endpoint in {
+        "login", "cadastro", "forgot_password", "upload_foto_perfil", "reset_password",
+        "definir_senha_usuario", "confirm_email", "api_localizacao",
+    }:
+        _rate_limit("upload" if rate_endpoint == "upload_foto_perfil" else rate_endpoint)
+
+
+@app.context_processor
+def inject_security_context():
+    return {"csrf_token": csrf_token}
+
+
+@app.after_request
+def add_security_headers(response):
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=(self)")
+    response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
+    response.headers.setdefault("Cross-Origin-Resource-Policy", "same-origin")
+    response.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; "
+        "form-action 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; "
+        "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; "
+        "img-src 'self' data:; connect-src 'self' https://api.bigdatacloud.net",
+    )
+    if app.config["SESSION_COOKIE_SECURE"] and request.is_secure:
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    if request.endpoint in {
+        "login", "cadastro", "forgot_password", "reset_password", "definir_senha_usuario",
+        "confirm_email", "logout", "redefinir_senha_forca", "alterar_senha",
+    }:
+        response.headers.setdefault("Cache-Control", "no-store")
+    return response
+
+
+@app.errorhandler(RequestEntityTooLarge)
+def request_too_large(_error):
+    if request.path.startswith("/api/"):
+        return jsonify(erro="Requisição excede o limite permitido."), 413
+    return "Requisição excede o limite permitido.", 413
+
 
 class RegistroPonto(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -569,7 +1031,14 @@ class SolicitacaoCorrecao(db.Model):
 
 @login_manager.user_loader
 def load_user(user_id):
-    return Usuario.query.get(int(user_id))
+    user = db.session.get(Usuario, int(user_id))
+    if not user:
+        return None
+    # Cookies antigos, sem versão, ou de uma versão revogada não carregam mais
+    # o usuário. A rotação de versão ocorre ao redefinir/alterar senha.
+    if session.get("_auth_version") != int(user.auth_version or 0):
+        return None
+    return user
 
 def admin_required(f):
     @wraps(f)
@@ -580,59 +1049,89 @@ def admin_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
-# Auto-migração do banco de dados
-with app.app_context():
+# Migração leve executada apenas fora do perfil de teste. O bloco antigo que
+# criava/migrava o banco durante a importação foi removido deliberadamente.
+def _apply_database_migrations():
+    """Cria tabelas novas e adiciona colunas em instalações legadas."""
+    from sqlalchemy import inspect, text
     db.create_all()
-    try:
-        from sqlalchemy import inspect, text
-        inspector = inspect(db.engine)
+    inspector = inspect(db.engine)
+    colunas_usuario = [c["name"] for c in inspector.get_columns("usuario")]
+    migrations = (
+        ("is_admin", "ALTER TABLE usuario ADD COLUMN is_admin BOOLEAN DEFAULT FALSE"),
+        ("email_confirmado", "ALTER TABLE usuario ADD COLUMN email_confirmado BOOLEAN DEFAULT FALSE"),
+        ("precisa_redefinir_senha", "ALTER TABLE usuario ADD COLUMN precisa_redefinir_senha BOOLEAN DEFAULT FALSE"),
+        ("auth_version", "ALTER TABLE usuario ADD COLUMN auth_version INTEGER NOT NULL DEFAULT 0"),
+        ("foto_url", "ALTER TABLE usuario ADD COLUMN foto_url VARCHAR(255)"),
+        ("departamento_id", "ALTER TABLE usuario ADD COLUMN departamento_id INTEGER"),
+        ("permissoes", "ALTER TABLE usuario ADD COLUMN permissoes TEXT"),
+        ("tipo_contrato", "ALTER TABLE usuario ADD COLUMN tipo_contrato VARCHAR(10) DEFAULT 'CLT'"),
+    )
+    for column, statement in migrations:
+        if column not in colunas_usuario:
+            db.session.execute(text(statement))
+    if "data_cadastro" not in colunas_usuario:
+        data_type = "TIMESTAMP" if db.engine.name == "postgresql" else "DATETIME"
+        db.session.execute(text(f"ALTER TABLE usuario ADD COLUMN data_cadastro {data_type}"))
+        db.session.execute(text("UPDATE usuario SET data_cadastro = CURRENT_TIMESTAMP"))
 
-        colunas_usuario = [c["name"] for c in inspector.get_columns("usuario")]
-        if "is_admin" not in colunas_usuario:
-            db.session.execute(text("ALTER TABLE usuario ADD COLUMN is_admin BOOLEAN DEFAULT FALSE;"))
-        if "email_confirmado" not in colunas_usuario:
-            db.session.execute(text("ALTER TABLE usuario ADD COLUMN email_confirmado BOOLEAN DEFAULT FALSE;"))
-        if "precisa_redefinir_senha" not in colunas_usuario:
-            db.session.execute(text("ALTER TABLE usuario ADD COLUMN precisa_redefinir_senha BOOLEAN DEFAULT FALSE;"))
-        if "data_cadastro" not in colunas_usuario:
-            if db.engine.name == "postgresql":
-                db.session.execute(text("ALTER TABLE usuario ADD COLUMN data_cadastro TIMESTAMP;"))
-            else:
-                db.session.execute(text("ALTER TABLE usuario ADD COLUMN data_cadastro DATETIME;"))
-            db.session.execute(text("UPDATE usuario SET data_cadastro = CURRENT_TIMESTAMP;"))
+    colunas_ponto = [c["name"] for c in inspector.get_columns("registro_ponto")]
+    if "foi_ajustado" not in colunas_ponto:
+        db.session.execute(text("ALTER TABLE registro_ponto ADD COLUMN foi_ajustado BOOLEAN DEFAULT FALSE"))
+    colunas_solicitacao = [c["name"] for c in inspector.get_columns("solicitacao_correcao")]
+    if "hora_original" not in colunas_solicitacao:
+        db.session.execute(text("ALTER TABLE solicitacao_correcao ADD COLUMN hora_original VARCHAR(8)"))
+    colunas_feriado = [c["name"] for c in inspector.get_columns("feriado")]
+    if "fonte" not in colunas_feriado:
+        db.session.execute(text("ALTER TABLE feriado ADD COLUMN fonte VARCHAR(20) DEFAULT 'manual'"))
 
-        if "foto_url" not in colunas_usuario:
-            db.session.execute(text("ALTER TABLE usuario ADD COLUMN foto_url VARCHAR(255);"))
-        if "departamento_id" not in colunas_usuario:
-            db.session.execute(text("ALTER TABLE usuario ADD COLUMN departamento_id INTEGER;"))
-        if "permissoes" not in colunas_usuario:
-            db.session.execute(text("ALTER TABLE usuario ADD COLUMN permissoes TEXT;"))
-        if "tipo_contrato" not in colunas_usuario:
-            db.session.execute(text("ALTER TABLE usuario ADD COLUMN tipo_contrato VARCHAR(10) DEFAULT 'CLT';"))
-            # Usuários já existentes mantêm como CLT por padrão
-
-        colunas_ponto = [c["name"] for c in inspector.get_columns("registro_ponto")]
-        if "foi_ajustado" not in colunas_ponto:
-            db.session.execute(text("ALTER TABLE registro_ponto ADD COLUMN foi_ajustado BOOLEAN DEFAULT FALSE;"))
-
-        colunas_solicitacao = [c["name"] for c in inspector.get_columns("solicitacao_correcao")]
-        if "hora_original" not in colunas_solicitacao:
-            db.session.execute(text("ALTER TABLE solicitacao_correcao ADD COLUMN hora_original VARCHAR(8);"))
-
-        colunas_feriado = [c["name"] for c in inspector.get_columns("feriado")]
-        if "fonte" not in colunas_feriado:
-            db.session.execute(text("ALTER TABLE feriado ADD COLUMN fonte VARCHAR(20) DEFAULT 'manual';"))
-
-        db.session.commit()
-    except Exception as e:
-        db.session.rollback()
-
-    # Garante que os feriados nacionais + estaduais (ESTADO_FERIADO) estejam
-    # cadastrados no banco já na inicialização do app.
+    db.session.execute(text("UPDATE usuario SET auth_version = COALESCE(auth_version, 0)"))
+    db.session.commit()
     try:
         _sincronizar_feriados_lib()
-    except Exception as e:
-        print(f"AVISO: falha ao sincronizar feriados na inicialização: {e}")
+    except Exception as exc:
+        app.logger.warning("Falha ao sincronizar feriados na inicialização: %s", exc)
+
+
+if app.config.get("AUTO_INIT_DB", False):
+    with app.app_context():
+        _apply_database_migrations()
+
+
+@app.cli.command("init-db")
+def init_db_command():
+    """Cria/migra tabelas explicitamente (não é executado ao importar)."""
+    _apply_database_migrations()
+    click.echo("Banco de dados inicializado.")
+
+
+@app.cli.command("bootstrap-admin")
+@click.option("--email", prompt=True)
+@click.option("--nome", prompt=True)
+@click.option("--senha", prompt=True, hide_input=True, confirmation_prompt=True)
+def bootstrap_admin(email, nome, senha):
+    """Cria o primeiro administrador explicitamente por linha de comando."""
+    email = email.strip().lower()
+    nome = nome.strip()
+    if not email or not nome or "@" not in email:
+        raise click.ClickException("Informe nome e e-mail válidos.")
+    if Usuario.query.filter_by(email=email).first():
+        raise click.ClickException("Já existe uma conta com este e-mail.")
+    problem = _password_problem(senha)
+    if problem:
+        raise click.ClickException(problem)
+    user = Usuario(
+        nome=nome,
+        email=email,
+        senha_hash=generate_password_hash(senha, method="scrypt"),
+        is_admin=True,
+        email_confirmado=True,
+        precisa_redefinir_senha=False,
+    )
+    db.session.add(user)
+    db.session.commit()
+    click.echo(f"Administrador criado: {email}")
+
 
 # ==========================================
 #         SISTEMA DE NOTIFICAÇÕES
@@ -834,7 +1333,7 @@ def obter_notificacoes_usuario(user_id):
         # Calcula o limite: corte das notificações ou primeiro registro/cadastro,
         # o que vier antes. Após o 5º dia útil do mês, o corte é o dia 1º do mês
         # atual, então faltas de meses anteriores deixam de gerar notificação.
-        usuario_obj = Usuario.query.get(user_id)
+        usuario_obj = db.session.get(Usuario, user_id)
         data_inicio = (
             usuario_obj.data_cadastro.date()
             if usuario_obj and usuario_obj.data_cadastro
@@ -926,25 +1425,26 @@ def login():
         return redirect(url_for("index"))
 
     if request.method == "POST":
-        email = request.form.get("email", "").strip()
+        email = request.form.get("email", "").strip().lower()
         senha = request.form.get("senha", "")
-        user = Usuario.query.filter_by(email=email).first()
-
-        if user and check_password_hash(user.senha_hash, senha):
-            if not user.email_confirmado:
-                flash("Por favor, confirme seu e-mail antes de acessar o sistema.", "warning")
-                return render_template("login.html", email=email)
-            
+        user = Usuario.query.filter(db.func.lower(Usuario.email) == email).first()
+        password_hash = user.senha_hash if user is not None else DUMMY_PASSWORD_HASH
+        valid = check_password_hash(password_hash, senha)
+        if valid and user is not None and user.email_confirmado:
+            # Rotaciona o identificador da sessão antes de autenticar para
+            # impedir fixação de sessão.
+            session.clear()
             login_user(user)
-            
+            session.permanent = True
+            session["_auth_version"] = int(user.auth_version or 0)
             if user.precisa_redefinir_senha:
                 flash("Você precisa redefinir sua senha no primeiro acesso.", "info")
                 return redirect(url_for("redefinir_senha_forca"))
-            
             return redirect(url_for("index"))
-        else:
-            flash("E-mail ou senha incorretos.", "danger")
-            return render_template("login.html", email=email)
+        # A mesma resposta para e-mail inexistente, senha inválida ou e-mail
+        # ainda não confirmado evita enumeração de contas.
+        flash("E-mail ou senha incorretos.", "danger")
+        return render_template("login.html", email=email)
 
     return render_template("login.html")
 
@@ -955,28 +1455,12 @@ def cadastro():
 
     if request.method == "POST":
         nome = request.form.get("nome", "").strip()
-        email = request.form.get("email", "").strip()
+        email = request.form.get("email", "").strip().lower()
         senha = request.form.get("senha", "")
 
-        if Usuario.query.filter_by(email=email).first():
-            flash(f"O e-mail {email} já está cadastrado. Por favor, faça login.", "warning")
-            return render_template("register.html", nome=nome, email=email)
-
-        # Validação de senha
-        if len(senha) < 8:
-            flash("A senha deve ter pelo menos 8 caracteres.", "danger")
-            return render_template("register.html", nome=nome, email=email)
-        if not re.search(r"[A-Z]", senha):
-            flash("A senha deve conter pelo menos uma letra maiúscula.", "danger")
-            return render_template("register.html", nome=nome, email=email)
-        if not re.search(r"[a-z]", senha):
-            flash("A senha deve conter pelo menos uma letra minúscula.", "danger")
-            return render_template("register.html", nome=nome, email=email)
-        if not re.search(r"\d", senha):
-            flash("A senha deve conter pelo menos um número.", "danger")
-            return render_template("register.html", nome=nome, email=email)
-        if not re.search(r"[@#*]", senha):
-            flash("A senha deve conter pelo menos um caractere especial (@, # ou *).", "danger")
+        problem = _password_problem(senha)
+        if problem:
+            flash(problem, "danger")
             return render_template("register.html", nome=nome, email=email)
 
         # Validação de domínio
@@ -984,54 +1468,58 @@ def cadastro():
             flash("O domínio do e-mail é inválido ou não possui registros MX.", "danger")
             return render_template("register.html", nome=nome, email=email)
 
+        if Usuario.query.filter(db.func.lower(Usuario.email) == email).first():
+            # A mesma resposta para e-mail novo e existente evita enumeração.
+            flash("Se os dados forem válidos, você poderá continuar o cadastro.", "info")
+            return redirect(url_for("login"))
+
         # Verificar se a confirmação de e-mail está obrigatória (configurável no admin)
         verificacao_obrigatoria = _get_config("email_confirmacao_obrigatoria", "false").lower() == "true"
 
         if verificacao_obrigatoria:
-            # Fluxo com confirmação: gerar token e enviar e-mail
-            token_data = {
-                'nome': nome,
-                'email': email,
-                'senha_hash': generate_password_hash(senha, method="scrypt")
-            }
-            s = Serializer(app.config['SECRET_KEY'])
-            token = s.dumps(token_data)
-
-            confirm_url = url_for('confirm_email', token=token, _external=True)
-
-            try:
-                resend.Emails.send({
-                    "from": "onboarding@resend.dev",
-                    "to": email,
-                    "subject": "Confirme seu e-mail",
-                    "html": f"<p>Olá {nome}, clique no link para confirmar seu e-mail: <a href='{confirm_url}'>{confirm_url}</a></p>"
-                })
-                flash("Link de confirmação enviado! Verifique seu e-mail para concluir o cadastro.", "success")
-            except Exception as e:
-                flash(f"Erro ao enviar e-mail: {str(e)}", "danger")
+            token, _row = issue_security_token(
+                None,
+                SecurityToken.PURPOSE_CONFIRM,
+                app.config["CONFIRM_TOKEN_TTL_SECONDS"],
+                email=email,
+                nome=nome,
+                senha_hash=generate_password_hash(senha, method="scrypt"),
+            )
+            confirm_url = _email_link("confirm_email", token=token)
+            safe_name = html.escape(nome)
+            sent = _send_email(
+                email,
+                "Confirme seu e-mail",
+                f"<p>Olá {safe_name}, confirme seu e-mail.</p>{_email_link_html(confirm_url, 'Confirmar e-mail')}",
+            )
+            if sent:
+                flash("Se os dados forem válidos, enviaremos as instruções por e-mail.", "info")
+            else:
+                flash("Não foi possível enviar o e-mail agora. Tente novamente.", "danger")
                 return render_template("register.html", nome=nome, email=email)
         else:
-            # Fluxo direto: criar usuário imediatamente sem confirmação de e-mail
-            is_first = Usuario.query.count() == 0
+            # Um usuário público nunca recebe privilégios de administrador por
+            # ser o primeiro registro; bootstrap é feito apenas pela CLI.
             novo_usuario = Usuario(
                 nome=nome,
                 email=email,
                 senha_hash=generate_password_hash(senha, method="scrypt"),
-                is_admin=is_first,
+                is_admin=False,
                 email_confirmado=True,
             )
             db.session.add(novo_usuario)
             db.session.commit()
-            flash("Cadastro realizado com sucesso! Faça login para acessar o sistema.", "success")
+            flash("Se os dados forem válidos, você poderá continuar o cadastro.", "info")
 
         return redirect(url_for("login"))
 
     return render_template("register.html")
 
-@app.route("/logout")
+@app.route("/logout", methods=["POST"])
 @login_required
 def logout():
     logout_user()
+    session.clear()
     flash("Você saiu da conta.", "info")
     return redirect(url_for("login"))
 
@@ -1041,29 +1529,20 @@ def redefinir_senha_forca():
     if request.method == "POST":
         senha = request.form.get("senha", "")
 
-        # Validação completa de senha (mesma regra do cadastro/reset)
-        if len(senha) < 8:
-            flash("A senha deve ter pelo menos 8 caracteres.", "danger")
-            return render_template("redefinir_senha_forca.html")
-        if not re.search(r"[A-Z]", senha):
-            flash("A senha deve conter pelo menos uma letra maiúscula.", "danger")
-            return render_template("redefinir_senha_forca.html")
-        if not re.search(r"[a-z]", senha):
-            flash("A senha deve conter pelo menos uma letra minúscula.", "danger")
-            return render_template("redefinir_senha_forca.html")
-        if not re.search(r"\d", senha):
-            flash("A senha deve conter pelo menos um número.", "danger")
-            return render_template("redefinir_senha_forca.html")
-        if not re.search(r"[@#*]", senha):
-            flash("A senha deve conter pelo menos um caractere especial (@, # ou *).", "danger")
+        problem = _password_problem(senha)
+        if problem:
+            flash(problem, "danger")
             return render_template("redefinir_senha_forca.html")
 
         current_user.senha_hash = generate_password_hash(senha, method="scrypt")
         current_user.precisa_redefinir_senha = False
+        current_user.auth_version = int(current_user.auth_version or 0) + 1
         db.session.commit()
-        registrar_log(current_user.id, f"Redefiniu a própria senha (primeiro acesso)")
-        flash("Senha alterada com sucesso!", "success")
-        return redirect(url_for("index"))
+        registrar_log(current_user.id, "Redefiniu a própria senha (primeiro acesso)")
+        flash("Senha alterada com sucesso! Faça login novamente.", "success")
+        logout_user()
+        session.clear()
+        return redirect(url_for("login"))
     
     return render_template("redefinir_senha_forca.html")
 
@@ -1074,36 +1553,61 @@ def alterar_senha():
     nova_senha = request.form.get("nova_senha", "")
     confirmar_senha = request.form.get("confirmar_senha", "")
 
+    fallback = _internal_referrer_path(url_for("index"))
     if not check_password_hash(current_user.senha_hash, senha_atual):
         flash("A senha atual está incorreta.", "danger")
-        return redirect(request.referrer or url_for("index"))
+        return redirect(fallback)
 
     if nova_senha != confirmar_senha:
         flash("A confirmação da nova senha não confere.", "danger")
-        return redirect(request.referrer or url_for("index"))
+        return redirect(fallback)
 
-    # Validação completa de senha (mesma regra do cadastro/reset)
-    if len(nova_senha) < 8:
-        flash("A senha deve ter pelo menos 8 caracteres.", "danger")
-        return redirect(request.referrer or url_for("index"))
-    if not re.search(r"[A-Z]", nova_senha):
-        flash("A senha deve conter pelo menos uma letra maiúscula.", "danger")
-        return redirect(request.referrer or url_for("index"))
-    if not re.search(r"[a-z]", nova_senha):
-        flash("A senha deve conter pelo menos uma letra minúscula.", "danger")
-        return redirect(request.referrer or url_for("index"))
-    if not re.search(r"\d", nova_senha):
-        flash("A senha deve conter pelo menos um número.", "danger")
-        return redirect(request.referrer or url_for("index"))
-    if not re.search(r"[@#*]", nova_senha):
-        flash("A senha deve conter pelo menos um caractere especial (@, # ou *).", "danger")
-        return redirect(request.referrer or url_for("index"))
+    problem = _password_problem(nova_senha)
+    if problem:
+        flash(problem, "danger")
+        return redirect(fallback)
 
     current_user.senha_hash = generate_password_hash(nova_senha, method="scrypt")
+    current_user.auth_version = int(current_user.auth_version or 0) + 1
     db.session.commit()
     registrar_log(current_user.id, "Alterou a própria senha")
-    flash("Senha alterada com sucesso!", "success")
-    return redirect(request.referrer or url_for("index"))
+    flash("Senha alterada com sucesso! Faça login novamente.", "success")
+    logout_user()
+    session.clear()
+    return redirect(url_for("login"))
+
+
+_ADMIN_VIEW_ENDPOINTS = {
+    "painel": "admin_panel",
+    "usuarios": "admin_usuarios",
+    "historico": "admin_historico",
+    "solicitacoes": "admin_solicitacoes",
+    "logs": "admin_logs",
+}
+
+
+def _redirect_admin(view_name):
+    """Volta à aba que originou a ação, preservando seus filtros."""
+    endpoint = _ADMIN_VIEW_ENDPOINTS.get(view_name, "admin_panel")
+    query_pairs = list(request.args.items(multi=True))
+
+    if not query_pairs:
+        referrer = urlsplit(request.referrer or "")
+        # O Referer só é consultado para preservar filtros; nunca é usado
+        # como destino de redirect.
+        if referrer.scheme in {"http", "https"}:
+            allowed_netlocs = {urlsplit(app.config["PUBLIC_BASE_URL"]).netloc}
+            allowed_netlocs.update(app.config["TRUSTED_HOSTS"])
+            is_internal = referrer.netloc in allowed_netlocs
+        else:
+            is_internal = not referrer.netloc
+        if is_internal and (referrer.path == "/admin" or referrer.path.startswith("/admin/")):
+            query_pairs = parse_qsl(referrer.query, keep_blank_values=True)
+
+    target = url_for(endpoint)
+    if query_pairs:
+        target = f"{target}?{urlencode(query_pairs)}"
+    return redirect(target)
 
 
 @app.route("/admin/lancar-ponto-manual", methods=["POST"])
@@ -1117,12 +1621,12 @@ def admin_lancar_ponto_manual():
 
     if not usuario_id or not data_raw or not tipo or not hora_raw:
         flash("Todos os campos obrigatórios devem ser preenchidos.", "danger")
-        return redirect(request.referrer or url_for("admin"))
+        return _redirect_admin("painel")
 
-    usuario_alvo = Usuario.query.get(usuario_id)
+    usuario_alvo = db.session.get(Usuario, usuario_id)
     if not usuario_alvo:
         flash("Usuário não encontrado.", "danger")
-        return redirect(request.referrer or url_for("admin"))
+        return _redirect_admin("painel")
 
     # Formatar data de YYYY-MM-DD para DD/MM/YYYY
     try:
@@ -1189,7 +1693,8 @@ def admin_lancar_ponto_manual():
     registrar_log(current_user.id, desc_log, entidade_id=usuario_alvo.id)
 
     flash(f"Ponto de {usuario_alvo.nome} lançado com sucesso!", "success")
-    return redirect(request.referrer or url_for("admin"))
+    return _redirect_admin("painel")
+
 
 @app.route("/admin/excluir-ponto/<int:ponto_id>", methods=["POST"])
 @login_required
@@ -1197,7 +1702,7 @@ def admin_lancar_ponto_manual():
 def admin_excluir_ponto(ponto_id):
     """Exclui um registro de ponto (apenas admin/RH). Usado para remover duplicatas."""
     ponto = RegistroPonto.query.get_or_404(ponto_id)
-    usuario_alvo = Usuario.query.get(ponto.usuario_id)
+    usuario_alvo = db.session.get(Usuario, ponto.usuario_id)
 
     # Salvar dados para o log de auditoria ANTES de excluir
     nome_usuario = usuario_alvo.nome if usuario_alvo else "Usuário"
@@ -1213,25 +1718,25 @@ def admin_excluir_ponto(ponto_id):
     except Exception:
         db.session.rollback()
         flash("Erro ao excluir registro. Tente novamente.", "danger")
-        return redirect(url_for("admin_historico"))
+        return _redirect_admin("historico")
 
     registrar_log(current_user.id, desc_log, entidade_id=ponto.usuario_id)
     flash(f"Ponto ({ponto.tipo}) de {nome_usuario} excluído com sucesso!", "success")
-    return redirect(url_for("admin_historico"))
+    return _redirect_admin("historico")
 
 @app.route("/admin/cadastrar_usuario", methods=["POST"])
 @admin_required
 def admin_cadastrar_usuario():
     nome = request.form.get("nome", "").strip()
-    email = request.form.get("email", "").strip()
+    email = request.form.get("email", "").strip().lower()
     
     if not nome or not email:
         flash("Nome e e-mail são obrigatórios.", "danger")
-        return redirect(url_for("admin_usuarios"))
-    
+        return _redirect_admin("usuarios")
+
     if Usuario.query.filter_by(email=email).first():
         flash(f"Usuário {email} já cadastrado.", "danger")
-        return redirect(url_for("admin_usuarios"))
+        return _redirect_admin("usuarios")
     
     # Criar usuário temporário para gerar o token
     senha_temporaria = secrets.token_urlsafe(32)
@@ -1250,33 +1755,56 @@ def admin_cadastrar_usuario():
     db.session.commit()
     registrar_log(current_user.id, f"Cadastrou usuário {nome} ({email})")
     
-    token = novo_usuario.get_reset_token()
-    link_definir_senha = url_for("definir_senha_usuario", token=token, _external=True)
-    
-    try:
-        resend.Emails.send({
-            "from": "onboarding@resend.dev",
-            "to": email,
-            "subject": "Bem-vindo ao 4Lab Orbit - Defina sua senha",
-            "html": f"<p>Olá {nome}, seu cadastro foi realizado pelo administrador.</p><p>Clique no link abaixo para definir sua senha e acessar o sistema:</p><p><a href='{link_definir_senha}'>{link_definir_senha}</a></p>"
-        })
+    token, _row = issue_security_token(
+        novo_usuario.id,
+        SecurityToken.PURPOSE_INVITE,
+        app.config["INVITE_TOKEN_TTL_SECONDS"],
+    )
+    link_definir_senha = _email_link("definir_senha_usuario", token=token)
+    safe_name = html.escape(nome)
+    sent = _send_email(
+        email,
+        "Bem-vindo ao 4Lab Orbit - Defina sua senha",
+        f"<p>Olá {safe_name}, seu cadastro foi realizado pelo administrador.</p>{_email_link_html(link_definir_senha, 'Definir senha')}",
+    )
+    if sent:
         flash(f"Usuário {nome} cadastrado com sucesso! E-mail de convite enviado.", "success")
-    except Exception as e:
-        flash(f"Erro ao enviar e-mail: {e}", "danger")
-        
-    return redirect(url_for("admin_usuarios"))
+    else:
+        flash("Usuário cadastrado, mas não foi possível enviar o convite. Gere um novo convite.", "danger")
 
-@app.route("/definir_senha/<token>")
+    return _redirect_admin("usuarios")
+
+@app.route("/definir_senha/<token>", methods=["GET", "POST"])
 def definir_senha_usuario(token):
-    usuario = Usuario.verify_reset_token(token)
-    if not usuario:
+    row = _get_valid_security_token(token, SecurityToken.PURPOSE_INVITE)
+    if not row or not row.usuario:
         flash("Token inválido ou expirado.", "danger")
         return redirect(url_for("login"))
-    
-    login_user(usuario)
-    usuario.precisa_redefinir_senha = True
-    db.session.commit()
-    return redirect(url_for("redefinir_senha_forca"))
+
+    if request.method == "POST":
+        senha = request.form.get("senha", "")
+        problem = _password_problem(senha)
+        if problem:
+            flash(problem, "danger")
+            return render_template("redefinir_senha_forca.html", invite_token=token)
+        # Consome somente depois de validar a nova senha; replay posterior falha.
+        consumed = consume_security_token(token, SecurityToken.PURPOSE_INVITE)
+        if not consumed or not consumed.usuario:
+            flash("Token inválido ou expirado.", "danger")
+            return redirect(url_for("login"))
+        usuario = consumed.usuario
+        usuario.senha_hash = generate_password_hash(senha, method="scrypt")
+        usuario.precisa_redefinir_senha = False
+        usuario.auth_version = int(usuario.auth_version or 0) + 1
+        db.session.commit()
+        session.clear()
+        login_user(usuario)
+        session.permanent = True
+        session["_auth_version"] = int(usuario.auth_version or 0)
+        flash("Senha definida com sucesso!", "success")
+        return redirect(url_for("index"))
+
+    return render_template("redefinir_senha_forca.html", invite_token=token)
 
 @app.route("/forgot_password", methods=["GET", "POST"])
 def forgot_password():
@@ -1284,89 +1812,90 @@ def forgot_password():
         return redirect(url_for("index"))
 
     if request.method == "POST":
-        email = request.form.get("email", "").strip()
-        user = Usuario.query.filter_by(email=email).first()
-
+        email = request.form.get("email", "").strip().lower()
+        user = Usuario.query.filter(db.func.lower(Usuario.email) == email).first()
         if user:
-            token = user.get_reset_token()
-            reset_link = url_for('reset_password', token=token, _external=True)
-            try:
-                resend.Emails.send({
-                    "from": "onboarding@resend.dev",
-                    "to": email,
-                    "subject": "Redefinição de Senha",
-                    "html": f"<p>Olá {user.nome}, clique no link para redefinir sua senha: <a href='{reset_link}'>{reset_link}</a></p>"
-                })
-                flash("E-mail de recuperação enviado com sucesso!", "success")
-            except Exception as e:
-                flash(f"Erro ao enviar e-mail: {str(e)}", "danger")
-        else:
-            # Por segurança, não informamos se o e-mail existe ou não
-            flash("Se o e-mail estiver cadastrado, você receberá instruções para redefinir a senha.", "info")
+            token, _row = issue_security_token(
+                user.id,
+                SecurityToken.PURPOSE_RESET,
+                app.config["RESET_TOKEN_TTL_SECONDS"],
+            )
+            reset_link = _email_link("reset_password", token=token)
+            safe_name = html.escape(user.nome)
+            _send_email(
+                email,
+                "Redefinição de Senha",
+                f"<p>Olá {safe_name}, use o link abaixo para redefinir sua senha.</p>{_email_link_html(reset_link, 'Redefinir senha')}",
+            )
+        # A resposta é a mesma para qualquer endereço, inclusive inexistente.
+        flash("Se o e-mail estiver cadastrado, você receberá instruções para redefinir a senha.", "info")
 
     return render_template("forgot_password.html")
 
-@app.route("/confirm_email/<token>")
+
+@app.route("/confirm_email/<token>", methods=["GET", "POST"])
 def confirm_email(token):
-    s = Serializer(app.config['SECRET_KEY'])
-    try:
-        data = s.loads(token, max_age=1800)
-    except:
+    row = _get_valid_security_token(token, SecurityToken.PURPOSE_CONFIRM)
+    if not row or not row.email or not row.nome or not row.senha_hash:
         flash("Token inválido ou expirado.", "danger")
         return redirect(url_for("login"))
 
-    # Verifica se e-mail já existe
-    if Usuario.query.filter_by(email=data['email']).first():
+    if Usuario.query.filter_by(email=row.email).first():
+        # Consome também um token de confirmação já usado para evitar replay.
+        consume_security_token(token, SecurityToken.PURPOSE_CONFIRM)
         flash("Este e-mail já foi confirmado/cadastrado.", "warning")
         return redirect(url_for("login"))
 
-    # Cria o usuário
-    is_first = Usuario.query.count() == 0
+    if request.method == "GET":
+        # A mensagem de um cliente de e-mail não consome o token; a confirmação
+        # exige uma ação POST protegida por CSRF.
+        return render_template("confirm_email.html", token=token)
+
+    # Consome atomicamente antes de criar a conta; nenhum usuário público é
+    # promovido a administrador.
+    consumed = consume_security_token(token, SecurityToken.PURPOSE_CONFIRM)
+    if not consumed:
+        flash("Token inválido ou expirado.", "danger")
+        return redirect(url_for("login"))
     novo_usuario = Usuario(
-        nome=data['nome'],
-        email=data['email'],
-        senha_hash=data['senha_hash'],
-        is_admin=is_first,
-        email_confirmado=True
+        nome=consumed.nome,
+        email=consumed.email,
+        senha_hash=consumed.senha_hash,
+        is_admin=False,
+        email_confirmado=True,
     )
     db.session.add(novo_usuario)
     db.session.commit()
-    
     flash("E-mail confirmado com sucesso! Você já pode fazer login.", "success")
     return redirect(url_for("login"))
+
 
 @app.route("/reset_password/<token>", methods=["GET", "POST"])
 def reset_password(token):
     if current_user.is_authenticated:
         return redirect(url_for("index"))
 
-    user = Usuario.verify_reset_token(token)
-    if not user:
+    row = _get_valid_security_token(token, SecurityToken.PURPOSE_RESET)
+    if not row or not row.usuario:
         flash("Token inválido ou expirado.", "danger")
         return redirect(url_for("forgot_password"))
 
     if request.method == "POST":
         senha = request.form.get("senha", "")
-
-        # Validação de senha
-        if len(senha) < 8:
-            flash("A senha deve ter pelo menos 8 caracteres.", "danger")
+        problem = _password_problem(senha)
+        if problem:
+            flash(problem, "danger")
             return render_template("reset_password.html")
-        if not re.search(r"[A-Z]", senha):
-            flash("A senha deve conter pelo menos uma letra maiúscula.", "danger")
-            return render_template("reset_password.html")
-        if not re.search(r"[a-z]", senha):
-            flash("A senha deve conter pelo menos uma letra minúscula.", "danger")
-            return render_template("reset_password.html")
-        if not re.search(r"\d", senha):
-            flash("A senha deve conter pelo menos um número.", "danger")
-            return render_template("reset_password.html")
-        if not re.search(r"[@#*]", senha):
-            flash("A senha deve conter pelo menos um caractere especial (@, # ou *).", "danger")
-            return render_template("reset_password.html")
-
-        user.senha_hash = generate_password_hash(senha, method="scrypt")
+        consumed = consume_security_token(token, SecurityToken.PURPOSE_RESET)
+        if not consumed or not consumed.usuario:
+            flash("Token inválido ou expirado.", "danger")
+            return redirect(url_for("forgot_password"))
+        usuario = consumed.usuario
+        usuario.senha_hash = generate_password_hash(senha, method="scrypt")
+        usuario.precisa_redefinir_senha = False
+        usuario.auth_version = int(usuario.auth_version or 0) + 1
         db.session.commit()
+        session.clear()
         flash("Senha redefinida com sucesso! Faça seu login.", "success")
         return redirect(url_for("login"))
 
@@ -1536,43 +2065,62 @@ def registrar_auto():
 @login_required
 def meu_historico():
     hoje = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
-    registros = (
-        RegistroPonto.query.filter_by(usuario_id=current_user.id)
-        .order_by(RegistroPonto.id.desc())
-        .all()
-    )
+    data_inicio_str = request.args.get("data_inicio", "").strip()
+    data_fim_str = request.args.get("data_fim", "").strip()
+    tipo_ponto = request.args.get("tipo_ponto", "").strip()
+
+    data_inicio_obj = None
+    data_fim_obj = None
+    if data_inicio_str:
+        try:
+            data_inicio_obj = datetime.strptime(data_inicio_str, "%Y-%m-%d").date()
+        except ValueError:
+            pass
+    if data_fim_str:
+        try:
+            data_fim_obj = datetime.strptime(data_fim_str, "%Y-%m-%d").date()
+        except ValueError:
+            pass
+
+    if not data_fim_obj:
+        data_fim_obj = hoje
+    if not data_inicio_obj:
+        # Sem período explícito, assume o mês corrente até hoje — mesma
+        # regra usada na folha de ponto exportada.
+        data_inicio_obj = data_fim_obj.replace(day=1)
+
+    if data_inicio_obj > data_fim_obj:
+        data_inicio_obj = data_fim_obj
+
+    query = RegistroPonto.query.filter_by(usuario_id=current_user.id)
+    if tipo_ponto in PONTOS_PERMITIDOS:
+        query = query.filter_by(tipo=tipo_ponto)
+
+    registros = query.order_by(RegistroPonto.id.desc()).all()
 
     dias_registrados = {}
-    primeira_data = hoje
-
     for r in registros:
         try:
             d_obj = datetime.strptime(r.data, "%d/%m/%Y").date()
-            if d_obj not in dias_registrados:
-                dias_registrados[d_obj] = []
-            dias_registrados[d_obj].append(r)
-            
-            if d_obj < primeira_data:
-                primeira_data = d_obj
+            if data_inicio_obj <= d_obj <= data_fim_obj:
+                if d_obj not in dias_registrados:
+                    dias_registrados[d_obj] = []
+                dias_registrados[d_obj].append(r)
         except ValueError:
             pass
 
     historico_analisado = []
-    curr = primeira_data if registros else (hoje - timedelta(days=30))
-    
     datas_intervalo = []
-    temp_date = curr
-    while temp_date <= hoje:
+    temp_date = data_inicio_obj
+    while temp_date <= data_fim_obj:
         datas_intervalo.append(temp_date)
         temp_date += timedelta(days=1)
-    
+
     datas_intervalo.sort(reverse=True)
 
     for d_obj in datas_intervalo:
         data_str = d_obj.strftime("%d/%m/%Y")
         registros_do_dia = dias_registrados.get(d_obj, [])
-        # Ordena por hora (ordem cronológica): o agrupamento global vem em ordem de
-        # inserção (id.desc) e pode ficar invertido após correções/adições tardias.
         registros_do_dia = sorted(
             registros_do_dia,
             key=lambda r: _parse_hora(getattr(r, "hora", None)) or datetime.min.time()
@@ -1583,10 +2131,6 @@ def meu_historico():
             continue
 
         saldo = calcular_saldo_dia(registros_do_dia, d_obj)
-
-        # No modelo de pares ilimitados, o dia está incompleto quando existe
-        # uma Entrada em aberto (sem a Saída correspondente de fechamento),
-        # ou quando não houve nenhuma batida no dia.
         incompleto = dia_ponto_incompleto(registros_do_dia) or not registros_do_dia
 
         historico_analisado.append({
@@ -1597,7 +2141,11 @@ def meu_historico():
         })
 
     return render_template(
-        "meu_historico.html", historico=historico_analisado
+        "meu_historico.html",
+        historico=historico_analisado,
+        data_inicio=data_inicio_obj.isoformat(),
+        data_fim=data_fim_obj.isoformat(),
+        tipo_ponto=tipo_ponto,
     )
 
 @app.route("/solicitar-correcao", methods=["GET", "POST"])
@@ -1686,46 +2234,64 @@ def api_pontos_do_dia(data_iso):
     ]
     return jsonify(resultado)
 
-@app.route("/exportar-ponto")
-@login_required
-def exportar_historico_ponto():
-    formato = request.args.get('format', 'pdf')
-    user_id = current_user.id
-    usuario = current_user
-    # PJ não possui carga horária fixa: sem horas extras, faltantes ou banco de horas
+def _gerar_relatorio_ponto_dados(usuario, data_inicio_str=None, data_fim_str=None):
+    hoje_real = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
     is_pj = getattr(usuario, "tipo_contrato", "CLT") == "PJ"
-    registros = RegistroPonto.query.filter_by(usuario_id=user_id).all()
-    hoje = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
-    
-    # Lógica de cálculo (adaptada de admin_exportar_ponto)
+
+    data_inicio_obj = None
+    data_fim_obj = None
+    if data_inicio_str:
+        try:
+            data_inicio_obj = datetime.strptime(data_inicio_str, "%Y-%m-%d").date()
+        except (ValueError, TypeError):
+            pass
+    if data_fim_str:
+        try:
+            data_fim_obj = datetime.strptime(data_fim_str, "%Y-%m-%d").date()
+        except (ValueError, TypeError):
+            pass
+
+    if not data_fim_obj:
+        data_fim_obj = hoje_real
+
+    if not data_inicio_obj:
+        if data_fim_str:
+            data_inicio_obj = data_fim_obj.replace(day=1)
+        else:
+            data_inicio_obj = hoje_real.replace(day=1)
+
+    if data_inicio_obj > data_fim_obj:
+        data_inicio_obj = data_fim_obj
+
+    registros = RegistroPonto.query.filter_by(usuario_id=usuario.id).order_by(RegistroPonto.id.asc()).all()
+
     dias_registrados = defaultdict(list)
-    primeira_data = hoje
     for r in registros:
         try:
             d_obj = datetime.strptime(r.data, "%d/%m/%Y").date()
-            if r.tipo in PONTOS_PERMITIDOS:
-                dias_registrados[d_obj].append((r.tipo, r.hora))
-            if d_obj < primeira_data:
-                primeira_data = d_obj
-        except ValueError:
+            if data_inicio_obj <= d_obj <= data_fim_obj:
+                if r.tipo in PONTOS_PERMITIDOS:
+                    dias_registrados[d_obj].append((r.tipo, r.hora))
+        except (ValueError, TypeError):
             pass
 
-    # Ordena por dia, depois pela ordem de registro (id preserva a ordem cronológica)
-    # Nº máx. de pares Entrada/Saída num único dia do período (len(regs)//2 arredondado p/ cima
-    # cobre batidas ímpares). A primeira coluna ("Dia") e a última ("Total / Status") são fixas;
-    # as colunas de movimentação são geradas dinamicamente: Entrada 1, Saída 1, Entrada 2, ...
+    for d in dias_registrados:
+        dias_registrados[d].sort(key=lambda x: x[1])
+
     max_pares = 1
-    for d_obj in range(primeira_data.toordinal(), hoje.toordinal() + 1):
+    for d_obj in range(data_inicio_obj.toordinal(), data_fim_obj.toordinal() + 1):
         regs_dia = dias_registrados.get(date.fromordinal(d_obj), [])
         pares = (len(regs_dia) + 1) // 2
         if pares > max_pares:
             max_pares = pares
+
     cabecalho = ["Dia"]
     for n in range(1, max_pares + 1):
         cabecalho.append(f"Entrada {n}")
         cabecalho.append(f"Saída {n}")
     cabecalho.append("Total / Status")
     tabela_linhas = [cabecalho]
+
     total_segundos_trabalhados = 0
     total_segundos_extras = 0
     total_segundos_faltantes = 0
@@ -1733,8 +2299,8 @@ def exportar_historico_ponto():
     FMT = "%H:%M:%S"
     segundos_carga_diaria = int(CARGA_HORARIA_DIARIA.total_seconds())
 
-    curr = primeira_data if registros else hoje
-    while curr <= hoje:
+    curr = data_inicio_obj
+    while curr <= data_fim_obj:
         dia_str = curr.strftime("%d/%m/%Y")
         regs = dias_registrados.get(curr, [])
 
@@ -1749,27 +2315,23 @@ def exportar_historico_ponto():
 
             tempo_trabalhado = timedelta()
             for i in range(min(len(entradas), len(saidas))):
-                t1, t2 = datetime.strptime(entradas[i], FMT), datetime.strptime(saidas[i], FMT)
-                if t2 > t1:
-                    tempo_trabalhado += t2 - t1
+                try:
+                    t1, t2 = datetime.strptime(entradas[i], FMT), datetime.strptime(saidas[i], FMT)
+                    if t2 > t1:
+                        tempo_trabalhado += t2 - t1
+                except (ValueError, TypeError):
+                    pass
 
             tot = int(tempo_trabalhado.total_seconds())
             total_segundos_trabalhados += tot
 
-            # Dia encerrado se a última movimentação do dia for uma Saída
             dia_encerrado = bool(regs) and regs[-1][0] == "Saída"
-            if curr < hoje or dia_encerrado:
-                # PJ não possui carga horária fixa: sem horas extras ou faltantes
-                if not is_pj:
-                    if tot > segundos_carga_diaria:
-                        total_segundos_extras += (tot - segundos_carga_diaria)
-                    elif eh_dia_util(curr) and tot < segundos_carga_diaria:
-                        total_segundos_faltantes += (segundos_carga_diaria - tot)
+            if not is_pj:
+                if tot > segundos_carga_diaria:
+                    total_segundos_extras += (tot - segundos_carga_diaria)
+                elif (curr < hoje_real or dia_encerrado) and eh_dia_util(curr) and tot < segundos_carga_diaria:
+                    total_segundos_faltantes += (segundos_carga_diaria - tot)
 
-            # Uma célula por movimentação (Entrada 1 / Saída 1 / Entrada 2 / Saída 2 / ...).
-            # Na ordem padrão esperada (Entrada, Saída, Entrada, ...), a posição i é do tipo
-            # da coluna i do cabeçalho; se o tipo fugir da alternância (correção manual), o
-            # horário ganha o prefixo "E"/"S" para não gerar relatório ambíguo.
             linha = [dia_str]
             for i, (tipo, hora) in enumerate(regs):
                 esperado = "Entrada" if i % 2 == 0 else "Saída"
@@ -1782,148 +2344,233 @@ def exportar_historico_ponto():
             hrs, mins = divmod(tot // 60, 60)
             linha.append(f"{hrs:02d}:{mins:02d}h")
             tabela_linhas.append(linha)
+
         elif eh_dia_util(curr):
-            # PJ não possui faltas: dias sem registros são ocultados do relatório
             if not is_pj:
                 vazios = [""] * (len(cabecalho) - 2)
-                if curr < hoje:
+                if curr < hoje_real:
                     total_faltas_dias += 1
                     total_segundos_faltantes += segundos_carga_diaria
                     tabela_linhas.append([dia_str, *vazios, "FALTA"])
-                else:
+                elif curr == hoje_real:
                     tabela_linhas.append([dia_str, *vazios, "Em Aberto"])
+                else:
+                    tabela_linhas.append([dia_str, *vazios, "-"])
+
         curr += timedelta(days=1)
 
-    # Exportação baseada no formato
+    balanco_segundos = total_segundos_extras - total_segundos_faltantes
+    hrs_t, mins_t = divmod(total_segundos_trabalhados // 60, 60)
+    hrs_e, mins_e = divmod(total_segundos_extras // 60, 60)
+    hrs_f, mins_f = divmod(total_segundos_faltantes // 60, 60)
+    hrs_b, mins_b = divmod(abs(balanco_segundos) // 60, 60)
+
+    texto_balanco = f"+{hrs_b:02d}:{mins_b:02d}h (Crédito)" if balanco_segundos >= 0 else f"-{hrs_b:02d}:{mins_b:02d}h (A Repor)"
+    cor_balanco = colors.HexColor("#2e7d32") if balanco_segundos >= 0 else colors.HexColor("#c62828")
+
+    return {
+        "usuario": usuario,
+        "is_pj": is_pj,
+        "data_inicio_obj": data_inicio_obj,
+        "data_fim_obj": data_fim_obj,
+        "tabela_linhas": tabela_linhas,
+        "max_pares": max_pares,
+        "total_segundos_trabalhados": total_segundos_trabalhados,
+        "total_segundos_extras": total_segundos_extras,
+        "total_segundos_faltantes": total_segundos_faltantes,
+        "total_faltas_dias": total_faltas_dias,
+        "hrs_t": hrs_t,
+        "mins_t": mins_t,
+        "hrs_e": hrs_e,
+        "mins_e": mins_e,
+        "hrs_f": hrs_f,
+        "mins_f": mins_f,
+        "hrs_b": hrs_b,
+        "mins_b": mins_b,
+        "balanco_segundos": balanco_segundos,
+        "texto_balanco": texto_balanco,
+        "cor_balanco": cor_balanco,
+    }
+
+
+def _gerar_arquivo_folha_ponto(dados, formato):
+    usuario = dados["usuario"]
+    is_pj = dados["is_pj"]
+    data_inicio_obj = dados["data_inicio_obj"]
+    data_fim_obj = dados["data_fim_obj"]
+    tabela_linhas = dados["tabela_linhas"]
+    max_pares = dados["max_pares"]
+
     if formato == "pdf":
         buffer = io.BytesIO()
-        pdf = SimpleDocTemplate(buffer, pagesize=letter)
+        pdf = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
         elementos = []
         estilos = getSampleStyleSheet()
-        
-        # Cabeçalho
-        elementos.append(Paragraph(f"Folha de Ponto - {usuario.nome}", estilos["Heading1"]))
-        elementos.append(Paragraph(f"E-mail: {usuario.email} | Contrato: {'PJ' if is_pj else 'CLT'} | Emissão: {datetime.now().strftime('%d/%m/%Y às %H:%M')}", estilos["Normal"]))
-        elementos.append(Spacer(1, 12))
-        
-        # Tabela (larguras dinâmicas: Dias e Total fixos, batidas dividem o restante)
-        largura_util = pdf.leftMargin + (letter[0] - pdf.leftMargin - pdf.rightMargin)
+
+        titulo_estilo = ParagraphStyle("T", parent=estilos["Heading1"], fontSize=18, alignment=1, spaceAfter=15)
+        elementos.append(Paragraph(f"<b>Folha de Ponto - {_pdf_text(usuario.nome)}</b>", titulo_estilo))
+        periodo_str = f"{data_inicio_obj.strftime('%d/%m/%Y')} a {data_fim_obj.strftime('%d/%m/%Y')}"
+        elementos.append(
+            Paragraph(
+                f"<b>E-mail:</b> {_pdf_text(usuario.email)} | <b>Contrato:</b> {'PJ' if is_pj else 'CLT'} | <b>Período:</b> {periodo_str} | <b>Emissão:</b> {datetime.now(ZoneInfo('America/Sao_Paulo')).strftime('%d/%m/%Y às %H:%M')}",
+                estilos["Normal"]
+            )
+        )
+        elementos.append(Spacer(1, 15))
+
+        largura_util = pdf.rightMargin + pdf.leftMargin + (letter[0] - pdf.rightMargin - pdf.leftMargin)
         col_batidas = max(1, max_pares * 2)
-        larg_batida = max(38.0, (largura_util - 64 - 66) / col_batidas)
-        colWidths = [64] + [larg_batida] * col_batidas + [66]
-        tabela = Table(tabela_linhas, colWidths=colWidths, repeatRows=1)
-        estilo_tabela = TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2c3e50')),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-        ])
-        
-        # Estilo para "FALTA"
-        for i, row in enumerate(tabela_linhas):
-            if "FALTA" in row:
-                estilo_tabela.add('BACKGROUND', (0, i), (-1, i), colors.HexColor('#fdecea'))
-                estilo_tabela.add('TEXTCOLOR', (0, i), (-1, i), colors.HexColor('#d9534f'))
-        
-        tabela.setStyle(estilo_tabela)
+        larg_batida = max(38.0, (largura_util - 80 - 90) / col_batidas)
+        colWidths = [80] + [larg_batida] * col_batidas + [90]
+        tabela = Table(tabela_linhas, colWidths=colWidths)
+        estilo_tabela = [
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2c3e50")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cccccc")),
+        ]
+        for i, linha in enumerate(tabela_linhas[1:], start=1):
+            if "FALTA" in linha:
+                estilo_tabela.append(("TEXTCOLOR", (0, i), (-1, i), colors.HexColor("#d32f2f")))
+                estilo_tabela.append(("FONTNAME", (0, i), (-1, i), "Helvetica-Bold"))
+                estilo_tabela.append(("BACKGROUND", (0, i), (-1, i), colors.HexColor("#ffebee")))
+
+        tabela.setStyle(TableStyle(estilo_tabela))
         elementos.append(tabela)
-        elementos.append(Spacer(1, 12))
-        
-        # Footer (Totais)
-        h_t = total_segundos_trabalhados // 3600
-        m_t = (total_segundos_trabalhados % 3600) // 60
-        
-        elementos.append(Paragraph(f"<b>Horas Totais Trabalhadas:</b> {h_t:02d}:{m_t:02d}h", estilos["Normal"]))
+        elementos.append(Spacer(1, 20))
 
-        # PJ não possui horas extras, faltantes ou banco de horas
+        dados_resumo = [
+            ["Horas Totais Trabalhadas:", f"{dados['hrs_t']:02d}:{dados['mins_t']:02d}h"],
+        ]
         if not is_pj:
-            h_e = total_segundos_extras // 3600
-            m_e = (total_segundos_extras % 3600) // 60
+            dados_resumo.append(["(+) Total Horas Extras:", f"{dados['hrs_e']:02d}:{dados['mins_e']:02d}h"])
+            dados_resumo.append(["(-) Total Horas Faltantes:", f"{dados['hrs_f']:02d}:{dados['mins_f']:02d}h ({dados['total_faltas_dias']} dia(s) ausente)"])
+            dados_resumo.append(["BALANÇO FINAL (BANCO DE HORAS):", dados["texto_balanco"]])
 
-            h_f = total_segundos_faltantes // 3600
-            m_f = (total_segundos_faltantes % 3600) // 60
+        tabela_resumo = Table(dados_resumo, colWidths=[310, 200])
+        resumo_estilos = [
+            ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"),
+            ("ALIGN", (0, 0), (0, -1), "RIGHT"),
+            ("ALIGN", (1, 0), (1, -1), "LEFT"),
+        ]
+        if not is_pj:
+            resumo_estilos.append(("TEXTCOLOR", (1, 3), (1, 3), dados["cor_balanco"]))
+            resumo_estilos.append(("LINEABOVE", (0, 3), (-1, 3), 1, colors.HexColor("#000000")))
+        tabela_resumo.setStyle(TableStyle(resumo_estilos))
+        elementos.append(tabela_resumo)
 
-            balanco = total_segundos_extras - total_segundos_faltantes
-            h_b = abs(balanco) // 3600
-            m_b = (abs(balanco) % 3600) // 60
-
-            elementos.append(Paragraph(f"<b>(+) Total Horas Extras:</b> <font color='green'>{h_e:02d}:{m_e:02d}h</font>", estilos["Normal"]))
-            elementos.append(Paragraph(f"<b>(-) Total Horas Faltantes:</b> <font color='red'>{h_f:02d}:{m_f:02d}h ({total_faltas_dias} dia(s) ausente)</font>", estilos["Normal"]))
-
-            cor_balanco = 'red' if balanco < 0 else 'green'
-            texto_balanco = f"BALANÇO FINAL (BANCO DE HORAS): <font color='{cor_balanco}'>{'-' if balanco < 0 else ''}{h_b:02d}:{m_b:02d}h ({'A Repor' if balanco < 0 else 'Crédito'})</font>"
-
-            elementos.append(Paragraph(f"<b>{texto_balanco}</b>", estilos["Normal"]))
-
-        
         pdf.build(elementos)
         buffer.seek(0)
-        return send_file(buffer, as_attachment=True, download_name=f"Folha_Ponto_{usuario.nome}.pdf", mimetype="application/pdf")
-    
+        return send_file(
+            buffer,
+            as_attachment=True,
+            download_name="Folha_Ponto.pdf",
+            mimetype="application/pdf",
+        )
+
     import pandas as pd
-    df = pd.DataFrame(tabela_linhas[1:], columns=tabela_linhas[0])
+    safe_rows = _safe_export_rows(tabela_linhas[1:])
+    df = pd.DataFrame(safe_rows, columns=tabela_linhas[0])
+
     if formato == "excel":
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df.to_excel(writer, index=False)
+            df.to_excel(writer, index=False, sheet_name='Ponto')
         output.seek(0)
-        return send_file(output, as_attachment=True, download_name=f"Folha_Ponto_{usuario.nome}.xlsx", mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-    
+        return send_file(
+            output,
+            as_attachment=True,
+            download_name="Folha_Ponto.xlsx",
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
     if formato == "csv":
         output = io.StringIO()
         df.to_csv(output, index=False, encoding='utf-8-sig')
         output.seek(0)
-        return send_file(io.BytesIO(output.getvalue().encode('utf-8-sig')), as_attachment=True, download_name=f"Folha_Ponto_{usuario.nome}.csv", mimetype="text/csv")
+        return send_file(
+            io.BytesIO(output.getvalue().encode('utf-8-sig')),
+            as_attachment=True,
+            download_name="Folha_Ponto.csv",
+            mimetype="text/csv"
+        )
 
+    return None
+
+
+@app.route("/exportar-ponto")
+@login_required
+def exportar_historico_ponto():
+    formato = request.args.get('format', 'pdf')
+    data_inicio = request.args.get('data_inicio', '').strip()
+    data_fim = request.args.get('data_fim', '').strip()
+    dados = _gerar_relatorio_ponto_dados(current_user, data_inicio, data_fim)
+    resp = _gerar_arquivo_folha_ponto(dados, formato)
+    if resp:
+        return resp
     return redirect(url_for("meu_historico"))
 # ==========================================
 #   ROTAS DE UPLOAD, DEPARTAMENTOS & RBAC
 # ==========================================
-from werkzeug.utils import secure_filename
-
-UPLOAD_FOLDER = os.path.join(app.root_path, 'static', 'uploads', 'perfil')
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
-
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+UPLOAD_FOLDER = app.config["UPLOAD_FOLDER"]
 
 @app.route("/perfil/upload-foto", methods=["POST"])
 @login_required
 def upload_foto_perfil():
-    if 'foto' not in request.files:
+    fallback = _internal_referrer_path(url_for("index"))
+    uploaded = request.files.get("foto")
+    if uploaded is None or not uploaded.filename:
         flash("Nenhum arquivo enviado.", "warning")
-        return redirect(request.referrer or url_for("index"))
-    
-    file = request.files['foto']
-    if file.filename == '':
-        flash("Nenhum arquivo selecionado.", "warning")
-        return redirect(request.referrer or url_for("index"))
-    
-    if file and allowed_file(file.filename):
-        ext = file.filename.rsplit('.', 1)[1].lower()
-        filename = f"user_{current_user.id}_{secrets.token_hex(8)}.{ext}"
-        filepath = os.path.join(UPLOAD_FOLDER, filename)
-        file.save(filepath)
-        
-        # Remove foto antiga se existir
-        if current_user.foto_url:
-            old_path = os.path.join(app.root_path, current_user.foto_url.lstrip('/'))
-            if os.path.exists(old_path):
-                try:
-                    os.remove(old_path)
-                except Exception:
-                    pass
-        
-        current_user.foto_url = f"/static/uploads/perfil/{filename}"
-        db.session.commit()
-        registrar_log(current_user.id, "Atualizou foto de perfil")
-        flash("Foto de perfil atualizada com sucesso!", "success")
-    else:
-        flash("Formato de imagem inválido (use PNG, JPG ou JPEG).", "danger")
+        return redirect(fallback)
 
-    return redirect(request.referrer or url_for("index"))
+    if uploaded.content_length and uploaded.content_length > app.config["UPLOAD_MAX_BYTES"]:
+        flash("A imagem excede o tamanho máximo de 2 MB.", "danger")
+        return redirect(fallback)
+
+    try:
+        output_format = _validate_profile_image(uploaded.stream)
+    except ValueError as exc:
+        flash(str(exc), "danger")
+        return redirect(fallback)
+
+    extension = {"PNG": "png", "JPEG": "jpg", "GIF": "gif"}[output_format]
+    filename = f"user_{current_user.id}_{secrets.token_hex(12)}.{extension}"
+    upload_folder = app.config["UPLOAD_FOLDER"]
+    os.makedirs(upload_folder, exist_ok=True)
+    filepath = os.path.abspath(os.path.join(upload_folder, filename))
+    if os.path.commonpath([os.path.abspath(upload_folder), filepath]) != os.path.abspath(upload_folder):
+        flash("Não foi possível salvar a imagem.", "danger")
+        return redirect(fallback)
+    uploaded.stream.seek(0)
+    uploaded.save(filepath)
+
+    old_url = current_user.foto_url
+    old_filename = old_url.rsplit("/", 1)[-1] if old_url else ""
+    if re.fullmatch(r"user_\d+_[0-9a-f]{24}\.(?:png|jpg|gif)", old_filename):
+        if old_url.startswith("/uploads/perfil/"):
+            old_path = os.path.abspath(os.path.join(upload_folder, old_filename))
+        else:
+            old_path = os.path.abspath(os.path.join(app.root_path, "static", "uploads", "perfil", old_filename))
+        if os.path.dirname(old_path) in {os.path.abspath(upload_folder), os.path.abspath(os.path.join(app.root_path, "static", "uploads", "perfil"))}:
+            try:
+                os.remove(old_path)
+            except OSError:
+                pass
+
+    current_user.foto_url = f"/uploads/perfil/{filename}"
+    db.session.commit()
+    registrar_log(current_user.id, "Atualizou foto de perfil")
+    flash("Foto de perfil atualizada com sucesso!", "success")
+    return redirect(fallback)
+
+@app.route("/uploads/perfil/<path:filename>")
+@login_required
+def uploaded_profile_image(filename):
+    if not re.fullmatch(r"user_\d+_[0-9a-f]{24}\.(?:png|jpg|gif)", filename):
+        abort(404)
+    return send_from_directory(app.config["UPLOAD_FOLDER"], filename, max_age=0)
+
 
 @app.route("/admin/departamentos", methods=["GET", "POST"])
 @login_required
@@ -1942,7 +2589,7 @@ def gerenciar_departamentos():
             db.session.commit()
             registrar_log(current_user.id, f"Criou o departamento '{nome}'")
             flash(f"Departamento '{nome}' cadastrado com sucesso!", "success")
-        return redirect(url_for("admin_usuarios"))
+        return _redirect_admin("usuarios")
 
     deps = Departamento.query.order_by(Departamento.nome.asc()).all()
     return render_template("admin_fragment_departamentos.html", departamentos=deps)
@@ -1959,7 +2606,7 @@ def excluir_departamento(id):
     db.session.commit()
     registrar_log(current_user.id, f"Excluiu departamento '{nome_dep}'")
     flash(f"Departamento '{nome_dep}' excluído com sucesso!", "success")
-    return redirect(url_for("admin_usuarios"))
+    return _redirect_admin("usuarios")
 
 @app.route("/admin/usuarios/<int:user_id>/atualizar", methods=["POST"])
 @login_required
@@ -1989,10 +2636,11 @@ def atualizar_usuario_admin(user_id):
         "pode_gerenciar_feriados": request.form.get("pode_gerenciar_feriados") == "on",
     }
     user.permissoes = json.dumps(permissoes)
+    user.auth_version = int(user.auth_version or 0) + 1
     db.session.commit()
     registrar_log(current_user.id, f"Atualizou departamento e permissões do usuário {user.nome}", user_id)
     flash(f"Dados e permissões do colaborador {user.nome} salvos com sucesso!", "success")
-    return redirect(url_for("admin_usuarios"))
+    return _redirect_admin("usuarios")
 
 # ==========================================
 #          ROTAS DE ADMINISTRAÇÃO
@@ -2091,7 +2739,7 @@ def toggle_verificacao_email():
     registrar_log(current_user.id, f"{'Reativou' if not ativa else 'Desativou'} a verificação de e-mail no cadastro")
     status = "ativada" if not ativa else "desativada"
     flash(f"Verificação de e-mail no cadastro {status}.", "success")
-    return redirect(url_for("admin_panel"))
+    return _redirect_admin("usuarios")
 
 @app.route("/admin")
 @login_required
@@ -2368,7 +3016,7 @@ def admin_fragment(view_name):
         logs = LogAuditoria.query.order_by(LogAuditoria.id.desc()).limit(100).all()
         return render_template("admin_fragment_logs.html", logs=logs)
 
-    return redirect(url_for("admin_panel"))
+    return _redirect_admin("painel")
 
 @app.route("/admin/historico")
 @login_required
@@ -2507,7 +3155,7 @@ def responder_solicitacao(id, acao):
 
     db.session.commit()
     _invalidar_notif_cache(solicitacao.usuario_id)
-    return redirect(url_for("admin_solicitacoes"))
+    return _redirect_admin("solicitacoes")
 
 @app.route("/admin/usuarios")
 @login_required
@@ -2534,23 +3182,18 @@ def admin_usuarios():
 
 @app.route("/admin/toggle-admin/<int:user_id>", methods=["POST"])
 @login_required
+@admin_required
 def toggle_admin(user_id):
-    # Garante que apenas administradores alterem permissões
-    if not current_user.is_admin:
-        flash("Acesso negado.", "danger")
-        return redirect(url_for("index"))
-    
     user = Usuario.query.get_or_404(user_id)
-    
     if user.id == current_user.id:
         flash("Você não pode alterar suas próprias permissões de administrador.", "warning")
     else:
         user.is_admin = not user.is_admin
+        user.auth_version = int(user.auth_version or 0) + 1
         db.session.commit()
         registrar_log(current_user.id, f"Alterou permissão de admin para {user.nome} -> {user.is_admin}", user_id)
         flash(f"Permissões do usuário {user.nome} atualizadas com sucesso!", "success")
-        
-    return redirect(url_for("admin_usuarios"))
+    return _redirect_admin("usuarios")
 
 def registrar_log(usuario_id, acao, entidade_id=None):
     log = LogAuditoria(usuario_id=usuario_id, acao=acao, entidade_id=entidade_id)
@@ -2559,11 +3202,8 @@ def registrar_log(usuario_id, acao, entidade_id=None):
 
 @app.route("/admin/excluir-usuario/<int:user_id>", methods=["POST"])
 @login_required
+@admin_required
 def excluir_usuario(user_id):
-    if not current_user.is_admin:
-        flash("Acesso negado.", "danger")
-        return redirect(url_for("index"))
-    
     user = Usuario.query.get_or_404(user_id)
     
     if user.id == current_user.id:
@@ -2575,16 +3215,17 @@ def excluir_usuario(user_id):
         RegistroPonto.query.filter_by(usuario_id=user.id).delete()
         SolicitacaoCorrecao.query.filter_by(usuario_id=user.id).delete()
         Notificacao.query.filter_by(usuario_id=user.id).delete()
+        SecurityToken.query.filter_by(usuario_id=user.id).delete()
         
         db.session.delete(user)
         db.session.commit()
         _invalidar_notif_cache(user_id)
         
         registrar_log(current_user.id, f"Excluiu usuário {user_nome}", user_id)
-        
+
         flash(f"Usuário {user_nome} excluído com sucesso!", "success")
-        
-    return redirect(url_for("admin_usuarios"))
+
+    return _redirect_admin("usuarios")
 
 @app.route("/admin/logs")
 @login_required
@@ -2643,248 +3284,17 @@ def admin_exportar_afd():
 
 @app.route("/admin/exportar-ponto/<int:user_id>")
 @login_required
+@admin_required
 def admin_exportar_ponto(user_id):
-    # 1. Validação de Administrador
-    if not current_user.is_admin:
-        flash("Acesso negado.", "danger")
-        return redirect(url_for("index"))
-
+    usuario = Usuario.query.get_or_404(user_id)
     formato = request.args.get('format', 'pdf')
     data_inicio = request.args.get('data_inicio', '').strip()
     data_fim = request.args.get('data_fim', '').strip()
-
-    # 2. Buscar o usuário específico pelo ID
-    # IMPORTANTE: Verifique se o nome da sua classe de usuário é 'Usuario' ou 'User'
-    usuario = Usuario.query.get_or_404(user_id)
-    # PJ não possui carga horária fixa: sem horas extras, faltantes ou banco de horas
-    is_pj = getattr(usuario, "tipo_contrato", "CLT") == "PJ"
-
-    # 3. Buscar registros desse usuário (com filtro opcional por período)
-    query_registros = RegistroPonto.query.filter_by(usuario_id=user_id)
-    registros = query_registros.order_by(RegistroPonto.id.asc()).all()
-
-    hoje = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
-
-    # Período de exibição: padrão = desde o primeiro registro até hoje
-    data_inicio_obj = None
-    data_fim_obj = hoje
-    if data_inicio:
-        data_inicio_obj = datetime.strptime(data_inicio, "%Y-%m-%d").date()
-    if data_fim:
-        data_fim_obj = datetime.strptime(data_fim, "%Y-%m-%d").date()
-
-    dias_registrados = defaultdict(list)
-    primeira_data = hoje
-
-    for r in registros:
-        try:
-            d_obj = datetime.strptime(r.data, "%d/%m/%Y").date()
-            if r.tipo in PONTOS_PERMITIDOS:
-                dias_registrados[d_obj].append((r.tipo, r.hora))
-            if d_obj < primeira_data:
-                primeira_data = d_obj
-        except ValueError:
-            pass
-
-    # Ordena registros de cada dia por hora (cronológica): correções tardias podem
-    # ter ID alto mas hora anterior à de batidas anteriores do mesmo dia.
-    for d in dias_registrados:
-        dias_registrados[d].sort(key=lambda x: x[1])
-
-    # Aplica filtro de período
-    if data_inicio_obj:
-        primeira_data = data_inicio_obj
-    if data_fim_obj:
-        hoje = data_fim_obj
-        if primeira_data > hoje:
-            primeira_data = hoje
-
-    # Nº máx. de pares Entrada/Saída num único dia do período; colunas de movimentação geradas
-    # dinamicamente (Entrada 1, Saída 1, Entrada 2, Saída 2, ...)
-    max_pares = 1
-    for d_obj in range(primeira_data.toordinal(), hoje.toordinal() + 1):
-        regs_dia = dias_registrados.get(date.fromordinal(d_obj), [])
-        pares = (len(regs_dia) + 1) // 2
-        if pares > max_pares:
-            max_pares = pares
-    cabecalho = ["Dia"]
-    for n in range(1, max_pares + 1):
-        cabecalho.append(f"Entrada {n}")
-        cabecalho.append(f"Saída {n}")
-    cabecalho.append("Total / Status")
-    tabela_linhas = [cabecalho]
-
-    total_segundos_trabalhados = 0
-    total_segundos_extras = 0
-    total_segundos_faltantes = 0
-    total_faltas_dias = 0
-
-    FMT = "%H:%M:%S"
-    segundos_carga_diaria = int(CARGA_HORARIA_DIARIA.total_seconds())
-
-    curr = primeira_data
-    while curr <= hoje:
-        dia_str = curr.strftime("%d/%m/%Y")
-        regs = dias_registrados.get(curr, [])
-
-        if regs:
-            entradas = []
-            saidas = []
-            for tipo, hora in regs:
-                if tipo == "Entrada":
-                    entradas.append(hora)
-                elif tipo == "Saída":
-                    saidas.append(hora)
-
-            tempo_trabalhado = timedelta()
-            for i in range(min(len(entradas), len(saidas))):
-                t1, t2 = datetime.strptime(entradas[i], FMT), datetime.strptime(saidas[i], FMT)
-                if t2 > t1:
-                    tempo_trabalhado += t2 - t1
-
-            tot = int(tempo_trabalhado.total_seconds())
-            total_segundos_trabalhados += tot
-
-            # Dia encerrado se a última movimentação do dia for uma Saída
-            dia_encerrado = bool(regs) and regs[-1][0] == "Saída"
-            if curr < hoje or dia_encerrado:
-                # PJ não possui carga horária fixa: sem horas extras ou faltantes
-                if not is_pj:
-                    if tot > segundos_carga_diaria:
-                        total_segundos_extras += (tot - segundos_carga_diaria)
-                    elif eh_dia_util(curr) and tot < segundos_carga_diaria:
-                        total_segundos_faltantes += (segundos_carga_diaria - tot)
-
-            # Uma célula por movimentação; horário vira "E/S" se o tipo fugir da alternância
-            linha = [dia_str]
-            for i, (tipo, hora) in enumerate(regs):
-                esperado = "Entrada" if i % 2 == 0 else "Saída"
-                cel = hora[:5]
-                if tipo != esperado:
-                    cel = f"E {cel}" if tipo == "Entrada" else f"S {cel}"
-                linha.append(cel)
-            while len(linha) < len(cabecalho) - 1:
-                linha.append("")
-            hrs, mins = divmod(tot // 60, 60)
-            linha.append(f"{hrs:02d}:{mins:02d}h")
-            tabela_linhas.append(linha)
-
-        elif eh_dia_util(curr):
-            # PJ não possui faltas: dias sem registros são ocultados do relatório
-            if not is_pj:
-                vazios = [""] * (len(cabecalho) - 2)
-                if curr < hoje:
-                    total_faltas_dias += 1
-                    total_segundos_faltantes += segundos_carga_diaria
-                    tabela_linhas.append([dia_str, *vazios, "FALTA"])
-                else:
-                    tabela_linhas.append([dia_str, *vazios, "Em Aberto"])
-
-        curr += timedelta(days=1)
-
-    # 4. Cálculo do Balanço e PDF (Usando dados do 'usuario' buscado)
-    balanco_segundos = total_segundos_extras - total_segundos_faltantes
-    hrs_t, mins_t = divmod(total_segundos_trabalhados // 60, 60)
-    hrs_e, mins_e = divmod(total_segundos_extras // 60, 60)
-    hrs_f, mins_f = divmod(total_segundos_faltantes // 60, 60)
-    hrs_b, mins_b = divmod(abs(balanco_segundos) // 60, 60)
-    
-    cor_balanco = colors.HexColor("#2e7d32") if balanco_segundos >= 0 else colors.HexColor("#c62828")
-    texto_balanco = f"+{hrs_b:02d}:{mins_b:02d}h (Crédito)" if balanco_segundos >= 0 else f"-{hrs_b:02d}:{mins_b:02d}h (A Repor)"
-
-    buffer = io.BytesIO()
-    pdf = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
-    elementos = []
-    estilos = getSampleStyleSheet()
-
-    titulo_estilo = ParagraphStyle("T", parent=estilos["Heading1"], fontSize=18, alignment=1, spaceAfter=15)
-    elementos.append(Paragraph(f"<b>Folha de Ponto - {usuario.nome}</b>", titulo_estilo))
-    elementos.append(Paragraph(f"<b>E-mail:</b> {usuario.email} | <b>Contrato:</b> {'PJ' if is_pj else 'CLT'} | <b>Emissão:</b> {datetime.now(ZoneInfo('America/Sao_Paulo')).strftime('%d/%m/%Y às %H:%M')}", estilos["Normal"]))
-    elementos.append(Spacer(1, 15))
-
-    # Tabela (larguras dinâmicas: Dias e Total fixos, batidas dividem o restante)
-    largura_util = pdf.rightMargin + pdf.leftMargin + (letter[0] - pdf.rightMargin - pdf.leftMargin)
-    col_batidas = max(1, max_pares * 2)
-    larg_batida = max(38.0, (largura_util - 80 - 90) / col_batidas)
-    colWidths = [80] + [larg_batida] * col_batidas + [90]
-    tabela = Table(tabela_linhas, colWidths=colWidths)
-    estilo_tabela = [
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2c3e50")),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
-        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cccccc")),
-    ]
-    for i, linha in enumerate(tabela_linhas[1:], start=1):
-        if linha[2] == "FALTA":
-            estilo_tabela.append(("TEXTCOLOR", (0, i), (-1, i), colors.HexColor("#d32f2f")))
-            estilo_tabela.append(("FONTNAME", (0, i), (-1, i), "Helvetica-Bold"))
-            estilo_tabela.append(("BACKGROUND", (0, i), (-1, i), colors.HexColor("#ffebee")))
-
-    tabela.setStyle(TableStyle(estilo_tabela))
-    elementos.append(tabela)
-    elementos.append(Spacer(1, 20))
-
-    dados_resumo = [
-        ["Horas Totais Trabalhadas:", f"{hrs_t:02d}:{mins_t:02d}h"],
-    ]
-    # PJ não possui horas extras, faltantes ou banco de horas
-    if not is_pj:
-        dados_resumo.append(["(+) Total Horas Extras:", f"{hrs_e:02d}:{mins_e:02d}h"])
-        dados_resumo.append(["(-) Total Horas Faltantes:", f"{hrs_f:02d}:{mins_f:02d}h ({total_faltas_dias} dia(s) ausente)"])
-        dados_resumo.append(["BALANÇO FINAL (BANCO DE HORAS):", texto_balanco])
-    
-    tabela_resumo = Table(dados_resumo, colWidths=[310, 200])
-    resumo_estilos = [
-        ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"),
-        ("ALIGN", (0, 0), (0, -1), "RIGHT"),
-        ("ALIGN", (1, 0), (1, -1), "LEFT"),
-    ]
-    # PJ não possui balanço de banco de horas: linha única, sem destaque especial
-    if not is_pj:
-        resumo_estilos.append(("TEXTCOLOR", (1, 3), (1, 3), cor_balanco))
-        resumo_estilos.append(("LINEABOVE", (0, 3), (-1, 3), 1, colors.HexColor("#000000")))
-    tabela_resumo.setStyle(TableStyle(resumo_estilos))
-    elementos.append(tabela_resumo)
-
-    if formato == "pdf":
-        pdf.build(elementos)
-        buffer.seek(0)
-        agora_br = datetime.now(ZoneInfo("America/Sao_Paulo"))
-        return send_file(
-            buffer,
-            as_attachment=True,
-            download_name=f"Folha_Ponto_{usuario.nome.replace(' ', '_')}_{agora_br.strftime('%m_%Y')}.pdf",
-            mimetype="application/pdf",
-        )
-
-    import pandas as pd
-    df = pd.DataFrame(tabela_linhas[1:], columns=tabela_linhas[0])
-
-    if formato == "excel":
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df.to_excel(writer, index=False, sheet_name='Ponto')
-        output.seek(0)
-        return send_file(
-            output,
-            as_attachment=True,
-            download_name=f"Folha_Ponto_{usuario.nome.replace(' ', '_')}.xlsx",
-            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-
-    if formato == "csv":
-        output = io.StringIO()
-        df.to_csv(output, index=False, encoding='utf-8-sig')
-        output.seek(0)
-        return send_file(
-            io.BytesIO(output.getvalue().encode('utf-8-sig')),
-            as_attachment=True,
-            download_name=f"Folha_Ponto_{usuario.nome.replace(' ', '_')}.csv",
-            mimetype="text/csv"
-        )
-
-    return redirect(url_for("admin_panel"))
+    dados = _gerar_relatorio_ponto_dados(usuario, data_inicio, data_fim)
+    resp = _gerar_arquivo_folha_ponto(dados, formato)
+    if resp:
+        return resp
+    return _redirect_admin("painel")
 
 @app.route("/admin/feriados/adicionar", methods=["POST"])
 @login_required
@@ -2903,7 +3313,7 @@ def adicionar_feriado():
         flash("Feriado cadastrado com sucesso!", "success")
     except Exception as e:
         flash(f"Erro ao cadastrar feriado: {e}", "danger")
-    return redirect(url_for("admin_panel"))
+    return _redirect_admin("painel")
 
 @app.route("/admin/feriados/excluir/<int:id>", methods=["POST"])
 @login_required
@@ -2917,7 +3327,7 @@ def excluir_feriado(id):
     db.session.commit()
     _FERIADOS_CACHE.clear()
     flash("Feriado excluído com sucesso!", "success")
-    return redirect(url_for("admin_panel"))
+    return _redirect_admin("painel")
 
 @app.route("/admin/feriados/sincronizar", methods=["POST"])
 @login_required
@@ -2933,7 +3343,7 @@ def sincronizar_feriados():
             flash("Sincronização concluída: nenhum feriado novo encontrado.", "info")
     except Exception as e:
         flash(f"Erro ao sincronizar feriados: {e}", "danger")
-    return redirect(url_for("admin_panel"))
+    return _redirect_admin("painel")
 
 @app.route("/api/localizacao", methods=["POST"])
 @login_required
@@ -2983,24 +3393,24 @@ def definir_regiao_feriados():
     if uf == "BR":
         # Remove a configuração -> volta para ESTADO_FERIADO (ou somente nacional)
         for chave in ("uf_feriado", "cidade_feriado", "regiao_fonte"):
-            reg = Configuracao.query.get(chave)
+            reg = db.session.get(Configuracao, chave)
             if reg is not None:
                 db.session.delete(reg)
         db.session.commit()
         _invalidar_cache_regiao()
         _sincronizar_feriados_lib()
         flash("Feriados regionais definidos como nacionais (BR).", "success")
-        return redirect(url_for("admin_panel"))
+        return _redirect_admin("painel")
 
     if uf not in UFS_BRASIL:
         flash("Sigla de UF inválida.", "danger")
-        return redirect(url_for("admin_panel"))
+        return _redirect_admin("painel")
 
     try:
         _set_config("uf_feriado", uf)
         _set_config("regiao_fonte", "manual")
         # Remove a cidade (não faz sentido para definição manual por UF)
-        reg_cidade = Configuracao.query.get("cidade_feriado")
+        reg_cidade = db.session.get(Configuracao, "cidade_feriado")
         if reg_cidade is not None:
             db.session.delete(reg_cidade)
         db.session.commit()
@@ -3009,20 +3419,16 @@ def definir_regiao_feriados():
     except Exception as e:
         db.session.rollback()
         flash(f"Erro ao definir a região: {e}", "danger")
-        return redirect(url_for("admin_panel"))
+        return _redirect_admin("painel")
 
     flash(f"Feriados regionais definidos para {uf} ({UFS_BRASIL[uf]}).", "success")
-    return redirect(url_for("admin_panel"))
+    return _redirect_admin("painel")
 
-@app.route('/admin/enviar-lembrete-geral', methods=['POST'])
+@app.route("/admin/enviar-lembrete-geral", methods=["POST"])
 @login_required
+@admin_required
 def enviar_lembrete_geral():
-    # Valida se é admin (ajuste conforme a sua regra de segurança)
-    if not getattr(current_user, 'is_admin', False):
-        flash('Acesso negado.', 'danger')
-        return redirect(url_for('index'))
-
-    mensagem = request.form.get('mensagem')
+    mensagem = request.form.get("mensagem", "").strip()
 
     if mensagem:
         # Busca todos os usuários do sistema
@@ -3043,8 +3449,8 @@ def enviar_lembrete_geral():
     else:
         flash('A mensagem do lembrete não pode estar vazia.', 'warning')
 
-    return redirect(url_for('admin_panel'))
+    return _redirect_admin("painel")
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=True)
+    app.run(host="0.0.0.0", port=port, debug=app.config["DEBUG"])

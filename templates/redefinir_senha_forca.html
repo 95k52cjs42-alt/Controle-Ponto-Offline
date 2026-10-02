@@ -20,7 +20,8 @@
                 {% endif %}
             {% endwith %}
 
-            <form method="POST">
+            <form method="POST"{% if invite_token %} action="{{ url_for('definir_senha_usuario', token=invite_token) }}"{% endif %}>
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                 <div class="mb-4">
                     <label for="senha" class="form-label fw-medium text-dark small">Nova Senha</label>
                     <input type="password" class="form-control" id="senha" name="senha" placeholder="••••••••" required>

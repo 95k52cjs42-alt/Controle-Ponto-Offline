@@ -54,11 +54,13 @@
                             {% set status_normalizado = (sol.status or '') | lower %}
                             {% if status_normalizado == 'pendente' %}
                                 <form method="POST" action="{{ url_for('responder_solicitacao', id=sol.id, acao='aprovar') }}" class="d-inline">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                                     <button type="submit" class="action-btn aprovar" title="Aprovar">
                                         <i class="bi bi-check-lg"></i>
                                     </button>
                                 </form>
                                 <form method="POST" action="{{ url_for('responder_solicitacao', id=sol.id, acao='recusar') }}" class="d-inline">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                                     <button type="submit" class="action-btn reprovar" title="Recusar">
                                         <i class="bi bi-x-lg"></i>
                                     </button>

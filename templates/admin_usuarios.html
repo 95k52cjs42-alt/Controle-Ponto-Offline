@@ -144,9 +144,12 @@
                     <div class="avatar-circle">{{ current_user.nome[0]|upper if current_user else 'A' }}</div>
                     <span class="d-none d-sm-inline fw-medium">{{ current_user.nome.split()[0] if current_user else 'Admin' }}</span>
                 </div>
-                <a href="{{ url_for('logout') }}" class="nav-btn btn-logout" title="Sair">
-                    <i class="bi bi-box-arrow-right"></i>
-                </a>
+                <form action="{{ url_for('logout') }}" method="POST" class="d-inline m-0 p-0">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="nav-btn btn-logout" title="Sair" style="cursor: pointer;">
+                        <i class="bi bi-box-arrow-right"></i>
+                    </button>
+                </form>
             </div>
         </div>
 
@@ -165,6 +168,7 @@
             <div class="modal-dialog modal-dialog-centered">
                 <div class="modal-content" style="background: var(--card-bg); border: 1px solid var(--card-border);">
                     <form action="{{ url_for('admin_cadastrar_usuario') }}" method="POST">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                         <div class="modal-header border-0">
                             <h5 class="modal-title fw-bold" id="modalNovoUsuarioLabel">Cadastrar Colaborador</h5>
                             <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
@@ -238,6 +242,7 @@
 
                             {% if u.id != current_user.id %}
                                 <form action="{{ url_for('toggle_admin', user_id=u.id) }}" method="POST" class="d-inline">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                                     <button type="submit" class="btn-action-outline btn-toggle-admin">
                                         <i class="bi bi-person-gear"></i>
                                         {% if u.is_admin %} Remover Admin {% else %} Tornar Admin {% endif %}

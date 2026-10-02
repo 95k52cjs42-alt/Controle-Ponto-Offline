@@ -38,11 +38,43 @@
             </div>
         </div>
 
-        <div class="d-flex justify-content-end gap-2 mt-4">
-            <a href="{{ url_for('admin_historico') }}" class="btn btn-outline-secondary rounded-3 px-4 py-2">Limpar</a>
-            <button type="submit" class="btn btn-primary rounded-3 px-4 py-2 fw-semibold">
-                <i class="bi bi-funnel me-1"></i> Filtrar
-            </button>
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mt-4">
+            <div class="d-flex align-items-center gap-2">
+                {% if usuario_id_selecionado %}
+                    <div class="dropdown">
+                        <button class="btn btn-outline-primary rounded-3 px-3 py-2 dropdown-toggle fw-semibold" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="bi bi-download me-1"></i> Exportar Folha Ponto
+                        </button>
+                        <ul class="dropdown-menu shadow-lg border-0 rounded-4">
+                            <li>
+                                <a class="dropdown-item py-2" href="{{ url_for('admin_exportar_ponto', user_id=usuario_id_selecionado, format='pdf', data_inicio=data_inicio, data_fim=data_fim) }}" target="_blank">
+                                    <i class="bi bi-file-earmark-pdf text-danger me-2"></i> PDF (Folha Formatada)
+                                </a>
+                            </li>
+                            <li>
+                                <a class="dropdown-item py-2" href="{{ url_for('admin_exportar_ponto', user_id=usuario_id_selecionado, format='excel', data_inicio=data_inicio, data_fim=data_fim) }}">
+                                    <i class="bi bi-file-earmark-excel text-success me-2"></i> Planilha Excel (.xlsx)
+                                </a>
+                            </li>
+                            <li>
+                                <a class="dropdown-item py-2" href="{{ url_for('admin_exportar_ponto', user_id=usuario_id_selecionado, format='csv', data_inicio=data_inicio, data_fim=data_fim) }}">
+                                    <i class="bi bi-filetype-csv text-primary me-2"></i> Arquivo CSV
+                                </a>
+                            </li>
+                        </ul>
+                    </div>
+                {% else %}
+                    <button type="button" class="btn btn-outline-primary rounded-3 px-3 py-2 fw-semibold" data-bs-toggle="modal" data-bs-target="#modalExportarPonto">
+                        <i class="bi bi-download me-1"></i> Exportar Folha Ponto
+                    </button>
+                {% endif %}
+            </div>
+            <div class="d-flex gap-2">
+                <a href="{{ url_for('admin_historico') }}" class="btn btn-outline-secondary rounded-3 px-4 py-2">Limpar</a>
+                <button type="submit" class="btn btn-primary rounded-3 px-4 py-2 fw-semibold">
+                    <i class="bi bi-funnel me-1"></i> Filtrar
+                </button>
+            </div>
         </div>
     </form>
 </div>
@@ -105,8 +137,9 @@
                     </td>
 
                     <td class="text-center">
-                        <form method="POST" action="{{ url_for('admin_excluir_ponto', ponto_id=reg.id) }}" class="d-inline"
+                        <form method="POST" action="{{ url_for('admin_excluir_ponto', ponto_id=reg.id) }}{% if request.query_string %}?{{ request.query_string.decode('utf-8', errors='replace') }}{% endif %}" class="d-inline"
                               onsubmit="return confirm('Tem certeza que deseja excluir este registro de ponto?');">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                             <button type="submit" class="btn btn-link text-danger p-0 border-0 shadow-none" title="Excluir ponto">
                                 <i class="bi bi-trash"></i>
                             </button>

@@ -6,6 +6,7 @@
         </div>
         <div class="d-flex align-items-center gap-3">
             <form action="{{ url_for('toggle_verificacao_email') }}" method="POST" class="d-inline">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                 <div class="form-check form-switch mb-0">
                     <input class="form-check-input" type="checkbox" role="switch" id="toggleVerificacaoEmail"
                            onchange="this.form.submit()" {% if email_verificacao_ativa %}checked{% endif %}
@@ -95,14 +96,24 @@
                         <i class="bi bi-clock-history"></i> Histórico
                     </a>
 
+                    <button type="button"
+                            class="btn-action-outline text-primary border-primary btn-emitir-folha"
+                            title="Emitir Folha de Ponto"
+                            data-user-id="{{ u.id }}"
+                            data-user-nome="{{ u.nome }}">
+                        <i class="bi bi-file-earmark-spreadsheet"></i> Folha
+                    </button>
+
                     {% if current_user and u.id != current_user.id %}
                         <form action="{{ url_for('toggle_admin', user_id=u.id) }}" method="POST" class="d-inline">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                             <button type="submit" class="btn-action-outline btn-toggle-admin">
                                 <i class="bi bi-person-gear"></i>
                                 {% if u.is_admin %} Remover Admin {% else %} Tornar Admin {% endif %}
                             </button>
                         </form>
                         <form action="{{ url_for('excluir_usuario', user_id=u.id) }}" method="POST" class="d-inline-block" onsubmit="return confirm('Tem certeza que deseja excluir este colaborador? Esta ação não pode ser desfeita.');">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                             <button type="submit" class="btn-delete-user" title="Excluir Usuário" style="height: 38px;">
                                 <i class="bi bi-trash"></i>
                             </button>

@@ -356,9 +356,12 @@
                     </span>
                 </div>
 
-                <a href="{{ url_for('logout') }}" class="nav-btn btn-logout" title="Sair">
-                    <i class="bi bi-box-arrow-right"></i>
-                </a>
+                <form action="{{ url_for('logout') }}" method="POST" class="d-inline m-0 p-0">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="nav-btn btn-logout" title="Sair" style="cursor: pointer;">
+                        <i class="bi bi-box-arrow-right"></i>
+                    </button>
+                </form>
             </div>
         </div>
 

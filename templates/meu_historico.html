@@ -238,9 +238,9 @@
                         <i class="bi bi-download"></i> Exportar
                     </button>
                     <ul class="dropdown-menu dropdown-menu-end shadow-lg border-0 rounded-4" aria-labelledby="dropdownExport">
-                        <li><a class="dropdown-item py-2" href="{{ url_for('exportar_historico_ponto', format='pdf') }}"><i class="bi bi-file-earmark-pdf text-danger me-2"></i> PDF</a></li>
-                        <li><a class="dropdown-item py-2" href="{{ url_for('exportar_historico_ponto', format='excel') }}"><i class="bi bi-file-earmark-excel text-success me-2"></i> Excel (.xlsx)</a></li>
-                        <li><a class="dropdown-item py-2" href="{{ url_for('exportar_historico_ponto', format='csv') }}"><i class="bi bi-filetype-csv text-primary me-2"></i> CSV</a></li>
+                        <li><a class="dropdown-item py-2" href="{{ url_for('exportar_historico_ponto', format='pdf', data_inicio=data_inicio, data_fim=data_fim) }}" target="_blank"><i class="bi bi-file-earmark-pdf text-danger me-2"></i> PDF</a></li>
+                        <li><a class="dropdown-item py-2" href="{{ url_for('exportar_historico_ponto', format='excel', data_inicio=data_inicio, data_fim=data_fim) }}"><i class="bi bi-file-earmark-excel text-success me-2"></i> Excel (.xlsx)</a></li>
+                        <li><a class="dropdown-item py-2" href="{{ url_for('exportar_historico_ponto', format='csv', data_inicio=data_inicio, data_fim=data_fim) }}"><i class="bi bi-filetype-csv text-primary me-2"></i> CSV</a></li>
                     </ul>
                 </div>
 
@@ -297,14 +297,14 @@
 
         <!-- Filtros -->
         <div class="custom-card p-4 mb-4">
-            <form method="GET" action="{{ url_for('meu_historico') }}" class="row g-3 align-items-end">
+            <form method="GET" action="{{ url_for('meu_historico') }}" class="row g-3 align-items-end" id="formMeuHistorico">
                 <div class="col-md-3">
                     <label class="form-label fw-semibold small text-muted">Data Início</label>
-                    <input type="date" name="data_inicio" class="form-control" value="{{ data_inicio if data_inicio else '' }}">
+                    <input type="date" name="data_inicio" id="dataInicio" class="form-control" value="{{ data_inicio or '' }}">
                 </div>
                 <div class="col-md-3">
                     <label class="form-label fw-semibold small text-muted">Data Fim</label>
-                    <input type="date" name="data_fim" class="form-control" value="{{ data_fim if data_fim else '' }}">
+                    <input type="date" name="data_fim" id="dataFim" class="form-control" value="{{ data_fim or '' }}">
                 </div>
                 <div class="col-md-3">
                     <label class="form-label fw-semibold small text-muted">Tipo</label>
@@ -319,6 +319,14 @@
                     <button type="submit" class="btn btn-primary w-100 rounded-3 py-2 fw-semibold">
                         <i class="bi bi-funnel"></i> Filtrar
                     </button>
+                </div>
+                <div class="col-12">
+                    <div class="d-flex flex-wrap align-items-center gap-2">
+                        <span class="text-muted small fw-semibold">Atalhos:</span>
+                        <button type="button" class="btn btn-outline-secondary btn-sm rounded-3" data-periodo-preset="current_month">Mês Atual</button>
+                        <button type="button" class="btn btn-outline-secondary btn-sm rounded-3" data-periodo-preset="prev_month">Mês Anterior</button>
+                        <button type="button" class="btn btn-outline-secondary btn-sm rounded-3" data-periodo-preset="last_30">Últimos 30 Dias</button>
+                    </div>
                 </div>
             </form>
         </div>
@@ -444,6 +452,61 @@
                 }
             });
         }, 6000);
+
+        // Atalhos de período (Mês Atual / Mês Anterior / Últimos 30 Dias)
+        function formatLocalDate(d) {
+            const year = d.getFullYear();
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        }
+
+        (function initPeriodoPresets() {
+            const form = document.getElementById('formMeuHistorico');
+            if (!form) return;
+
+            const elInicio = document.getElementById('dataInicio');
+            const elFim = document.getElementById('dataFim');
+
+            function aplicarPreset(preset) {
+                const now = new Date();
+                const hoje = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                let inicio, fim;
+
+                if (preset === 'current_month') {
+                    inicio = new Date(now.getFullYear(), now.getMonth(), 1);
+                    const ultimoDia = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+                    fim = ultimoDia > hoje ? hoje : ultimoDia;
+                } else if (preset === 'prev_month') {
+                    inicio = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+                    fim = new Date(now.getFullYear(), now.getMonth(), 0);
+                } else if (preset === 'last_30') {
+                    fim = hoje;
+                    inicio = new Date(hoje.getTime());
+                    inicio.setDate(hoje.getDate() - 29);
+                } else {
+                    return;
+                }
+
+                elInicio.value = formatLocalDate(inicio);
+                elFim.value = formatLocalDate(fim);
+                form.submit();
+            }
+
+            form.addEventListener('click', function(e) {
+                const btn = e.target.closest('[data-periodo-preset]');
+                if (!btn) return;
+                e.preventDefault();
+                aplicarPreset(btn.getAttribute('data-periodo-preset'));
+            });
+
+            // Evita período invertido: se o início passar do fim, encosta o fim
+            elInicio.addEventListener('change', function() {
+                if (elInicio.value && elFim.value && elInicio.value > elFim.value) {
+                    elFim.value = elInicio.value;
+                }
+            });
+        })();
     </script>
 </body>
 </html>

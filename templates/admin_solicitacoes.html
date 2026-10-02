@@ -406,9 +406,12 @@
                     </span>
                 </div>
 
-                <a href="{{ url_for('logout') }}" class="nav-btn btn-logout" title="Sair">
-                    <i class="bi bi-box-arrow-right"></i>
-                </a>
+                <form action="{{ url_for('logout') }}" method="POST" class="d-inline m-0 p-0">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="nav-btn btn-logout" title="Sair" style="cursor: pointer;">
+                        <i class="bi bi-box-arrow-right"></i>
+                    </button>
+                </form>
             </div>
         </div>
 
@@ -464,11 +467,13 @@
                                     {% set status_normalizado = (sol.status or '') | lower %}
                                     {% if status_normalizado == 'pendente' %}
                                         <form method="POST" action="{{ url_for('responder_solicitacao', id=sol.id, acao='aprovar') }}" class="d-inline">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                                             <button type="submit" class="action-btn aprovar" title="Aprovar">
                                                 <i class="bi bi-check-lg"></i>
                                             </button>
                                         </form>
                                         <form method="POST" action="{{ url_for('responder_solicitacao', id=sol.id, acao='recusar') }}" class="d-inline">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                                             <button type="submit" class="action-btn reprovar" title="Recusar">
                                                 <i class="bi bi-x-lg"></i>
                                             </button>
