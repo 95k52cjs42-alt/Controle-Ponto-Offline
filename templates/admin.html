@@ -597,9 +597,12 @@
                     </span>
                 </div>
 
-                <a href="{{ url_for('logout') }}" class="nav-btn btn-logout" title="Sair">
-                    <i class="bi bi-box-arrow-right"></i>
-                </a>
+                <form action="{{ url_for('logout') }}" method="POST" class="d-inline m-0 p-0">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="nav-btn btn-logout" title="Sair" style="cursor: pointer;">
+                        <i class="bi bi-box-arrow-right"></i>
+                    </button>
+                </form>
             </div>
         </div>
 
@@ -768,6 +771,7 @@
                         <h5 class="fw-bold m-0"><i class="bi bi-calendar-check text-primary me-2"></i>Feriados do Mês</h5>
                         <div class="d-flex gap-2">
                             <form method="POST" action="{{ url_for('sincronizar_feriados') }}" class="d-inline" title="Adicionar automaticamente os feriados nacionais e da região configurada">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                                 <button type="submit" class="btn btn-sm btn-outline-secondary rounded-3">
                                     <i class="bi bi-arrow-repeat"></i> Sincronizar
                                 </button>
@@ -790,6 +794,7 @@
                             <i class="bi bi-crosshair"></i> Detectar região
                         </button>
                         <form method="POST" action="{{ url_for('definir_regiao_feriados') }}" class="d-inline-flex align-items-center gap-1">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                             <select id="selectRegiaoUf" name="uf" class="form-select form-select-sm" style="width: auto;" title="Definir manualmente a região dos feriados">
                                 <option value="BR" {% if regiao_uf == 'BR' %}selected{% endif %}>BR – Nacional</option>
                                 {% for sigla, nome in ufs_brasil.items() %}
@@ -810,6 +815,7 @@
                                     </div>
                                     {% if f.id %}
                                     <form method="POST" action="{{ url_for('excluir_feriado', id=f.id) }}" class="d-inline" onsubmit="return confirm('Deseja remover este feriado?');">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                                         <button type="submit" class="btn btn-link text-danger p-0 border-0 shadow-none ms-2" title="Excluir feriado">
                                             <i class="bi bi-trash"></i>
                                         </button>
@@ -872,6 +878,7 @@
                 
                 <div class="modal-body pt-2">
                     <form method="POST" action="{{ url_for('gerenciar_departamentos') }}" class="mb-4">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                         <label class="form-label text-muted small fw-semibold">Novo Departamento / Setor</label>
                         <div class="input-group">
                             <input type="text" name="nome" class="form-control" placeholder="Ex: Tecnologia, Recursos Humanos" required style="background: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main); border-radius: var(--radius-btn) 0 0 var(--radius-btn);">
@@ -891,6 +898,7 @@
                                         <span class="text-muted" style="font-size: 0.75rem;">{{ d.usuarios|length }} colaborador(es)</span>
                                     </div>
                                     <form action="{{ url_for('excluir_departamento', id=d.id) }}" method="POST" onsubmit="return confirm('Deseja excluir este departamento?');">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                                         <button type="submit" class="btn btn-sm text-danger border-0 bg-transparent p-1" title="Excluir">
                                             <i class="bi bi-trash"></i>
                                         </button>
@@ -918,6 +926,7 @@
                 </div>
                 
                 <form method="POST" action="{{ url_for('enviar_lembrete_geral') }}">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                     <div class="modal-body pt-2">
                         <p class="text-muted small mb-3">Escreva a mensagem que será enviada como lembrete para todos os colaboradores:</p>
                         
@@ -945,6 +954,7 @@
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <form method="POST" action="{{ url_for('admin_lancar_ponto_manual') }}">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                     <div class="modal-body">
                         <!-- Busca e Seleção de Colaborador -->
                         <div class="mb-3">
@@ -1025,6 +1035,7 @@
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content text-start" style="background: var(--card-bg); border: 1px solid var(--card-border);">
                 <form action="{{ url_for('admin_cadastrar_usuario') }}" method="POST">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                     <div class="modal-header border-0">
                         <h5 class="modal-title fw-bold" style="color: var(--text-main);" id="modalNovoUsuarioLabel">Cadastrar Colaborador</h5>
                         <button type="button" class="btn-close" data-bs-theme="dark" data-bs-dismiss="modal" aria-label="Close"></button>
@@ -1066,6 +1077,7 @@
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <form method="POST" action="{{ url_for('adicionar_feriado') }}">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                     <div class="modal-body pt-2">
                         <div class="mb-3">
                             <label for="dataFeriado" class="form-label text-muted small fw-semibold">Data do Feriado</label>
@@ -1170,6 +1182,15 @@
                                     <option value="excel">Planilha Excel (.xlsx)</option>
                                     <option value="csv">Arquivo CSV</option>
                                 </select>
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label text-muted small fw-semibold d-block">Atalhos de Período</label>
+                                <div class="btn-group w-100" role="group">
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="setExportPeriodPreset('current_month')">Mês Atual</button>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="setExportPeriodPreset('prev_month')">Mês Anterior</button>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="setExportPeriodPreset('last_30')">Últimos 30 Dias</button>
+                                </div>
                             </div>
 
                             <div class="row g-3 mb-4">
@@ -1279,7 +1300,10 @@
             contentWrap.classList.add('loading');
 
             try {
-                const response = await fetch(`/admin/fragment/${viewName}`, {
+                // Preserva query string (ex.: filtros do historico) ao carregar o fragmento
+                const _qIdx = url.indexOf('?');
+                const _fragQuery = _qIdx >= 0 ? url.slice(_qIdx) : '';
+                const response = await fetch(`/admin/fragment/${viewName}${_fragQuery}`, {
                     signal: currentAbortController.signal
                 });
                 if (!response.ok) {
@@ -1289,7 +1313,11 @@
 
                 const html = await response.text();
                 contentWrap.innerHTML = html;
-                history.pushState({}, '', url);
+                // So empurra estado quando a URL mudou (evita entrada duplicada no reload)
+                const _currentUrl = window.location.pathname + window.location.search;
+                if (url !== _currentUrl) {
+                    history.pushState({}, '', url);
+                }
                 setActiveNav(viewName);
                 if (typeof window.bindAdminSearch === 'function') window.bindAdminSearch();
                 if (viewName === 'painel') initCharts();
@@ -1310,6 +1338,35 @@
                 const targetUrl = button.dataset.targetUrl;
                 await loadAdminView(viewName, targetUrl);
             });
+        });
+
+        // ---------------------------------------------------------------
+        // Acesso direto / F5 / redirect apos POST: o shell sempre vem com o
+        // painel renderizado, entao carrega o fragmento da aba correta
+        // (o backend informa qual e via variavel Jinja "initial_view").
+        // ---------------------------------------------------------------
+        const _validAdminViews = ['painel', 'usuarios', 'historico', 'solicitacoes', 'logs'];
+        (function carregarViewInicial() {
+            const initialView = {{ initial_view|tojson }};
+            if (_validAdminViews.includes(initialView) && initialView !== 'painel') {
+                loadAdminView(initialView, window.location.pathname + window.location.search);
+            }
+        })();
+
+        // Botoes voltar/avancar do navegador: recarrega o fragmento da URL atual
+        window.addEventListener('popstate', function () {
+            const path = window.location.pathname;
+            if (path === '/admin') {
+                loadAdminView('painel', path + window.location.search);
+                return;
+            }
+            const prefix = '/admin/';
+            if (path.indexOf(prefix) === 0) {
+                const viewFromPath = path.slice(prefix.length);
+                if (_validAdminViews.includes(viewFromPath)) {
+                    loadAdminView(viewFromPath, path + window.location.search);
+                }
+            }
         });
 
         bindAdminSearch();
@@ -1412,7 +1469,10 @@
                     try {
                         const resposta = await fetch('/api/localizacao', {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-CSRF-Token': '{{ csrf_token() }}'
+                            },
                             body: JSON.stringify({
                                 lat: pos.coords.latitude,
                                 lng: pos.coords.longitude
@@ -1544,32 +1604,97 @@
             });
         }
 
+        function formatLocalDate(d) {
+            const year = d.getFullYear();
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        }
+
+        function setExportPeriodPreset(preset) {
+            const now = new Date();
+            let inicio, fim;
+            if (preset === 'current_month') {
+                inicio = new Date(now.getFullYear(), now.getMonth(), 1);
+                // Não extrapola para datas futuras: o relatório do mês corrente
+                // encerra em hoje (dias futuros são ignorados na folha).
+                fim = new Date(now.getFullYear(), now.getMonth() + 1, 0) > now
+                    ? new Date(now.getFullYear(), now.getMonth(), now.getDate())
+                    : new Date(now.getFullYear(), now.getMonth() + 1, 0);
+            } else if (preset === 'prev_month') {
+                inicio = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+                fim = new Date(now.getFullYear(), now.getMonth(), 0);
+            } else if (preset === 'last_30') {
+                // 30 dias inclusivos: de (hoje - 29) até hoje.
+                fim = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                inicio = new Date(fim.getTime());
+                inicio.setDate(fim.getDate() - 29);
+            }
+            if (inicio && fim) {
+                const elInicio = document.getElementById('dateInicio');
+                const elFim = document.getElementById('dateFim');
+                if (elInicio) elInicio.value = formatLocalDate(inicio);
+                if (elFim) elFim.value = formatLocalDate(fim);
+            }
+        }
+
         // Função única para selecionar o usuário ao clicar na div
         function selectUser(element) {
             let userId = element.getAttribute('data-user-id');
             let userName = element.getAttribute('data-user-name');
 
             // Atualiza os dados na tela de período
-             document.getElementById('selectedUserNameDisplay').textContent = userName;
+            document.getElementById('selectedUserNameDisplay').textContent = userName;
             document.getElementById('selectedUserAvatar').textContent = userName.charAt(0).toUpperCase();
 
             // Configura a URL
             document.getElementById('formExportarPonto').action = "/admin/exportar-ponto/" + userId;
 
-            // Pré-preenche datas
-            let date = new Date();
-            document.getElementById('dateInicio').value = new Date(date.getFullYear(), date.getMonth(), 1).toISOString().split('T')[0];
-            document.getElementById('dateFim').value = new Date(date.getFullYear(), date.getMonth() + 1, 0).toISOString().split('T')[0];
+            // Pré-preenche datas com o mês atual (formatação local sem fuso invertido)
+            setExportPeriodPreset('current_month');
 
             // Alterna telas
             document.getElementById('stepUserList').style.display = 'none';
             document.getElementById('stepPeriod').style.display = 'block';
         }
 
+        window.openExportModalForUser = function(userId, userName) {
+            const modalEl = document.getElementById('modalExportarPonto');
+            if (!modalEl) return;
+            const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+
+            document.getElementById('selectedUserNameDisplay').textContent = userName;
+            document.getElementById('selectedUserAvatar').textContent = userName.charAt(0).toUpperCase();
+            document.getElementById('formExportarPonto').action = "/admin/exportar-ponto/" + userId;
+            setExportPeriodPreset('current_month');
+
+            document.getElementById('stepUserList').style.display = 'none';
+            document.getElementById('stepPeriod').style.display = 'block';
+
+            modal.show();
+        };
+
         // Botão Voltar
         document.getElementById('backToUserListBtn').addEventListener('click', function() {
             document.getElementById('stepPeriod').style.display = 'none';
             document.getElementById('stepUserList').style.display = 'block';
+        });
+
+        // ------------------------------------------------------------------
+        // Emissão rápida de folha por colaborador (aba Usuários)
+        // O fragmento é injetado via innerHTML, então binding direto não
+        // funciona — usamos delegação no documento.
+        // ------------------------------------------------------------------
+        document.addEventListener('click', function(e) {
+            const btn = e.target.closest('.btn-emitir-folha');
+            if (!btn) return;
+            e.preventDefault();
+            if (typeof window.openExportModalForUser === 'function') {
+                window.openExportModalForUser(
+                    btn.getAttribute('data-user-id'),
+                    btn.getAttribute('data-user-nome') || ''
+                );
+            }
         });
 
         // Lógica para Busca e Seleção de Colaborador no Modal de Lançamento Manual
@@ -1652,6 +1777,7 @@
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <form id="formConfigurarUsuario" method="POST">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                 <div class="modal-body py-3">
                     <div class="mb-3">
                         <label class="form-label small fw-semibold text-muted">Tipo de Contrato</label>

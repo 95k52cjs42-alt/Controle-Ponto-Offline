@@ -283,6 +283,26 @@
             color: var(--text-dark);
         }
 
+        .btn-encerrar-sessao {
+            background: transparent;
+            border: none;
+            color: #adb5bd;
+            font-size: 0.875rem;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            padding: 4px 8px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: color 0.2s ease, transform 0.2s ease;
+        }
+
+        .btn-encerrar-sessao:hover {
+            color: #ef4444 !important;
+            transform: translateY(-1px);
+        }
+
         /* Cápsula de perfil do usuário (canto superior direito) */
         .user-pill {
             width: 44px; height: 44px; border: none; border-radius: 14px;
@@ -700,7 +720,14 @@
                                 <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#modalFotoPerfil"><i class="bi bi-camera"></i> Alterar Foto</a></li>
                                 <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#modalAlterarSenha"><i class="bi bi-key"></i> Alterar Senha</a></li>
                                 <li><hr class="dropdown-divider"></li>
-                                <li><a class="dropdown-item text-danger" href="{{ url_for('logout') }}"><i class="bi bi-box-arrow-right"></i> Sair</a></li>
+                                <li>
+                                    <form action="{{ url_for('logout') }}" method="POST" class="m-0 p-0">
+                                        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                                        <button type="submit" class="dropdown-item text-danger border-0 bg-transparent w-100 text-start">
+                                            <i class="bi bi-box-arrow-right me-1"></i> Sair
+                                        </button>
+                                    </form>
+                                </li>
                             </ul>
                         </div>
 
@@ -727,6 +754,7 @@
             {% set pt = proximo_tipo|default('Entrada') %}
             <div class="mb-4">
                 <form action="{{ url_for('registrar_auto') }}" method="POST">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                     <button type="submit" id="btnAuto" class="btn-ponto btn-auto btn-t3 btn-shape-tall btn-pulse-float w-100">
                         <i class="bi bi-clock-fill"></i>
                         <span id="btnAutoLabel">{{ pt }}</span>
@@ -759,9 +787,12 @@
                     </a>
                 {% endif %}
 
-                <a href="{{ url_for('logout') }}" class="small fw-semibold text-center mt-3" style="color: #adb5bd">
-                    Encerrar Sessão
-                </a>
+                <form action="{{ url_for('logout') }}" method="POST" class="text-center mt-3 mb-0">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn-encerrar-sessao">
+                        Encerrar Sessão
+                    </button>
+                </form>
             </div>
 
         </div>
@@ -777,6 +808,7 @@
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <form action="{{ url_for('upload_foto_perfil') }}" method="POST" enctype="multipart/form-data">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                     <div class="modal-body text-center py-3">
                         <div class="mb-3">
                             {% if current_user and current_user.is_authenticated and current_user.foto_url %}
@@ -808,6 +840,7 @@
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <form action="{{ url_for('alterar_senha') }}" method="POST">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                     <div class="modal-body py-3">
                         <div class="mb-3">
                             <label for="senhaAtual" class="form-label small fw-semibold">Senha atual</label>

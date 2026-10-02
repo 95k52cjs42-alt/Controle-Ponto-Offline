@@ -2,6 +2,7 @@ Flask
 Flask-Login
 Flask-SQLAlchemy
 reportlab
+Pillow
 gunicorn
 psycopg2-binary
 tzdata

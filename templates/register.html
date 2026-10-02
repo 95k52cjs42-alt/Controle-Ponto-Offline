@@ -119,6 +119,7 @@
 
             <!-- Formulário de Cadastro -->
             <form method="POST" action="{{ url_for('cadastro') }}">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                 <div class="mb-3">
                     <label for="nome" class="form-label fw-medium text-dark small">Nome Completo</label>
                     <input type="text" class="form-control" id="nome" name="nome" placeholder="Seu Nome" value="{{ nome or '' }}" required>
