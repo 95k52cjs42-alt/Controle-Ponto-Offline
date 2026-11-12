@@ -215,6 +215,37 @@
             font-weight: 700;
         }
 
+        /* Menu suspenso do painel (RH / TI / conta) */
+        .nav-chevron { font-size: 0.65rem; opacity: 0.7; margin-left: 2px; }
+        .nav-user { cursor: pointer; appearance: none; -webkit-appearance: none; transition: all 0.2s ease; }
+        .nav-user:hover { background: var(--nav-btn-hover); }
+        .nav-dropdown {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 14px;
+            padding: 0.4rem;
+            min-width: 230px;
+            box-shadow: 0 14px 34px rgba(0, 0, 0, 0.25);
+            margin-top: 6px !important;
+        }
+        .nav-dropdown .dropdown-item {
+            color: var(--text-main);
+            border: 0;
+            border-radius: 10px;
+            padding: 0.55rem 0.75rem;
+            font-size: 0.88rem;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .nav-dropdown .dropdown-item i { width: 18px; text-align: center; opacity: 0.85; }
+        .nav-dropdown .dropdown-item:hover,
+        .nav-dropdown .dropdown-item:focus { background: var(--nav-btn-hover); color: var(--text-main); }
+        .nav-dropdown .dropdown-item.active { background: var(--blue-accent); color: #ffffff; }
+        .nav-dropdown .dropdown-header { color: var(--text-muted); padding: 0.4rem 0.75rem; }
+        .nav-dropdown .dropdown-divider { border-color: var(--card-border); margin: 0.3rem 0; }
+
         .btn-logout {
             border: 1px solid rgba(239, 68, 68, 0.5);
             color: #ef4444;
@@ -558,11 +589,15 @@
             </div>
 
             <div class="nav-actions">
+                {% set grupo_rh = ['usuarios', 'historico', 'solicitacoes', 'afastamentos', 'fechamento'] %}
+                {% set grupo_ti = ['parametros', 'logs'] + ([] if current_user.is_rh else ['usuarios']) %}
+                {% set item = 'dropdown-item js-admin-nav' %}
+
                 <button class="nav-btn btn-theme" id="themeToggleBtn" title="Mudar Tema">
                     <i class="bi bi-sun" id="themeIcon"></i>
                 </button>
 
-                <a href="{{ url_for('index') }}" class="nav-btn">
+                <a href="{{ url_for('index') }}" class="nav-btn" title="Bater o meu ponto">
                     <i class="bi bi-house-door"></i> Início
                 </a>
 
@@ -570,56 +605,65 @@
                     <i class="bi bi-shield-check"></i> Painel
                 </button>
 
-                <button type="button" class="nav-btn js-admin-nav{% if initial_view == 'usuarios' %} active{% endif %}" data-admin-view="usuarios" data-target-url="{{ url_for('admin_usuarios') }}">
-                    <i class="bi bi-people"></i> Usuários
-                </button>
-
                 {% if current_user.is_rh %}
-                <button type="button" class="nav-btn js-admin-nav{% if initial_view == 'historico' %} active{% endif %}" data-admin-view="historico" data-target-url="{{ url_for('admin_historico') }}" title="Histórico Geral">
-                    <i class="bi bi-clock-history text-primary"></i> Histórico Geral
-                </button>
-
-                <button type="button" class="nav-btn js-admin-nav position-relative{% if initial_view == 'solicitacoes' %} active{% endif %}" data-admin-view="solicitacoes" data-target-url="{{ url_for('admin_solicitacoes') }}" title="Ver Ajustes">
-                    <i class="bi bi-pencil-square"></i> Solicitações
-                    {% if total_solicitacoes_pendentes and total_solicitacoes_pendentes > 0 %}
-                        <span class="notification-dot"></span>
-                    {% endif %}
-                </button>
-
-                <button type="button" class="nav-btn js-admin-nav{% if initial_view == 'afastamentos' %} active{% endif %}" data-admin-view="afastamentos" data-target-url="{{ url_for('admin_afastamentos') }}" title="Férias, atestados e folgas">
-                    <i class="bi bi-calendar-x"></i> Afastamentos
-                </button>
-
-                <button type="button" class="nav-btn js-admin-nav{% if initial_view == 'fechamento' %} active{% endif %}" data-admin-view="fechamento" data-target-url="{{ url_for('admin_fechamento') }}" title="Fechamento do mês e espelhos">
-                    <i class="bi bi-lock"></i> Fechamento
-                </button>
+                <div class="dropdown">
+                    <button type="button" class="nav-btn position-relative js-nav-grupo{% if initial_view in grupo_rh %} active{% endif %}" data-bs-toggle="dropdown" aria-expanded="false" title="Colaboradores, ponto e fechamento">
+                        <i class="bi bi-people"></i> RH <i class="bi bi-chevron-down nav-chevron"></i>
+                        {% if total_solicitacoes_pendentes and total_solicitacoes_pendentes > 0 %}
+                            <span class="notification-dot"></span>
+                        {% endif %}
+                    </button>
+                    <ul class="dropdown-menu nav-dropdown">
+                        <li><button type="button" class="{{ item }}{% if initial_view == 'usuarios' %} active{% endif %}" data-admin-view="usuarios" data-target-url="{{ url_for('admin_usuarios') }}"><i class="bi bi-people"></i> Usuários</button></li>
+                        <li><button type="button" class="{{ item }}{% if initial_view == 'historico' %} active{% endif %}" data-admin-view="historico" data-target-url="{{ url_for('admin_historico') }}"><i class="bi bi-clock-history"></i> Histórico geral</button></li>
+                        <li><button type="button" class="{{ item }}{% if initial_view == 'solicitacoes' %} active{% endif %}" data-admin-view="solicitacoes" data-target-url="{{ url_for('admin_solicitacoes') }}"><i class="bi bi-pencil-square"></i> Solicitações
+                            {% if total_solicitacoes_pendentes and total_solicitacoes_pendentes > 0 %}<span class="badge rounded-pill bg-danger ms-auto">{{ total_solicitacoes_pendentes }}</span>{% endif %}
+                        </button></li>
+                        <li><button type="button" class="{{ item }}{% if initial_view == 'afastamentos' %} active{% endif %}" data-admin-view="afastamentos" data-target-url="{{ url_for('admin_afastamentos') }}"><i class="bi bi-calendar-x"></i> Afastamentos</button></li>
+                        <li><button type="button" class="{{ item }}{% if initial_view == 'fechamento' %} active{% endif %}" data-admin-view="fechamento" data-target-url="{{ url_for('admin_fechamento') }}"><i class="bi bi-lock"></i> Fechamento do mês</button></li>
+                    </ul>
+                </div>
                 {% endif %}
 
                 {% if current_user.is_ti %}
-                <button type="button" class="nav-btn js-admin-nav{% if initial_view == 'logs' %} active{% endif %}" data-admin-view="logs" data-target-url="{{ url_for('admin_logs') }}" title="Logs">
-                    <i class="bi bi-journal-text"></i> Logs
-                </button>
-
-                <button type="button" class="nav-btn js-admin-nav{% if initial_view == 'parametros' %} active{% endif %}" data-admin-view="parametros" data-target-url="{{ url_for('admin_parametros') }}" title="Parâmetros de jornada">
-                    <i class="bi bi-sliders"></i> Parâmetros
-                </button>
+                <div class="dropdown">
+                    <button type="button" class="nav-btn js-nav-grupo{% if initial_view in grupo_ti %} active{% endif %}" data-bs-toggle="dropdown" aria-expanded="false" title="Parâmetros e auditoria">
+                        <i class="bi bi-cpu"></i> TI <i class="bi bi-chevron-down nav-chevron"></i>
+                    </button>
+                    <ul class="dropdown-menu nav-dropdown">
+                        {% if not current_user.is_rh %}
+                        <li><button type="button" class="{{ item }}{% if initial_view == 'usuarios' %} active{% endif %}" data-admin-view="usuarios" data-target-url="{{ url_for('admin_usuarios') }}"><i class="bi bi-people"></i> Usuários e acessos</button></li>
+                        {% endif %}
+                        <li><button type="button" class="{{ item }}{% if initial_view == 'parametros' %} active{% endif %}" data-admin-view="parametros" data-target-url="{{ url_for('admin_parametros') }}"><i class="bi bi-sliders"></i> Parâmetros</button></li>
+                        <li><button type="button" class="{{ item }}{% if initial_view == 'logs' %} active{% endif %}" data-admin-view="logs" data-target-url="{{ url_for('admin_logs') }}"><i class="bi bi-journal-text"></i> Logs</button></li>
+                    </ul>
+                </div>
                 {% endif %}
 
-                <div class="user-pill">
-                    <div class="avatar-circle">
-                        {{ current_user.nome[0]|upper if current_user and current_user.nome else 'A' }}
-                    </div>
-                    <span class="d-none d-sm-inline fw-medium">
-                        {{ current_user.nome.split()[0] if current_user and current_user.nome else 'Admin' }}
-                    </span>
-                </div>
-
-                <form action="{{ url_for('logout') }}" method="POST" class="d-inline m-0 p-0">
-                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-                    <button type="submit" class="nav-btn btn-logout" title="Sair" style="cursor: pointer;">
-                        <i class="bi bi-box-arrow-right"></i>
+                <div class="dropdown ms-auto ms-md-0">
+                    <button type="button" class="user-pill nav-user" data-bs-toggle="dropdown" aria-expanded="false" title="Minha conta">
+                        <span class="avatar-circle">
+                            {{ current_user.nome[0]|upper if current_user and current_user.nome else 'A' }}
+                        </span>
+                        <span class="d-none d-sm-inline fw-medium">
+                            {{ current_user.nome.split()[0] if current_user and current_user.nome else 'Admin' }}
+                        </span>
+                        <i class="bi bi-chevron-down nav-chevron"></i>
                     </button>
-                </form>
+                    <ul class="dropdown-menu dropdown-menu-end nav-dropdown">
+                        <li class="dropdown-header">
+                            <div class="fw-semibold" style="color: var(--text-main);">{{ current_user.nome }}</div>
+                            <div class="small">{{ current_user.papeis_texto }}</div>
+                        </li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li>
+                            <form action="{{ url_for('logout') }}" method="POST" class="m-0">
+                                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                                <button type="submit" class="dropdown-item text-danger"><i class="bi bi-box-arrow-right"></i> Sair</button>
+                            </form>
+                        </li>
+                    </ul>
+                </div>
             </div>
         </div>
 
@@ -683,8 +727,8 @@
                     </div>
                     <div>
                         <span class="text-muted small d-block">Incompletos / faltas ({{ mes_referencia|default('mês') }})</span>
-                        <h4 class="fw-bold mb-0 text-danger">{{ (incompletos|default(0)) + (faltas|default(0)) }}
-                            <span class="small fw-normal text-muted ms-1">{{ incompletos|default(0) }} incompleto(s) · {{ faltas|default(0) }} falta(s)</span></h4>
+                        <h4 class="fw-bold mb-0 text-danger">{{ (incompletos|default(0)) + (faltas|default(0)) }}</h4>
+                            <span class="d-block text-muted" style="font-size: 0.75rem;">{{ incompletos|default(0) }} incompleto(s) · {{ faltas|default(0) }} falta(s)</span>
                     </div>
                 </div>
             </div>
@@ -1283,6 +1327,10 @@
             document.querySelectorAll('.js-admin-nav').forEach(button => {
                 const isActive = button.dataset.adminView === viewName;
                 button.classList.toggle('active', isActive);
+            });
+            // Botão do grupo (RH / TI) acende quando uma tela dele está aberta.
+            document.querySelectorAll('.js-nav-grupo').forEach(grupo => {
+                grupo.classList.toggle('active', !!grupo.parentElement.querySelector('.js-admin-nav.active'));
             });
         }
 

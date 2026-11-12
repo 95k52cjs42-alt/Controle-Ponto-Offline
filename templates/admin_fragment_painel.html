@@ -33,8 +33,8 @@
             </div>
             <div>
                 <span class="text-muted small d-block">Incompletos / faltas ({{ mes_referencia|default('mês') }})</span>
-                <h4 class="fw-bold mb-0 text-danger">{{ (incompletos|default(0)) + (faltas|default(0)) }}
-                    <span class="small fw-normal text-muted ms-1">{{ incompletos|default(0) }} incompleto(s) · {{ faltas|default(0) }} falta(s)</span></h4>
+                <h4 class="fw-bold mb-0 text-danger">{{ (incompletos|default(0)) + (faltas|default(0)) }}</h4>
+                    <span class="d-block text-muted" style="font-size: 0.75rem;">{{ incompletos|default(0) }} incompleto(s) · {{ faltas|default(0) }} falta(s)</span>
             </div>
         </div>
     </div>
