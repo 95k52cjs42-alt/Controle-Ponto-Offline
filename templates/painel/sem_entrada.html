@@ -1,0 +1,29 @@
+<div class="dashboard-card h-100">
+    <div class="d-flex justify-content-between align-items-center mb-1">
+        <h5 class="fw-bold m-0">Sem entrada hoje</h5>
+        <span class="badge rounded-pill {{ 'tag-warn' if sem_entrada else 'tag-ok' }}">{{ sem_entrada|length }}</span>
+    </div>
+    <p class="text-muted small mb-3">Dia de trabalho, sem afastamento e sem nenhuma batida.</p>
+    {% if sem_entrada %}
+    <div class="activity-list painel-rolagem">
+        {% for p in sem_entrada %}
+        <div class="activity-item">
+            <div class="activity-icon {{ 'alerta' if p.atrasado else 'entrada' }}">
+                <i class="bi {{ 'bi-alarm' if p.atrasado else 'bi-hourglass' }}"></i>
+            </div>
+            <div class="activity-content">
+                <span class="fw-bold d-block">{{ p.nome }}</span>
+                <span class="text-muted small">
+                    {% if p.entrada %}{{ 'Atrasado · entrada às ' if p.atrasado else 'Entrada prevista às ' }}{{ p.entrada }}{% else %}Sem horário fixo{% endif %}
+                </span>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="text-center py-4 text-muted">
+        <i class="bi bi-check2-all fs-3 d-block mb-1 text-success"></i>
+        Todos que trabalham hoje já bateram ponto.
+    </div>
+    {% endif %}
+</div>

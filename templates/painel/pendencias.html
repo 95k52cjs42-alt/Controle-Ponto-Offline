@@ -1,0 +1,10 @@
+<div class="metric-card h-100">
+    <div class="metric-icon" style="background: rgba(239, 68, 68, 0.15); color: #ef4444;">
+        <i class="bi bi-exclamation-triangle-fill"></i>
+    </div>
+    <div>
+        <span class="text-muted small d-block">Incompletos / faltas ({{ mes_referencia }})</span>
+        <h4 class="fw-bold mb-0 text-danger">{{ (incompletos|default(0)) + (faltas|default(0)) }}</h4>
+        <span class="d-block text-muted" style="font-size: 0.75rem;">{{ incompletos|default(0) }} incompleto(s) · {{ faltas|default(0) }} falta(s)</span>
+    </div>
+</div>

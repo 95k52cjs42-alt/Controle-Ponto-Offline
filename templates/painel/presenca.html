@@ -1,0 +1,10 @@
+<div class="dashboard-card h-100">
+    <h5 class="fw-bold mb-1">Presença nos últimos 7 dias</h5>
+    <p class="text-muted small mb-3">Colaboradores que registraram ponto em cada dia.</p>
+    <div style="height: 260px; position: relative;"
+         id="weeklyChartContainer"
+         data-labels='{{ labels_semana|default([])|tojson }}'
+         data-values='{{ dados_semana|default([])|tojson }}'>
+        <canvas id="weeklyChart"></canvas>
+    </div>
+</div>

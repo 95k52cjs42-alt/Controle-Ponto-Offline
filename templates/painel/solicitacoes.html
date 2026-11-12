@@ -1,0 +1,40 @@
+<div class="dashboard-card h-100">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h5 class="fw-bold m-0">Solicitações para aprovar</h5>
+        <button type="button" class="btn btn-link btn-sm p-0 text-primary text-decoration-none js-admin-nav-atalho" data-admin-view="solicitacoes" data-target-url="{{ url_for('admin_solicitacoes') }}">Ver todas</button>
+    </div>
+    {% if solicitacoes_pendentes %}
+    <div class="activity-list painel-rolagem">
+        {% for sol in solicitacoes_pendentes %}
+        <div class="activity-item align-items-start">
+            <div class="activity-icon alerta"><i class="bi bi-pencil-square"></i></div>
+            <div class="activity-content flex-grow-1" style="min-width: 0;">
+                <span class="fw-bold d-block">{{ sol.usuario.nome if sol.usuario else '?' }}</span>
+                <span class="small d-block" style="color: var(--text-main);">
+                    {{ sol.tipo_ponto }} em {{ sol.data_ponto }}:
+                    {% if sol.hora_original %}{{ sol.hora_original[:5] }} → {% endif %}<b>{{ sol.hora_correta[:5] }}</b>
+                </span>
+                <span class="text-muted small d-block text-truncate" title="{{ sol.justificativa }}">{{ sol.justificativa }}</span>
+            </div>
+            <div class="d-flex gap-1 flex-shrink-0">
+                <form method="POST" action="{{ url_for('responder_solicitacao', id=sol.id, acao='aprovar') }}" class="m-0">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="voltar" value="painel">
+                    <button type="submit" class="btn btn-sm btn-outline-success rounded-3" title="Aprovar"><i class="bi bi-check-lg"></i></button>
+                </form>
+                <form method="POST" action="{{ url_for('responder_solicitacao', id=sol.id, acao='recusar') }}" class="m-0" onsubmit="return confirm('Recusar esta solicitação?');">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="voltar" value="painel">
+                    <button type="submit" class="btn btn-sm btn-outline-danger rounded-3" title="Recusar"><i class="bi bi-x-lg"></i></button>
+                </form>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="text-center py-4 text-muted">
+        <i class="bi bi-inbox fs-3 d-block mb-1"></i>
+        Nenhuma solicitação pendente.
+    </div>
+    {% endif %}
+</div>

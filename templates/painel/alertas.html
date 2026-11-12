@@ -1,0 +1,23 @@
+<div class="dashboard-card h-100">
+    <h5 class="fw-bold mb-3">Alertas de Conformidade (CLT)</h5>
+    <div class="activity-list painel-rolagem">
+        {% if alertas_clt %}
+            {% for alerta in alertas_clt %}
+            <div class="activity-item">
+                <div class="activity-icon alerta">
+                    <i class="bi bi-exclamation-triangle"></i>
+                </div>
+                <div class="activity-content">
+                    <span class="fw-bold d-block">{{ alerta.nome }}</span>
+                    <span class="text-muted small">{{ alerta.msg }}</span>
+                </div>
+            </div>
+            {% endfor %}
+        {% else %}
+            <div class="text-center py-4 text-muted">
+                <i class="bi bi-shield-check fs-3 d-block mb-1 text-success"></i>
+                Tudo em conformidade!
+            </div>
+        {% endif %}
+    </div>
+</div>

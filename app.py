@@ -3467,7 +3467,8 @@ def build_admin_logs_recentes(limit=5):
     logs = []
     limite_logs = max(limit, 1)
 
-    registros = RegistroPonto.query.join(Usuario).order_by(RegistroPonto.id.desc()).all()
+    registros = (RegistroPonto.query.join(Usuario).options(db.contains_eager(RegistroPonto.usuario))
+                 .order_by(RegistroPonto.id.desc()).limit(limite_logs * 10).all())
     for reg in registros:
         if not reg.usuario:
             continue
@@ -3509,7 +3510,8 @@ def build_admin_logs_recentes(limit=5):
             "_timestamp": data_obj,
         })
 
-    solicitacoes = SolicitacaoCorrecao.query.join(Usuario).order_by(SolicitacaoCorrecao.id.desc()).all()
+    solicitacoes = (SolicitacaoCorrecao.query.join(Usuario)
+                    .order_by(SolicitacaoCorrecao.id.desc()).limit(limite_logs * 4).all())
     for sol in solicitacoes:
         if not sol.usuario:
             continue
@@ -3544,9 +3546,14 @@ def render_admin_shell(initial_view="painel", **context):
         context["regiao_fonte"] = regiao_fonte
     if "ufs_brasil" not in context:
         context["ufs_brasil"] = UFS_BRASIL
-    if initial_view != "painel" and "conteudo_inicial" not in context:
-        # Monta a aba pedida já no servidor: sem isso a página vinha com o
-        # Painel e o JS trocava pelo fragmento depois (pisca após salvar).
+    if "usuarios" not in context:
+        # Modais do shell (exportar, ponto manual) listam os colaboradores.
+        context["usuarios"] = Usuario.query.order_by(Usuario.nome.asc()).all()
+    if "total_solicitacoes_pendentes" not in context:
+        context["total_solicitacoes_pendentes"] = SolicitacaoCorrecao.query.filter_by(status="Pendente").count()
+    if "conteudo_inicial" not in context:
+        # Monta a aba pedida já no servidor (o painel inclusive): uma única
+        # fonte de HTML por aba e nada de piscar o Painel após salvar.
         fragmento = admin_fragment(initial_view)
         if isinstance(fragmento, str):
             context["conteudo_inicial"] = Markup(fragmento)
@@ -3611,25 +3618,235 @@ def _indicadores_painel(hoje=None):
     }
 
 
+# ----------------------------------------------------------------------------
+# Painel em blocos: cada usuário de gestão monta o seu (ordem, largura e quais
+# blocos). O layout fica em Configuracao("painel:<id>") como "bloco:largura,...".
+# ----------------------------------------------------------------------------
+PAINEL_BLOCOS = {
+    # id: (título, ícone, papel exigido, largura padrão, largura mínima, tipo)
+    "colaboradores": ("Colaboradores", "bi-people-fill", None, 3, 2, "metrica"),
+    "conformes": ("Dias conformes", "bi-check-circle-fill", None, 3, 2, "metrica"),
+    "pendencias": ("Incompletos / faltas", "bi-exclamation-triangle-fill", None, 3, 2, "metrica"),
+    "solic_qtd": ("Solicitações pendentes", "bi-pencil-square", "rh", 3, 2, "metrica"),
+    "atalhos": ("Atalhos", "bi-lightning-charge", None, 12, 3, "bloco"),
+    "presenca": ("Presença nos últimos 7 dias", "bi-bar-chart", None, 8, 4, "bloco"),
+    "conformidade": ("Conformidade de pontos", "bi-pie-chart", None, 4, 3, "bloco"),
+    "atividades": ("Atividades recentes", "bi-clock-history", None, 7, 4, "bloco"),
+    "feriados": ("Feriados do mês", "bi-calendar-check", None, 5, 4, "bloco"),
+    "sem_entrada": ("Sem entrada hoje", "bi-person-exclamation", "rh", 4, 3, "bloco"),
+    "afastados": ("Afastados e próximos", "bi-calendar-x", "rh", 4, 3, "bloco"),
+    "alertas": ("Alertas CLT", "bi-shield-exclamation", None, 4, 3, "bloco"),
+    "solicitacoes": ("Solicitações para aprovar", "bi-inbox", "rh", 6, 4, "bloco"),
+    "extras": ("Horas extras do mês", "bi-graph-up-arrow", "rh", 6, 4, "bloco"),
+}
+PAINEL_PADRAO = [
+    "colaboradores", "conformes", "pendencias", "solic_qtd", "atalhos",
+    "presenca", "conformidade", "atividades", "feriados",
+    "sem_entrada", "afastados", "alertas", "solicitacoes", "extras",
+]
+
+
+def _painel_permitido(usuario, bloco_id):
+    meta = PAINEL_BLOCOS.get(bloco_id)
+    if not meta:
+        return False
+    papel = meta[2]
+    return papel is None or (papel == "rh" and usuario.is_rh) or (papel == "ti" and usuario.is_ti)
+
+
+def _painel_layout_padrao(usuario):
+    layout = [[b, PAINEL_BLOCOS[b][3]] for b in PAINEL_PADRAO if _painel_permitido(usuario, b)]
+    if not usuario.is_rh:
+        # Sem o 4º cartão de RH, os 3 indicadores ocupam a linha inteira.
+        for item in layout:
+            if PAINEL_BLOCOS[item[0]][5] == "metrica":
+                item[1] = 4
+    return [tuple(i) for i in layout]
+
+
+def _painel_normalizar(itens, usuario):
+    """Valida a lista [(id, largura)]: só blocos conhecidos e permitidos, sem repetir."""
+    vistos, layout = set(), []
+    for bloco_id, largura in itens:
+        if bloco_id in vistos or not _painel_permitido(usuario, bloco_id):
+            continue
+        try:
+            largura = int(largura)
+        except (TypeError, ValueError):
+            largura = PAINEL_BLOCOS[bloco_id][3]
+        largura = max(PAINEL_BLOCOS[bloco_id][4], min(12, largura))
+        vistos.add(bloco_id)
+        layout.append((bloco_id, largura))
+    return layout
+
+
+def _painel_layout(usuario):
+    cfg = db.session.get(Configuracao, f"painel:{usuario.id}")
+    if not cfg:
+        return _painel_layout_padrao(usuario)
+    itens = [p.partition(":")[::2] for p in cfg.valor.split(",") if p]
+    return _painel_normalizar(itens, usuario)
+
+
+def _painel_salvar_layout(usuario, layout):
+    chave = f"painel:{usuario.id}"
+    cfg = db.session.get(Configuracao, chave)
+    if layout is None:
+        if cfg:
+            db.session.delete(cfg)
+    else:
+        valor = ",".join(f"{b}:{w}" for b, w in layout)
+        if cfg:
+            cfg.valor = valor
+        else:
+            db.session.add(Configuracao(chave=chave, valor=valor))
+    db.session.commit()
+
+
+def _painel_sem_entrada(hoje, agora_min):
+    """Colaboradores CLT em dia de trabalho, sem afastamento e sem batida hoje."""
+    com_batida = {uid for (uid,) in db.session.query(RegistroPonto.usuario_id)
+                  .filter(RegistroPonto.data == hoje.strftime("%d/%m/%Y")).distinct()}
+    lista = []
+    for u in Usuario.query.order_by(Usuario.nome.asc()).all():
+        if u.tipo_contrato == "PJ" or u.id in com_batida:
+            continue
+        if not eh_dia_util(hoje, u.departamento_id) or afastamento_no_dia(u.id, hoje):
+            continue
+        j = jornada_vigente(hoje, u.departamento_id)
+        entrada = j.horario_entrada_min
+        atrasado = entrada is not None and agora_min > entrada + j.tolerancia_marcacao_min
+        lista.append({
+            "nome": u.nome,
+            "entrada": f"{entrada // 60:02d}:{entrada % 60:02d}" if entrada is not None else None,
+            "atrasado": atrasado,
+        })
+    lista.sort(key=lambda x: (not x["atrasado"], x["nome"]))
+    return lista
+
+
+def _painel_afastados(hoje, dias=14):
+    ate = hoje + timedelta(days=dias)
+    itens = (Afastamento.query.options(db.joinedload(Afastamento.usuario))
+             .filter(Afastamento.data_fim >= hoje, Afastamento.data_inicio <= ate)
+             .order_by(Afastamento.data_inicio.asc()).all())
+    return [{
+        "nome": a.usuario.nome if a.usuario else "?",
+        "tipo": a.tipo,
+        "rotulo": a.rotulo,
+        "inicio": a.data_inicio,
+        "fim": a.data_fim,
+        "em_curso": a.data_inicio <= hoje,
+    } for a in itens]
+
+
+def _painel_alertas_clt(usuarios):
+    alertas = []
+    for u in usuarios:
+        regs = RegistroPonto.query.filter_by(usuario_id=u.id).order_by(RegistroPonto.id.desc()).limit(10).all()
+        dias_agrupados = defaultdict(dict)
+        for r in regs:
+            dias_agrupados[r.data][r.tipo] = r.hora
+        dias_ordenados = sorted(dias_agrupados.keys(), key=lambda d: datetime.strptime(d, "%d/%m/%Y"), reverse=True)
+        for i in range(len(dias_ordenados) - 1):
+            d_atual, d_anterior = dias_ordenados[i], dias_ordenados[i + 1]
+            saida_ant = dias_agrupados[d_anterior].get("Saída")
+            entrada_atual = dias_agrupados[d_atual].get("Entrada")
+            if saida_ant and entrada_atual and not verificar_conformidade_clt(d_anterior, saida_ant, d_atual, entrada_atual):
+                alertas.append({"nome": u.nome, "msg": f"Interjornada < 11h em {d_atual}"})
+                break
+    return alertas
+
+
+def _painel_extras(usuarios, hoje):
+    inicio = hoje.replace(day=1)
+    linhas = []
+    for u in usuarios:
+        if u.tipo_contrato == "PJ":
+            continue
+        _, tot = apurar_periodo(u, inicio, hoje, hoje=hoje)
+        if tot["extra_50"] or tot["extra_100"]:
+            linhas.append({
+                "nome": u.nome,
+                "extra_50": tot["extra_50"],
+                "extra_100": tot["extra_100"],
+                "total": tot["extra_50"] + tot["extra_100"],
+            })
+    linhas.sort(key=lambda x: -x["total"])
+    j = jornada_vigente(hoje)
+    return {
+        "linhas": linhas,
+        "pct_util": j.extra_util_pct,
+        "pct_descanso": j.extra_descanso_pct,
+        "total_50": sum(x["extra_50"] for x in linhas),
+        "total_100": sum(x["extra_100"] for x in linhas),
+    }
+
+
+def _contexto_painel(usuario):
+    """Monta o painel calculando só o que os blocos visíveis usam."""
+    agora = datetime.now(ZoneInfo("America/Sao_Paulo"))
+    hoje = agora.date()
+    layout = _painel_layout(usuario)
+    ids = {b for b, _ in layout}
+    ctx = {
+        "blocos": [{"id": b, "w": w, "titulo": PAINEL_BLOCOS[b][0], "icone": PAINEL_BLOCOS[b][1],
+                    "min": PAINEL_BLOCOS[b][4], "tipo": PAINEL_BLOCOS[b][5]} for b, w in layout],
+        "catalogo": [{"id": b, "titulo": m[0], "icone": m[1]} for b, m in PAINEL_BLOCOS.items()
+                     if _painel_permitido(usuario, b)],
+        "data_hoje": hoje,
+        "mes_referencia": MESES_PT[hoje.month - 1],
+        "fmt_hhmm": fmt_hhmm,
+    }
+    usuarios = Usuario.query.all() if ids & {"colaboradores", "alertas", "extras"} else []
+    ctx["usuarios"] = usuarios
+    if ids & {"conformes", "pendencias", "presenca", "conformidade"}:
+        ctx.update(_indicadores_painel(hoje))
+    if ids & {"solic_qtd", "solicitacoes"}:
+        pend = (SolicitacaoCorrecao.query.options(db.joinedload(SolicitacaoCorrecao.usuario))
+                .filter_by(status="Pendente").order_by(SolicitacaoCorrecao.id.asc()).all())
+        ctx["solicitacoes_pendentes"] = pend
+        ctx["total_solicitacoes_pendentes"] = len(pend)
+    if "atividades" in ids:
+        ctx["logs_recentes"] = build_admin_logs_recentes()
+    if "feriados" in ids:
+        _sincronizar_feriados_lib()
+        ctx["feriados"] = _feriados_do_mes(hoje)
+        ctx["regiao_uf"], ctx["regiao_cidade"], ctx["regiao_fonte"] = _regiao_display()
+        ctx["ufs_brasil"] = UFS_BRASIL
+    if "alertas" in ids:
+        ctx["alertas_clt"] = _painel_alertas_clt(usuarios)
+    if "sem_entrada" in ids:
+        ctx["sem_entrada"] = _painel_sem_entrada(hoje, agora.hour * 60 + agora.minute)
+    if "afastados" in ids:
+        ctx["afastados"] = _painel_afastados(hoje)
+    if "extras" in ids:
+        ctx["extras"] = _painel_extras(usuarios, hoje)
+    return ctx
+
+
+@app.route("/admin/painel/layout", methods=["POST"])
+@login_required
+@gestao_required
+def salvar_layout_painel():
+    dados = request.get_json(silent=True) or {}
+    if dados.get("restaurar"):
+        _painel_salvar_layout(current_user, None)
+        return jsonify({"ok": True})
+    blocos = dados.get("blocos")
+    if not isinstance(blocos, list) or len(blocos) > len(PAINEL_BLOCOS) * 2:
+        return jsonify({"ok": False, "erro": "Layout inválido."}), 400
+    itens = [(str(b.get("id", "")), b.get("w")) for b in blocos if isinstance(b, dict)]
+    layout = _painel_normalizar(itens, current_user)
+    _painel_salvar_layout(current_user, layout)
+    return jsonify({"ok": True, "blocos": [{"id": b, "w": w} for b, w in layout]})
+
+
 @app.route("/admin")
 @login_required
 @gestao_required
 def admin_panel():
-    usuarios = Usuario.query.all()
-    total_solicitacoes_pendentes = SolicitacaoCorrecao.query.filter_by(status="Pendente").count()
-    hoje = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
-    # Garante feriados automáticos (nacionais + regionais) presentes no banco
-    _sincronizar_feriados_lib()
-    indicadores = _indicadores_painel(hoje)
-
-    return render_admin_shell(
-        initial_view="painel",
-        usuarios=usuarios,
-        total_solicitacoes_pendentes=total_solicitacoes_pendentes,
-        logs_recentes=build_admin_logs_recentes(),
-        feriados=_feriados_do_mes(hoje),
-        **indicadores,
-    )
+    return render_admin_shell(initial_view="painel")
 
 @app.route("/admin/fragment/<string:view_name>")
 @login_required
@@ -3639,57 +3856,7 @@ def admin_fragment(view_name):
     if papel == "rh" and not current_user.is_rh or papel == "ti" and not current_user.is_ti:
         abort(403)
     if view_name == "painel":
-        usuarios = Usuario.query.all()
-        total_solicitacoes_pendentes = SolicitacaoCorrecao.query.filter_by(status="Pendente").count()
-        
-        hoje = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
-        indicadores = _indicadores_painel(hoje)
-
-        # Garante feriados automáticos (nacionais + regionais) presentes no banco
-        _sincronizar_feriados_lib()
-
-        # Feriados do mês atual
-        feriados = _feriados_do_mes(hoje)
-        
-        # Alertas CLT
-        alertas_clt = []
-        for u in usuarios:
-            regs = RegistroPonto.query.filter_by(usuario_id=u.id).order_by(RegistroPonto.id.desc()).limit(10).all()
-            dias_agrupados = defaultdict(dict)
-            for r in regs:
-                dias_agrupados[r.data][r.tipo] = r.hora
-            
-            # Verificar intervalo de 11h entre dias (Interjornada)
-            dias_ordenados = sorted(dias_agrupados.keys(), key=lambda d: datetime.strptime(d, "%d/%m/%Y"), reverse=True)
-            for i in range(len(dias_ordenados) - 1):
-                d_atual = dias_ordenados[i]
-                d_anterior = dias_ordenados[i+1]
-                
-                # Regra: Saída dia anterior -> Entrada dia atual
-                saida_ant = dias_agrupados[d_anterior].get("Saída")
-                entrada_atual = dias_agrupados[d_atual].get("Entrada")
-                
-                if saida_ant and entrada_atual:
-                    if not verificar_conformidade_clt(d_anterior, saida_ant, d_atual, entrada_atual):
-                        alertas_clt.append({"nome": u.nome, "msg": f"Interjornada < 11h em {d_atual}"})
-                        break
-
-        regiao_uf, regiao_cidade, regiao_fonte = _regiao_display()
-
-        return render_template(
-            "admin_fragment_painel.html",
-            usuarios=usuarios,
-            total_solicitacoes_pendentes=total_solicitacoes_pendentes,
-            logs_recentes=build_admin_logs_recentes(),
-            alertas_clt=alertas_clt,
-            feriados=feriados,
-            data_hoje=hoje,
-            regiao_uf=regiao_uf,
-            regiao_cidade=regiao_cidade,
-            regiao_fonte=regiao_fonte,
-            ufs_brasil=UFS_BRASIL,
-            **indicadores,
-        )
+        return render_template("admin_fragment_painel.html", **_contexto_painel(current_user))
 
     if view_name == "usuarios":
         usuarios = Usuario.query.order_by(Usuario.nome.asc()).all()
@@ -3928,7 +4095,7 @@ def responder_solicitacao(id, acao):
 
     db.session.commit()
     _invalidar_notif_cache(solicitacao.usuario_id)
-    return _redirect_admin("solicitacoes")
+    return _redirect_admin("painel" if request.form.get("voltar") == "painel" else "solicitacoes")
 
 @app.route("/admin/usuarios")
 @login_required

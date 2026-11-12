@@ -1,0 +1,29 @@
+<div class="dashboard-card h-100">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h5 class="fw-bold m-0">Atividades Recentes</h5>
+        {% if current_user.is_rh %}<a href="{{ url_for('admin_historico') }}" class="text-primary small text-decoration-none">Ver histórico geral</a>{% endif %}
+    </div>
+    <div class="activity-list">
+        {% if logs_recentes %}
+            {% for log in logs_recentes %}
+            <div class="activity-item">
+                <div class="activity-icon {{ log.tipo }}">
+                    <i class="bi {{ log.icone }}"></i>
+                </div>
+                <div class="activity-content">
+                    <div class="d-flex justify-content-between">
+                        <span class="fw-bold">{{ log.nome }}</span>
+                        <span class="text-muted small">{{ log.horario }}</span>
+                    </div>
+                    <span class="text-muted small">{{ log.descricao }}</span>
+                </div>
+            </div>
+            {% endfor %}
+        {% else %}
+            <div class="text-center py-4 text-muted">
+                <i class="bi bi-clock-history fs-3 d-block mb-1"></i>
+                Nenhuma atividade recente registrada.
+            </div>
+        {% endif %}
+    </div>
+</div>

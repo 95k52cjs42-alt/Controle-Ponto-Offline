@@ -1567,6 +1567,99 @@ class SecurityRegressionTests(unittest.TestCase):
             self.assertEqual(linhas, {"a@example.com": "1/1", "f@example.com": "0/0"})
 
 
+    # ------------------------------------------------------------------
+    # Painel em blocos
+    # ------------------------------------------------------------------
+    def _ids_blocos(self, html):
+        return re.findall(r'class="painel-bloco[^"]*" data-bloco="([a-z_]+)" data-w="(\d+)"', html)
+
+    def test_painel_padrao_por_papel(self):
+        self.make_user(email="rh@example.com", rh=True)
+        self.make_user(email="ti@example.com", ti=True)
+        with self.app.test_client() as client:
+            self.login(client, email="rh@example.com")
+            ids = [b for b, _ in self._ids_blocos(client.get("/admin").get_data(as_text=True))]
+            self.assertEqual(ids, self.module.PAINEL_PADRAO)
+        with self.app.test_client() as client:
+            self.login(client, email="ti@example.com")
+            blocos = self._ids_blocos(client.get("/admin/fragment/painel").get_data(as_text=True))
+            ids = [b for b, _ in blocos]
+            for so_rh in ("solic_qtd", "sem_entrada", "afastados", "solicitacoes", "extras"):
+                self.assertNotIn(so_rh, ids)
+            self.assertIn(("colaboradores", "4"), blocos)
+
+    def test_painel_salva_layout_validado_e_restaura(self):
+        self.make_user(email="ti@example.com", ti=True)
+        with self.app.test_client() as client:
+            self.login(client, email="ti@example.com")
+            token = self.csrf(client, "/admin")
+            r = client.post("/admin/painel/layout", json={"blocos": [
+                {"id": "alertas", "w": 99},
+                {"id": "extras", "w": 6},          # só RH: descartado
+                {"id": "inexistente", "w": 3},
+                {"id": "presenca", "w": 1},        # abaixo do mínimo
+                {"id": "alertas", "w": 4},         # repetido
+                {"id": "colaboradores"},           # sem largura: padrão
+            ]}, headers={"X-CSRF-Token": token})
+            self.assertEqual(r.status_code, 200)
+            self.assertEqual(r.get_json()["blocos"], [
+                {"id": "alertas", "w": 12}, {"id": "presenca", "w": 4}, {"id": "colaboradores", "w": 3}])
+            blocos = self._ids_blocos(client.get("/admin").get_data(as_text=True))
+            self.assertEqual(blocos, [("alertas", "12"), ("presenca", "4"), ("colaboradores", "3")])
+            # Sem CSRF: recusado
+            self.assertEqual(client.post("/admin/painel/layout", json={"restaurar": True}).status_code, 403)
+            client.post("/admin/painel/layout", json={"restaurar": True}, headers={"X-CSRF-Token": token})
+            self.assertEqual(len(self._ids_blocos(client.get("/admin").get_data(as_text=True))), 9)
+            self.assertEqual(client.post("/admin/painel/layout", json={"blocos": "x"},
+                                         headers={"X-CSRF-Token": token}).status_code, 400)
+
+    def test_painel_layout_e_por_usuario_e_colaborador_nao_salva(self):
+        self.make_user(email="a@example.com", admin=True)
+        self.make_user(email="b@example.com", admin=True)
+        self.make_user(email="func@example.com")
+        with self.app.test_client() as client:
+            self.login(client, email="a@example.com")
+            token = self.csrf(client, "/admin")
+            client.post("/admin/painel/layout", json={"blocos": [{"id": "extras", "w": 12}]},
+                        headers={"X-CSRF-Token": token})
+            self.assertEqual(self._ids_blocos(client.get("/admin").get_data(as_text=True)), [("extras", "12")])
+        with self.app.test_client() as client:
+            self.login(client, email="b@example.com")
+            self.assertEqual(len(self._ids_blocos(client.get("/admin").get_data(as_text=True))),
+                             len(self.module.PAINEL_PADRAO))
+        with self.app.test_client() as client:
+            self.login(client, email="func@example.com")
+            token = self.csrf(client, "/")
+            r = client.post("/admin/painel/layout", json={"blocos": []}, headers={"X-CSRF-Token": token})
+            self.assertIn(r.status_code, (302, 403))
+        with self.app.app_context():
+            self.assertEqual(self.module.Configuracao.query.filter(
+                self.module.Configuracao.chave.like("painel:%")).count(), 1)
+
+    def test_painel_blocos_com_dados(self):
+        m = self.module
+        rh_id = self.make_user(email="rh@example.com", admin=True)
+        func_id = self.make_user(email="func@example.com")
+        hoje = m.datetime.now(m.ZoneInfo("America/Sao_Paulo")).date()
+        with self.app.app_context():
+            m.db.session.add(m.Afastamento(usuario_id=func_id, tipo="ferias", data_inicio=hoje,
+                                           data_fim=hoje + m.timedelta(days=3)))
+            m.db.session.add(m.SolicitacaoCorrecao(data_ponto=hoje.strftime("%d/%m/%Y"), tipo_ponto="Entrada",
+                                                   hora_correta="08:00:00", justificativa="Esqueci <b>",
+                                                   usuario_id=func_id))
+            m.db.session.commit()
+            sol_id = m.SolicitacaoCorrecao.query.first().id
+        with self.app.test_client() as client:
+            self.login(client, email="rh@example.com")
+            html = client.get("/admin").get_data(as_text=True)
+            self.assertIn("Férias", html)
+            self.assertIn("Esqueci &lt;b&gt;", html)
+            self.assertIn('name="voltar" value="painel"', html)
+            token = self.csrf(client, "/admin")
+            r = client.post(f"/admin/solicitacoes/{sol_id}/aprovar", data={"_csrf_token": token, "voltar": "painel"})
+            self.assertEqual(r.status_code, 302)
+            self.assertTrue(r.headers["Location"].endswith("/admin"))
+
 if __name__ == "__main__":
     unittest.main()
 

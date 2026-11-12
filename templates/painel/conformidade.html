@@ -1,0 +1,11 @@
+<div class="dashboard-card h-100">
+    <h5 class="fw-bold mb-1">Conformidade de pontos</h5>
+    <p class="text-muted small mb-3">Dias de trabalho de {{ mes_referencia }} até ontem.</p>
+    <div style="height: 260px; position: relative;"
+         id="complianceChartContainer"
+         data-conformes="{{ conformes|default(0) }}"
+         data-incompletos="{{ incompletos|default(0) }}"
+         data-faltas="{{ faltas|default(0) }}">
+        <canvas id="complianceChart"></canvas>
+    </div>
+</div>

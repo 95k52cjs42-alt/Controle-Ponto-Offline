@@ -1,0 +1,27 @@
+<div class="d-flex flex-wrap gap-3 h-100 align-items-center">
+    {% if current_user.is_rh %}
+    <button class="quick-action-btn" data-bs-toggle="modal" data-bs-target="#modalExportarPonto">
+        <i class="bi bi-file-earmark-spreadsheet"></i> Exportar Relatório
+    </button>
+    <a href="{{ url_for('admin_exportar_afd') }}" class="quick-action-btn">
+        <i class="bi bi-file-earmark-text"></i> Gerar AFD (Portaria 671)
+    </a>
+    <button class="quick-action-btn" data-bs-toggle="modal" data-bs-target="#modalLembrete">
+        <i class="bi bi-megaphone"></i> Enviar Lembrete
+    </button>
+    <button type="button" class="quick-action-btn" data-bs-toggle="modal" data-bs-target="#modalLancarPontoManual">
+        <i class="bi bi-clock-history"></i> Lançar Ponto Manual
+    </button>
+    <button type="button" class="quick-action-btn" data-bs-toggle="modal" data-bs-target="#modalNovoUsuario">
+        <i class="bi bi-person-plus"></i> Novo Colaborador
+    </button>
+    {% endif %}
+    {% if current_user.is_ti %}
+    <a href="{{ url_for('admin_parametros') }}#setores" class="quick-action-btn text-decoration-none">
+        <i class="bi bi-building"></i> Setores
+    </a>
+    <button type="button" class="quick-action-btn" data-bs-toggle="modal" data-bs-target="#modalInformarFeriado">
+        <i class="bi bi-calendar-event"></i> Informar Feriado
+    </button>
+    {% endif %}
+</div>

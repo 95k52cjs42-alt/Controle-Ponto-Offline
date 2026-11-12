@@ -24,6 +24,7 @@
 
     <!-- Chart.js para os gráficos -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
 
     <style>
         /* TEMA ESCURO (Padrão) */
@@ -213,6 +214,67 @@
             justify-content: center;
             font-size: 0.75rem;
             font-weight: 700;
+        }
+
+        /* Painel em blocos: grade de 12 colunas, altura pelo conteúdo */
+        .painel-grid {
+            display: grid;
+            grid-template-columns: repeat(12, minmax(0, 1fr));
+            gap: 1rem;
+            align-items: stretch;
+        }
+        .painel-bloco { grid-column: span var(--w, 12); position: relative; min-width: 0; display: flex; flex-direction: column; }
+        .painel-bloco-corpo { flex: 1 1 auto; min-width: 0; }
+        .painel-bloco-corpo > .dashboard-card, .painel-bloco-corpo > .metric-card { margin-bottom: 0 !important; }
+        .painel-rolagem { max-height: 340px; overflow-y: auto; }
+        .painel-vazio { grid-column: 1 / -1; border: 1px dashed var(--card-border); border-radius: 16px; }
+        .painel-bloco-ctrl, .painel-ferramentas-edicao, .painel-dica { display: none; }
+        button.metric-card { color: inherit; cursor: pointer; }
+        button.metric-card:hover { border-color: var(--blue-accent); }
+
+        .painel-grid.editando .painel-bloco {
+            outline: 2px dashed var(--card-border);
+            outline-offset: 4px;
+            border-radius: 18px;
+            padding-top: 46px;
+        }
+        .painel-grid.editando .painel-bloco-corpo { pointer-events: none; user-select: none; opacity: 0.85; }
+        .painel-grid.editando .painel-bloco-ctrl {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 38px;
+            padding: 0 6px;
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 12px;
+            z-index: 2;
+        }
+        .painel-alca { cursor: grab; padding: 4px 6px; color: var(--text-muted); font-size: 1.05rem; }
+        .painel-alca:active { cursor: grabbing; }
+        .painel-rotulo { flex: 1 1 auto; min-width: 0; font-size: 0.8rem; font-weight: 600; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .painel-largura { font-size: 0.72rem; color: var(--text-muted); min-width: 34px; text-align: center; font-variant-numeric: tabular-nums; }
+        .painel-ctl {
+            border: 0; background: transparent; color: var(--text-main);
+            width: 28px; height: 28px; border-radius: 8px;
+            display: inline-flex; align-items: center; justify-content: center; font-size: 0.85rem;
+        }
+        .painel-ctl:hover:not(:disabled) { background: var(--nav-btn-hover); }
+        .painel-ctl:disabled { opacity: 0.35; cursor: not-allowed; }
+        .painel-ctl-remover:hover:not(:disabled) { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
+        .painel-fantasma { opacity: 0.35; }
+        .painel-editando .painel-dica { display: block; }
+        .painel-editando .painel-ferramentas-edicao { display: flex; }
+        .painel-editando .js-painel-personalizar { display: none; }
+
+        @media (max-width: 991.98px) {
+            .painel-bloco { grid-column: span 12; }
+            .painel-bloco.painel-metrica { grid-column: span 6; }
+        }
+        @media (max-width: 575.98px) {
+            .painel-bloco.painel-metrica { grid-column: span 12; }
         }
 
         /* Menu suspenso do painel (RH / TI / conta) */
@@ -687,255 +749,7 @@
         {% endwith %}
 
         <div id="adminContent">
-        {% if conteudo_inicial %}
-        {{ conteudo_inicial }}
-        {% else %}
-            <!-- Cabeçalho do Dashboard -->
-            <div class="mb-4">
-                <h3 class="fw-bold mb-1">Visão Geral & Indicadores</h3>
-                <p class="text-muted small m-0">Acompanhe a conformidade dos registros de ponto e o desempenho da equipe</p>
-            </div>
-
-        <!-- Cards de Métricas Rápidas -->
-        <div class="row g-3 mb-4">
-            <div class="col-md-4">
-                <div class="metric-card">
-                    <div class="metric-icon" style="background: rgba(37, 99, 235, 0.15); color: var(--blue-accent);">
-                        <i class="bi bi-people-fill"></i>
-                    </div>
-                    <div>
-                        <span class="text-muted small d-block">Colaboradores</span>
-                        <h4 class="fw-bold mb-0">{{ usuarios|length if usuarios else 0 }}</h4>
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-4">
-                <div class="metric-card">
-                    <div class="metric-icon" style="background: rgba(16, 185, 129, 0.15); color: var(--green-accent);">
-                        <i class="bi bi-check-circle-fill"></i>
-                    </div>
-                    <div>
-                        <span class="text-muted small d-block">Dias conformes ({{ mes_referencia|default('mês') }})</span>
-                        <h4 class="fw-bold mb-0 text-success">{{ conformes|default(0) }}</h4>
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-4">
-                <div class="metric-card">
-                    <div class="metric-icon" style="background: rgba(239, 68, 68, 0.15); color: #ef4444;">
-                        <i class="bi bi-exclamation-triangle-fill"></i>
-                    </div>
-                    <div>
-                        <span class="text-muted small d-block">Incompletos / faltas ({{ mes_referencia|default('mês') }})</span>
-                        <h4 class="fw-bold mb-0 text-danger">{{ (incompletos|default(0)) + (faltas|default(0)) }}</h4>
-                            <span class="d-block text-muted" style="font-size: 0.75rem;">{{ incompletos|default(0) }} incompleto(s) · {{ faltas|default(0) }} falta(s)</span>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Atalhos de Ações Rápidas -->
-        <div class="row mb-4">
-            <div class="col-12">
-                <div class="d-flex flex-wrap gap-3">
-                    {% if current_user.is_rh %}
-                    <button class="quick-action-btn" data-bs-toggle="modal" data-bs-target="#modalExportarPonto">
-                        <i class="bi bi-file-earmark-spreadsheet"></i> 
-                        Exportar Relatório
-                    </button>
-
-                    <a href="{{ url_for('admin_exportar_afd') }}" class="quick-action-btn">
-                        <i class="bi bi-file-earmark-text"></i>
-                        Gerar AFD (Portaria 671)
-                    </a>
-                    
-                    <button class="quick-action-btn" data-bs-toggle="modal" data-bs-target="#modalLembrete">
-                        <i class="bi bi-megaphone"></i> 
-                        Enviar Lembrete
-                    </button>
-
-                    <button type="button" class="quick-action-btn" data-bs-toggle="modal" data-bs-target="#modalLancarPontoManual">
-                        <i class="bi bi-clock-history"></i> 
-                        Lançar Ponto Manual
-                    </button>
-                    
-                    <button type="button" class="quick-action-btn" data-bs-toggle="modal" data-bs-target="#modalNovoUsuario">
-                        <i class="bi bi-person-plus"></i> 
-                        Novo Colaborador
-                    </button>
-
-                    {% endif %}
-
-                    {% if current_user.is_ti %}
-                    <a href="{{ url_for('admin_parametros') }}#setores" class="quick-action-btn text-decoration-none">
-                        <i class="bi bi-building"></i>
-                        Setores
-                    </a>
-
-                    <button type="button" class="quick-action-btn" data-bs-toggle="modal" data-bs-target="#modalInformarFeriado">
-                        <i class="bi bi-calendar-event"></i> 
-                        Informar Feriado
-                    </button>
-                    {% endif %}
-                </div>
-            </div>
-        </div>
-
-        <!-- Seção de Gráficos -->
-        <div class="row g-4 mb-4">
-            <div class="col-lg-8">
-                <div class="dashboard-card h-100">
-                    <h5 class="fw-bold mb-1">Presença nos últimos 7 dias</h5>
-                    <p class="text-muted small mb-3">Colaboradores que registraram ponto em cada dia.</p>
-                    <div style="height: 260px; position: relative;" id="weeklyChartContainer" data-labels='{{ labels_semana|default([])|tojson }}' data-values='{{ dados_semana|default([])|tojson }}'>
-                        <canvas id="weeklyChart"></canvas>
-                    </div>
-                </div>
-            </div>
-            <div class="col-lg-4">
-                <div class="dashboard-card h-100">
-                    <h5 class="fw-bold mb-1">Conformidade de pontos</h5>
-                    <p class="text-muted small mb-3">Dias de trabalho de {{ mes_referencia|default('este mês') }} até ontem.</p>
-                    <div style="height: 260px; position: relative;" id="complianceChartContainer" data-conformes="{{ conformes|default(0) }}" data-incompletos="{{ incompletos|default(0) }}" data-faltas="{{ faltas|default(0) }}">
-                        <canvas id="complianceChart"></canvas>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Widget: Atividades Recentes e Feriados / Alertas -->
-        <div class="row">
-            <div class="col-lg-7">
-                <div class="dashboard-card">
-                    <div class="d-flex justify-content-between align-items-center mb-3">
-                        <h5 class="fw-bold m-0">Atividades Recentes</h5>
-                        {% if current_user.is_rh %}<a href="{{ url_for('admin_historico') }}" class="text-primary small text-decoration-none">Ver histórico geral</a>{% endif %}
-                    </div>
-
-                    <div class="activity-list">
-                        {% if logs_recentes %}
-                            {% for log in logs_recentes %}
-                            <div class="activity-item">
-                                <div class="activity-icon {{ log.tipo }}">
-                                    <i class="bi {{ log.icone }}"></i>
-                                </div>
-                                <div class="activity-content">
-                                    <div class="d-flex justify-content-between">
-                                        <span class="fw-bold">{{ log.nome }}</span>
-                                        <span class="text-muted small">{{ log.horario }}</span>
-                                    </div>
-                                    <span class="text-muted small">{{ log.descricao }}</span>
-                                </div>
-                            </div>
-                            {% endfor %}
-                        {% else %}
-                            <div class="text-center py-4 text-muted">
-                                <i class="bi bi-clock-history fs-3 d-block mb-1"></i>
-                                Nenhuma atividade recente registrada.
-                            </div>
-                        {% endif %}
-                    </div>
-                </div>
-            </div>
-            <div class="col-lg-5">
-                <!-- Card de Feriados do Mês -->
-                <div class="dashboard-card mb-4">
-                    <div class="d-flex justify-content-between align-items-center mb-3">
-                        <h5 class="fw-bold m-0"><i class="bi bi-calendar-check text-primary me-2"></i>Feriados do Mês</h5>
-{% if current_user.is_ti %}
-                        <div class="d-flex gap-2">
-                            <form method="POST" action="{{ url_for('sincronizar_feriados') }}" class="d-inline" title="Adicionar automaticamente os feriados nacionais e da região configurada">
-                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-                                <button type="submit" class="btn btn-sm btn-outline-secondary rounded-3">
-                                    <i class="bi bi-arrow-repeat"></i> Sincronizar
-                                </button>
-                            </form>
-                            <button type="button" class="btn btn-sm btn-outline-primary rounded-3" data-bs-toggle="modal" data-bs-target="#modalInformarFeriado">
-                                <i class="bi bi-plus-lg"></i> Novo
-                            </button>
-                        </div>
-{% endif %}
-                    </div>
-                    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
-                        <span class="badge rounded-pill py-1 px-3" id="regiaoBadge" style="background: rgba(37, 99, 235, 0.15); color: var(--text-main); border: 1px solid var(--card-border); font-weight: 500;">
-                            <i class="bi bi-geo-alt me-1"></i>
-                            <span id="regiaoBadgeTexto">
-                                {% if regiao_fonte == 'env' %}{{ regiao_uf }} (definido no servidor)
-                                {% elif regiao_uf == 'BR' %}Feriados nacionais (BR)
-                                {% else %}{{ regiao_uf }}{% if regiao_cidade %} – {{ regiao_cidade }}{% endif %}{% if regiao_fonte == 'manual' %} (manual){% endif %}{% endif %}
-                            </span>
-                        </span>
-{% if current_user.is_ti %}
-                        <button type="button" class="btn btn-sm btn-outline-secondary rounded-3" id="btnDetectarRegiao" title="Detectar a região pela sua localização atual">
-                            <i class="bi bi-crosshair"></i> Detectar região
-                        </button>
-                        <form method="POST" action="{{ url_for('definir_regiao_feriados') }}" class="d-inline-flex align-items-center gap-1">
-                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-                            <select id="selectRegiaoUf" name="uf" class="form-select form-select-sm" style="width: auto;" title="Definir manualmente a região dos feriados">
-                                <option value="BR" {% if regiao_uf == 'BR' %}selected{% endif %}>BR – Nacional</option>
-                                {% for sigla, nome in ufs_brasil.items() %}
-                                    <option value="{{ sigla }}" {% if regiao_uf == sigla %}selected{% endif %}>{{ sigla }} – {{ nome }}</option>
-                                {% endfor %}
-                            </select>
-                            <button type="submit" class="btn btn-sm btn-outline-secondary rounded-3" title="Aplicar região"><i class="bi bi-check-lg"></i></button>
-                        </form>
-{% endif %}
-                        <input type="hidden" id="regiaoFonte" value="{{ regiao_fonte }}">
-                    </div>
-                    {% if feriados %}
-                        <div class="list-group list-group-flush border-0">
-                            {% for f in feriados %}
-                                <div class="list-group-item bg-transparent d-flex justify-content-between align-items-center px-0 py-2 border-secondary border-opacity-25">
-                                    <div>
-                                        <span class="badge bg-danger rounded-pill me-2">{{ f.data.strftime('%d/%m') }}</span>
-                                        <span class="fw-medium" style="color: var(--text-main);">{{ f.descricao }}</span>
-                                    </div>
-                                    {% if f.id %}
-{% if current_user.is_ti %}
-                                    <form method="POST" action="{{ url_for('excluir_feriado', id=f.id) }}" class="d-inline" onsubmit="return confirm('Deseja remover este feriado?');">
-                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-                                        <button type="submit" class="btn btn-link text-danger p-0 border-0 shadow-none ms-2" title="Excluir feriado">
-                                            <i class="bi bi-trash"></i>
-                                        </button>
-                                    </form>
-{% endif %}
-                                    {% endif %}
-                                </div>
-                            {% endfor %}
-                        </div>
-                    {% else %}
-                        <div class="text-center py-3 text-muted small">
-                            <i class="bi bi-calendar-x d-block fs-4 mb-1"></i>
-                            Nenhum feriado cadastrado para este mês.
-                        </div>
-                    {% endif %}
-                </div>
-
-                <div class="dashboard-card">
-                    <h5 class="fw-bold mb-3">Alertas de Conformidade (CLT)</h5>
-                    <div class="activity-list">
-                        {% if alertas_clt %}
-                            {% for alerta in alertas_clt %}
-                            <div class="activity-item">
-                                <div class="activity-icon alerta">
-                                    <i class="bi bi-exclamation-triangle"></i>
-                                </div>
-                                <div class="activity-content">
-                                    <span class="fw-bold d-block">{{ alerta.nome }}</span>
-                                    <span class="text-muted small">{{ alerta.msg }}</span>
-                                </div>
-                            </div>
-                            {% endfor %}
-                        {% else %}
-                            <div class="text-center py-4 text-muted">
-                                <i class="bi bi-shield-check fs-3 d-block mb-1 text-success"></i>
-                                Tudo em conformidade!
-                            </div>
-                        {% endif %}
-                    </div>
-                </div>
-            </div>
-        {% endif %}
+        {{ conteudo_inicial or '' }}
         </div>
         </div>
 
@@ -1317,8 +1131,7 @@
         function aposCarregarView(viewName, contentWrap) {
             setActiveNav(viewName);
             if (typeof window.bindAdminSearch === 'function') window.bindAdminSearch();
-            if (viewName === 'painel') initCharts();
-            if (viewName === 'painel') initRegionControls();
+            if (viewName === 'painel') { initCharts(); initRegionControls(); initPainelBlocos(contentWrap); }
             if (viewName === 'historico') initHistoricoFadeAlert(contentWrap);
             if (viewName === 'parametros') initParametros();
         }
@@ -1462,7 +1275,6 @@
         });
 
         bindAdminSearch();
-        initRegionControls();
 
         // Auto-dismiss dos alerts de flash messages do admin após alguns segundos
         setTimeout(function() {
@@ -1612,6 +1424,124 @@
             }
         }
 
+        // ------------------------------------------------------------------
+        // Painel em blocos (personalizável por usuário)
+        // ------------------------------------------------------------------
+        let painelSortable = null;
+        let painelEditarAoCarregar = false;
+
+        function csrfAtual() {
+            return document.querySelector('input[name="_csrf_token"]')?.value || '';
+        }
+
+        function painelLayoutAtual(grid) {
+            return [...grid.querySelectorAll(':scope > .painel-bloco')].map(b => ({ id: b.dataset.bloco, w: parseInt(b.dataset.w, 10) }));
+        }
+
+        async function painelSalvar(grid, corpo) {
+            try {
+                const resp = await fetch(grid.dataset.urlLayout, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfAtual() },
+                    body: JSON.stringify(corpo || { blocos: painelLayoutAtual(grid) }),
+                });
+                if (!resp.ok) throw new Error(resp.status);
+                return true;
+            } catch (e) {
+                alert('Não foi possível salvar o layout do painel. Recarregue a página e tente de novo.');
+                return false;
+            }
+        }
+
+        function painelAtualizarControles(grid) {
+            grid.querySelectorAll(':scope > .painel-bloco').forEach(b => {
+                const w = parseInt(b.dataset.w, 10), min = parseInt(b.dataset.min, 10);
+                b.style.setProperty('--w', w);
+                b.querySelector('.painel-largura').textContent = `${w}/12`;
+                b.querySelector('[data-acao="menor"]').disabled = w <= min;
+                b.querySelector('[data-acao="maior"]').disabled = w >= 12;
+            });
+            const presentes = new Set(painelLayoutAtual(grid).map(b => b.id));
+            const catalogo = document.querySelector('.painel-catalogo');
+            if (catalogo) {
+                let livres = 0;
+                catalogo.querySelectorAll('.js-painel-adicionar').forEach(btn => {
+                    const usado = presentes.has(btn.dataset.bloco);
+                    btn.parentElement.classList.toggle('d-none', usado);
+                    if (!usado) livres++;
+                });
+                catalogo.querySelector('.painel-catalogo-vazio').classList.toggle('d-none', livres > 0);
+            }
+            // Gráficos recalculam o tamanho quando a largura muda.
+            if (weeklyChart) weeklyChart.resize();
+            if (complianceChart) complianceChart.resize();
+        }
+
+        function painelModoEdicao(raiz, ligado) {
+            const grid = raiz.querySelector('#painelGrid');
+            if (!grid) return;
+            raiz.classList.toggle('painel-editando', ligado);
+            grid.classList.toggle('editando', ligado);
+            if (painelSortable) { painelSortable.destroy(); painelSortable = null; }
+            if (ligado && typeof Sortable !== 'undefined') {
+                painelSortable = Sortable.create(grid, {
+                    handle: '.painel-alca',
+                    draggable: '.painel-bloco',
+                    animation: 150,
+                    ghostClass: 'painel-fantasma',
+                    onEnd: () => painelSalvar(grid),
+                });
+            }
+            painelAtualizarControles(grid);
+        }
+
+        async function painelRecarregar(editar) {
+            painelEditarAoCarregar = editar;
+            await loadAdminView('painel', {{ url_for('admin_panel')|tojson }});
+        }
+
+        function initPainelBlocos(raiz) {
+            raiz = raiz || document.getElementById('adminContent');
+            const grid = raiz.querySelector('#painelGrid');
+            if (!grid) return;
+
+            raiz.querySelector('.js-painel-personalizar')?.addEventListener('click', () => painelModoEdicao(raiz, true));
+            raiz.querySelector('.js-painel-concluir')?.addEventListener('click', () => painelModoEdicao(raiz, false));
+            raiz.querySelector('.js-painel-restaurar')?.addEventListener('click', async () => {
+                if (!confirm('Voltar o painel para o layout original?')) return;
+                if (await painelSalvar(grid, { restaurar: true })) painelRecarregar(true);
+            });
+            raiz.querySelectorAll('.js-painel-adicionar').forEach(btn => btn.addEventListener('click', async () => {
+                // Vai para o fim; sem largura, o servidor usa a padrão do bloco.
+                const layout = [...painelLayoutAtual(grid), { id: btn.dataset.bloco }];
+                if (await painelSalvar(grid, { blocos: layout })) painelRecarregar(true);
+            }));
+
+            grid.addEventListener('click', (ev) => {
+                const ctl = ev.target.closest('.painel-ctl');
+                if (!ctl || !grid.classList.contains('editando')) return;
+                const bloco = ctl.closest('.painel-bloco');
+                const w = parseInt(bloco.dataset.w, 10), min = parseInt(bloco.dataset.min, 10);
+                if (ctl.dataset.acao === 'menor') bloco.dataset.w = Math.max(min, w - 1);
+                else if (ctl.dataset.acao === 'maior') bloco.dataset.w = Math.min(12, w + 1);
+                else if (ctl.dataset.acao === 'remover') bloco.remove();
+                painelAtualizarControles(grid);
+                painelSalvar(grid);
+            });
+
+            const editar = painelEditarAoCarregar;
+            painelEditarAoCarregar = false;
+            painelModoEdicao(raiz, editar);
+        }
+
+        // Atalhos dentro dos blocos (ex.: "Ver todas") abrem a aba sem recarregar.
+        document.addEventListener('click', (ev) => {
+            const atalho = ev.target.closest('.js-admin-nav-atalho');
+            if (!atalho) return;
+            ev.preventDefault();
+            loadAdminView(atalho.dataset.adminView, atalho.dataset.targetUrl);
+        });
+
         let weeklyChart, complianceChart;
 
         // Cores lidas do tema atual (claro/escuro) a cada desenho.
@@ -1694,8 +1624,6 @@
         // Redesenha com as cores do novo tema.
         document.getElementById('themeToggleBtn')?.addEventListener('click', () => setTimeout(initCharts, 0));
 
-        // Inicialização na carga da página
-        document.addEventListener('DOMContentLoaded', initCharts);
 
         // Filtro de pesquisa no modal
         const modalUserSearch = document.getElementById('modalUserSearch');

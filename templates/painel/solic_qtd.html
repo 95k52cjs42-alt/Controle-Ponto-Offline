@@ -1,0 +1,9 @@
+<button type="button" class="metric-card h-100 w-100 text-start border-0 js-admin-nav-atalho" data-admin-view="solicitacoes" data-target-url="{{ url_for('admin_solicitacoes') }}" title="Abrir solicitações">
+    <div class="metric-icon" style="background: rgba(245, 158, 11, 0.15); color: #f59e0b;">
+        <i class="bi bi-pencil-square"></i>
+    </div>
+    <div>
+        <span class="text-muted small d-block">Solicitações pendentes</span>
+        <h4 class="fw-bold mb-0 {{ 'text-warning' if total_solicitacoes_pendentes else '' }}">{{ total_solicitacoes_pendentes|default(0) }}</h4>
+    </div>
+</button>

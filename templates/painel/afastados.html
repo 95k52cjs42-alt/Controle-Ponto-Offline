@@ -1,0 +1,33 @@
+{% set tag_tipo = {'ferias': 'tag-info', 'atestado': 'tag-warn', 'licenca': 'tag-neutral', 'folga': 'tag-ok', 'outro': 'tag-neutral'} %}
+<div class="dashboard-card h-100">
+    <div class="d-flex justify-content-between align-items-center mb-1">
+        <h5 class="fw-bold m-0">Afastados</h5>
+        <button type="button" class="btn btn-link btn-sm p-0 text-primary text-decoration-none js-admin-nav-atalho" data-admin-view="afastamentos" data-target-url="{{ url_for('admin_afastamentos') }}">Gerenciar</button>
+    </div>
+    <p class="text-muted small mb-3">Hoje e nos próximos 14 dias.</p>
+    {% if afastados %}
+    <div class="activity-list painel-rolagem">
+        {% for a in afastados %}
+        <div class="activity-item">
+            <div class="activity-icon {{ 'alerta' if a.em_curso else 'entrada' }}">
+                <i class="bi {{ 'bi-hourglass-split' if a.em_curso else 'bi-calendar-event' }}"></i>
+            </div>
+            <div class="activity-content flex-grow-1">
+                <div class="d-flex justify-content-between gap-2">
+                    <span class="fw-bold">{{ a.nome }}</span>
+                    <span class="badge rounded-pill {{ tag_tipo.get(a.tipo, 'tag-neutral') }}">{{ a.rotulo }}</span>
+                </div>
+                <span class="text-muted small">
+                    {% if a.em_curso %}Até {{ a.fim.strftime('%d/%m') }}{% else %}{{ a.inicio.strftime('%d/%m') }} a {{ a.fim.strftime('%d/%m') }}{% endif %}
+                </span>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="text-center py-4 text-muted">
+        <i class="bi bi-calendar-check fs-3 d-block mb-1"></i>
+        Ninguém afastado no período.
+    </div>
+    {% endif %}
+</div>
