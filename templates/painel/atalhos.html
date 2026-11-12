@@ -1,6 +1,5 @@
 {# Grade de ícones: cada atalho é um quadradinho com ícone colorido e nome curto. #}
-<div class="dashboard-card h-100">
-    <h5 class="fw-bold mb-3">Ações rápidas</h5>
+<div class="dashboard-card atalhos-card h-100" aria-label="Ações rápidas">
     <div class="atalho-grade">
         {% if current_user.is_rh %}
         <button type="button" class="atalho" data-bs-toggle="modal" data-bs-target="#modalExportarPonto" title="Exportar folha de ponto">

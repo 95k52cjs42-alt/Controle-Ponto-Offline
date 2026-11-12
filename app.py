@@ -3641,7 +3641,7 @@ PAINEL_BLOCOS = {
     "conformes": BlocoPainel("Dias conformes", "bi-check-circle-fill", None, 3, 2, 2, 2, "metrica", "cf"),
     "pendencias": BlocoPainel("Incompletos / faltas", "bi-exclamation-triangle-fill", None, 3, 2, 2, 2, "metrica", "pe"),
     "solic_qtd": BlocoPainel("Solicitações pendentes", "bi-pencil-square", "rh", 3, 2, 2, 2, "metrica", "sq"),
-    "atalhos": BlocoPainel("Ações rápidas", "bi-lightning-charge", None, 12, 3, 2, 3, "bloco", "at"),
+    "atalhos": BlocoPainel("Ações rápidas", "bi-lightning-charge", None, 12, 2, 2, 2, "bloco", "at"),
     "presenca": BlocoPainel("Presença nos últimos 7 dias", "bi-bar-chart", None, 8, 5, 3, 3, "bloco", "pr"),
     "conformidade": BlocoPainel("Conformidade de pontos", "bi-pie-chart", None, 4, 5, 3, 3, "bloco", "cd"),
     "atividades": BlocoPainel("Atividades recentes", "bi-clock-history", None, 7, 7, 3, 3, "bloco", "av"),

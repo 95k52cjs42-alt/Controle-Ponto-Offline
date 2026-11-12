@@ -1588,7 +1588,7 @@ class SecurityRegressionTests(unittest.TestCase):
             # 4 indicadores lado a lado na primeira linha, atalhos logo abaixo
             self.assertEqual(blocos[:5], [("colaboradores", 0, 0, 3, 2), ("conformes", 3, 0, 3, 2),
                                           ("pendencias", 6, 0, 3, 2), ("solic_qtd", 9, 0, 3, 2),
-                                          ("atalhos", 0, 2, 12, 3)])
+                                          ("atalhos", 0, 2, 12, 2)])
         with self.app.test_client() as client:
             self.login(client, email="ti@example.com")
             blocos = self._ids_blocos(client.get("/admin/fragment/painel").get_data(as_text=True))
