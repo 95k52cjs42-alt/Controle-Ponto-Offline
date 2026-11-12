@@ -32,28 +32,33 @@
 
 <div class="painel-dica small text-muted mb-3">
     <i class="bi bi-info-circle me-1"></i>
-    Arraste pela alça <i class="bi bi-grip-vertical"></i> para trocar de lugar, use <b>−</b> / <b>+</b> para a largura e <b>×</b> para remover. As mudanças são salvas na hora, só para você.
+    Arraste pela barra de título para mover, puxe as bordas ou os cantos para redimensionar (os blocos se encaixam na grade),
+    <i class="bi bi-window"></i> ou duplo clique na barra maximiza e <b>×</b> fecha. Tudo é salvo na hora, só para você.
 </div>
 
-<div class="painel-grid" id="painelGrid" data-url-layout="{{ url_for('salvar_layout_painel') }}">
+{% if not blocos %}
+<div class="painel-vazio text-center text-muted py-5 mb-3">
+    <i class="bi bi-grid-1x2 fs-2 d-block mb-2"></i>
+    Seu painel está vazio. Use <b>Personalizar → Adicionar bloco</b>.
+</div>
+{% endif %}
+
+<div class="grid-stack painel-grid" id="painelGrid" data-url-layout="{{ url_for('salvar_layout_painel') }}">
     {% for b in blocos %}
-    <section class="painel-bloco painel-{{ b.tipo }}" data-bloco="{{ b.id }}" data-w="{{ b.w }}" data-min="{{ b.min }}" style="--w: {{ b.w }};">
-        <div class="painel-bloco-ctrl">
-            <span class="painel-alca" title="Arrastar para mover"><i class="bi bi-grip-vertical"></i></span>
-            <span class="painel-rotulo" title="{{ b.titulo }}">{{ b.titulo }}</span>
-            <button type="button" class="painel-ctl" data-acao="menor" title="Diminuir largura"><i class="bi bi-dash-lg"></i></button>
-            <span class="painel-largura">{{ b.w }}/12</span>
-            <button type="button" class="painel-ctl" data-acao="maior" title="Aumentar largura"><i class="bi bi-plus-lg"></i></button>
-            <button type="button" class="painel-ctl painel-ctl-remover" data-acao="remover" title="Remover do painel"><i class="bi bi-x-lg"></i></button>
+    <div class="grid-stack-item painel-bloco painel-{{ b.bloco.tipo }}" data-bloco="{{ b.id }}"
+         gs-id="{{ b.id }}" gs-x="{{ b.x }}" gs-y="{{ b.y }}" gs-w="{{ b.w }}" gs-h="{{ b.h }}"
+         gs-min-w="{{ b.bloco.min_w }}" gs-min-h="{{ b.bloco.min_h }}">
+        <div class="grid-stack-item-content">
+            <div class="janela-barra" title="Arraste para mover · duplo clique maximiza">
+                <i class="bi {{ b.bloco.icone }} janela-icone"></i>
+                <span class="janela-titulo">{{ b.bloco.titulo }}</span>
+                <button type="button" class="janela-btn" data-acao="maximizar" title="Maximizar"><i class="bi bi-window"></i></button>
+                <button type="button" class="janela-btn janela-btn-fechar" data-acao="fechar" title="Fechar (remover do painel)"><i class="bi bi-x-lg"></i></button>
+            </div>
+            <div class="painel-bloco-corpo">
+                {% include 'painel/' ~ b.id ~ '.html' %}
+            </div>
         </div>
-        <div class="painel-bloco-corpo">
-            {% include 'painel/' ~ b.id ~ '.html' %}
-        </div>
-    </section>
-    {% else %}
-    <div class="painel-vazio text-center text-muted py-5">
-        <i class="bi bi-grid-1x2 fs-2 d-block mb-2"></i>
-        Seu painel está vazio. Use <b>Personalizar → Adicionar bloco</b>.
     </div>
     {% endfor %}
 </div>

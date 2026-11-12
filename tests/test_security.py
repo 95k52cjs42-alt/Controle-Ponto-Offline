@@ -1571,47 +1571,83 @@ class SecurityRegressionTests(unittest.TestCase):
     # Painel em blocos
     # ------------------------------------------------------------------
     def _ids_blocos(self, html):
-        return re.findall(r'class="painel-bloco[^"]*" data-bloco="([a-z_]+)" data-w="(\d+)"', html)
+        """[(id, x, y, w, h)] na ordem em que o painel renderizou."""
+        return [(i, int(x), int(y), int(w), int(h)) for i, x, y, w, h in re.findall(
+            r'data-bloco="([a-z_]+)"\s+gs-id="[a-z_]+" gs-x="(\d+)" gs-y="(\d+)" gs-w="(\d+)" gs-h="(\d+)"', html)]
+
+    def _post_layout(self, client, token, corpo):
+        return client.post("/admin/painel/layout", json=corpo, headers={"X-CSRF-Token": token})
 
     def test_painel_padrao_por_papel(self):
         self.make_user(email="rh@example.com", rh=True)
         self.make_user(email="ti@example.com", ti=True)
         with self.app.test_client() as client:
             self.login(client, email="rh@example.com")
-            ids = [b for b, _ in self._ids_blocos(client.get("/admin").get_data(as_text=True))]
-            self.assertEqual(ids, self.module.PAINEL_PADRAO)
+            blocos = self._ids_blocos(client.get("/admin").get_data(as_text=True))
+            self.assertEqual([b[0] for b in blocos], self.module.PAINEL_PADRAO)
+            # 4 indicadores lado a lado na primeira linha, atalhos logo abaixo
+            self.assertEqual(blocos[:5], [("colaboradores", 0, 0, 3, 2), ("conformes", 3, 0, 3, 2),
+                                          ("pendencias", 6, 0, 3, 2), ("solic_qtd", 9, 0, 3, 2),
+                                          ("atalhos", 0, 2, 12, 3)])
         with self.app.test_client() as client:
             self.login(client, email="ti@example.com")
             blocos = self._ids_blocos(client.get("/admin/fragment/painel").get_data(as_text=True))
-            ids = [b for b, _ in blocos]
+            ids = [b[0] for b in blocos]
             for so_rh in ("solic_qtd", "sem_entrada", "afastados", "solicitacoes", "extras"):
                 self.assertNotIn(so_rh, ids)
-            self.assertIn(("colaboradores", "4"), blocos)
+            self.assertEqual(blocos[:3], [("colaboradores", 0, 0, 4, 2), ("conformes", 4, 0, 4, 2),
+                                          ("pendencias", 8, 0, 4, 2)])
 
     def test_painel_salva_layout_validado_e_restaura(self):
         self.make_user(email="ti@example.com", ti=True)
         with self.app.test_client() as client:
             self.login(client, email="ti@example.com")
             token = self.csrf(client, "/admin")
-            r = client.post("/admin/painel/layout", json={"blocos": [
-                {"id": "alertas", "w": 99},
-                {"id": "extras", "w": 6},          # só RH: descartado
-                {"id": "inexistente", "w": 3},
-                {"id": "presenca", "w": 1},        # abaixo do mínimo
-                {"id": "alertas", "w": 4},         # repetido
-                {"id": "colaboradores"},           # sem largura: padrão
-            ]}, headers={"X-CSRF-Token": token})
+            r = self._post_layout(client, token, {"blocos": [
+                {"id": "alertas", "x": 5, "y": 0, "w": 99, "h": 99},   # largura/altura limitadas; x volta p/ caber
+                {"id": "extras", "x": 0, "y": 0, "w": 6, "h": 5},      # só RH: descartado
+                {"id": "inexistente", "x": 0, "y": 0, "w": 3, "h": 3},
+                {"id": "presenca", "x": 2, "y": 20, "w": 1, "h": 1},   # abaixo do mínimo
+                {"id": "alertas", "x": 0, "y": 0, "w": 4, "h": 4},     # repetido
+                {"id": ["x"], "x": 0},                                  # id inválido
+                {"id": "colaboradores"},                                # sem posição: vai para baixo
+            ]})
             self.assertEqual(r.status_code, 200)
-            self.assertEqual(r.get_json()["blocos"], [
-                {"id": "alertas", "w": 12}, {"id": "presenca", "w": 4}, {"id": "colaboradores", "w": 3}])
+            esperado = [{"id": "alertas", "x": 0, "y": 0, "w": 12, "h": 20},
+                        {"id": "presenca", "x": 2, "y": 20, "w": 3, "h": 3},
+                        {"id": "colaboradores", "x": 0, "y": 23, "w": 3, "h": 2}]
+            self.assertEqual(r.get_json()["blocos"], esperado)
             blocos = self._ids_blocos(client.get("/admin").get_data(as_text=True))
-            self.assertEqual(blocos, [("alertas", "12"), ("presenca", "4"), ("colaboradores", "3")])
+            self.assertEqual(blocos, [tuple(e.values()) for e in esperado])
+            with self.app.app_context():
+                cfg = self.module.Configuracao.query.filter(self.module.Configuracao.chave.like("painel:%")).one()
+                self.assertEqual(cfg.valor, "al.0.0.12.20,pr.2.20.3.3,co.0.23.3.2")
             # Sem CSRF: recusado
             self.assertEqual(client.post("/admin/painel/layout", json={"restaurar": True}).status_code, 403)
-            client.post("/admin/painel/layout", json={"restaurar": True}, headers={"X-CSRF-Token": token})
+            self._post_layout(client, token, {"restaurar": True})
             self.assertEqual(len(self._ids_blocos(client.get("/admin").get_data(as_text=True))), 9)
-            self.assertEqual(client.post("/admin/painel/layout", json={"blocos": "x"},
-                                         headers={"X-CSRF-Token": token}).status_code, 400)
+            self.assertEqual(self._post_layout(client, token, {"blocos": "x"}).status_code, 400)
+
+    def test_painel_layout_antigo_ou_corrompido_volta_ao_padrao(self):
+        uid = self.make_user(email="a@example.com", admin=True)
+        with self.app.app_context():
+            self.module.db.session.add(self.module.Configuracao(chave=f"painel:{uid}", valor="presenca:8,alertas:4"))
+            self.module.db.session.commit()
+        with self.app.test_client() as client:
+            self.login(client, email="a@example.com")
+            self.assertEqual(len(self._ids_blocos(client.get("/admin").get_data(as_text=True))),
+                             len(self.module.PAINEL_PADRAO))
+
+    def test_painel_layout_cabe_no_campo(self):
+        m = self.module
+        uid = self.make_user(email="a@example.com", admin=True)
+        with self.app.test_client() as client:
+            self.login(client, email="a@example.com")
+            token = self.csrf(client, "/admin")
+            pior = [{"id": b, "x": 0, "y": 300, "w": 12, "h": 20} for b in m.PAINEL_BLOCOS]
+            self.assertEqual(self._post_layout(client, token, {"blocos": pior}).status_code, 200)
+        with self.app.app_context():
+            self.assertLessEqual(len(m.db.session.get(m.Configuracao, f"painel:{uid}").valor), 255)
 
     def test_painel_layout_e_por_usuario_e_colaborador_nao_salva(self):
         self.make_user(email="a@example.com", admin=True)
@@ -1620,9 +1656,8 @@ class SecurityRegressionTests(unittest.TestCase):
         with self.app.test_client() as client:
             self.login(client, email="a@example.com")
             token = self.csrf(client, "/admin")
-            client.post("/admin/painel/layout", json={"blocos": [{"id": "extras", "w": 12}]},
-                        headers={"X-CSRF-Token": token})
-            self.assertEqual(self._ids_blocos(client.get("/admin").get_data(as_text=True)), [("extras", "12")])
+            self._post_layout(client, token, {"blocos": [{"id": "extras", "x": 0, "y": 0, "w": 12, "h": 6}]})
+            self.assertEqual(self._ids_blocos(client.get("/admin").get_data(as_text=True)), [("extras", 0, 0, 12, 6)])
         with self.app.test_client() as client:
             self.login(client, email="b@example.com")
             self.assertEqual(len(self._ids_blocos(client.get("/admin").get_data(as_text=True))),
@@ -1630,7 +1665,7 @@ class SecurityRegressionTests(unittest.TestCase):
         with self.app.test_client() as client:
             self.login(client, email="func@example.com")
             token = self.csrf(client, "/")
-            r = client.post("/admin/painel/layout", json={"blocos": []}, headers={"X-CSRF-Token": token})
+            r = self._post_layout(client, token, {"blocos": []})
             self.assertIn(r.status_code, (302, 403))
         with self.app.app_context():
             self.assertEqual(self.module.Configuracao.query.filter(

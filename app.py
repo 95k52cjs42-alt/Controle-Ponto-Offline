@@ -3619,64 +3619,102 @@ def _indicadores_painel(hoje=None):
 
 
 # ----------------------------------------------------------------------------
-# Painel em blocos: cada usuário de gestão monta o seu (ordem, largura e quais
-# blocos). O layout fica em Configuracao("painel:<id>") como "bloco:largura,...".
+# Painel em janelas (Gridstack): cada usuário de gestão monta o seu — posição,
+# largura e altura de cada bloco numa grade de 12 colunas. O layout fica em
+# Configuracao("painel:<id>") como "cod.x.y.w.h,..." (cabe nos 255 caracteres).
 # ----------------------------------------------------------------------------
+@dataclass(frozen=True)
+class BlocoPainel:
+    titulo: str
+    icone: str
+    papel: str      # None (toda a gestão) | "rh" | "ti"
+    w: int          # largura padrão (colunas de 12)
+    h: int          # altura padrão (linhas da grade)
+    min_w: int
+    min_h: int
+    tipo: str       # "metrica" | "bloco"
+    codigo: str     # 2 letras usadas no layout salvo
+
+
 PAINEL_BLOCOS = {
-    # id: (título, ícone, papel exigido, largura padrão, largura mínima, tipo)
-    "colaboradores": ("Colaboradores", "bi-people-fill", None, 3, 2, "metrica"),
-    "conformes": ("Dias conformes", "bi-check-circle-fill", None, 3, 2, "metrica"),
-    "pendencias": ("Incompletos / faltas", "bi-exclamation-triangle-fill", None, 3, 2, "metrica"),
-    "solic_qtd": ("Solicitações pendentes", "bi-pencil-square", "rh", 3, 2, "metrica"),
-    "atalhos": ("Ações rápidas", "bi-lightning-charge", None, 12, 3, "bloco"),
-    "presenca": ("Presença nos últimos 7 dias", "bi-bar-chart", None, 8, 4, "bloco"),
-    "conformidade": ("Conformidade de pontos", "bi-pie-chart", None, 4, 3, "bloco"),
-    "atividades": ("Atividades recentes", "bi-clock-history", None, 7, 4, "bloco"),
-    "feriados": ("Feriados do mês", "bi-calendar-check", None, 5, 4, "bloco"),
-    "sem_entrada": ("Sem entrada hoje", "bi-person-exclamation", "rh", 4, 3, "bloco"),
-    "afastados": ("Afastados e próximos", "bi-calendar-x", "rh", 4, 3, "bloco"),
-    "alertas": ("Alertas CLT", "bi-shield-exclamation", None, 4, 3, "bloco"),
-    "solicitacoes": ("Solicitações para aprovar", "bi-inbox", "rh", 6, 4, "bloco"),
-    "extras": ("Horas extras do mês", "bi-graph-up-arrow", "rh", 6, 4, "bloco"),
+    "colaboradores": BlocoPainel("Colaboradores", "bi-people-fill", None, 3, 2, 2, 2, "metrica", "co"),
+    "conformes": BlocoPainel("Dias conformes", "bi-check-circle-fill", None, 3, 2, 2, 2, "metrica", "cf"),
+    "pendencias": BlocoPainel("Incompletos / faltas", "bi-exclamation-triangle-fill", None, 3, 2, 2, 2, "metrica", "pe"),
+    "solic_qtd": BlocoPainel("Solicitações pendentes", "bi-pencil-square", "rh", 3, 2, 2, 2, "metrica", "sq"),
+    "atalhos": BlocoPainel("Ações rápidas", "bi-lightning-charge", None, 12, 3, 2, 3, "bloco", "at"),
+    "presenca": BlocoPainel("Presença nos últimos 7 dias", "bi-bar-chart", None, 8, 5, 3, 3, "bloco", "pr"),
+    "conformidade": BlocoPainel("Conformidade de pontos", "bi-pie-chart", None, 4, 5, 3, 3, "bloco", "cd"),
+    "atividades": BlocoPainel("Atividades recentes", "bi-clock-history", None, 7, 7, 3, 3, "bloco", "av"),
+    "feriados": BlocoPainel("Feriados do mês", "bi-calendar-check", None, 5, 7, 3, 3, "bloco", "fe"),
+    "sem_entrada": BlocoPainel("Sem entrada hoje", "bi-person-exclamation", "rh", 4, 5, 3, 3, "bloco", "se"),
+    "afastados": BlocoPainel("Afastados e próximos", "bi-calendar-x", "rh", 4, 5, 3, 3, "bloco", "af"),
+    "alertas": BlocoPainel("Alertas CLT", "bi-shield-exclamation", None, 4, 5, 3, 3, "bloco", "al"),
+    "solicitacoes": BlocoPainel("Solicitações para aprovar", "bi-inbox", "rh", 6, 5, 3, 3, "bloco", "so"),
+    "extras": BlocoPainel("Horas extras do mês", "bi-graph-up-arrow", "rh", 6, 5, 3, 3, "bloco", "ex"),
 }
+PAINEL_POR_CODIGO = {b.codigo: bid for bid, b in PAINEL_BLOCOS.items()}
 PAINEL_PADRAO = [
     "colaboradores", "conformes", "pendencias", "solic_qtd", "atalhos",
     "presenca", "conformidade", "atividades", "feriados",
     "sem_entrada", "afastados", "alertas", "solicitacoes", "extras",
 ]
+PAINEL_COLUNAS = 12
+PAINEL_MAX_H = 20
+PAINEL_MAX_Y = 300
 
 
 def _painel_permitido(usuario, bloco_id):
-    meta = PAINEL_BLOCOS.get(bloco_id)
-    if not meta:
+    bloco = PAINEL_BLOCOS.get(bloco_id)
+    if not bloco:
         return False
-    papel = meta[2]
-    return papel is None or (papel == "rh" and usuario.is_rh) or (papel == "ti" and usuario.is_ti)
+    return bloco.papel is None or (bloco.papel == "rh" and usuario.is_rh) or (bloco.papel == "ti" and usuario.is_ti)
 
 
 def _painel_layout_padrao(usuario):
-    layout = [[b, PAINEL_BLOCOS[b][3]] for b in PAINEL_PADRAO if _painel_permitido(usuario, b)]
-    if not usuario.is_rh:
+    """Empilha os blocos padrão em linhas, da esquerda para a direita."""
+    layout, x, y, altura_linha = [], 0, 0, 0
+    for bid in PAINEL_PADRAO:
+        if not _painel_permitido(usuario, bid):
+            continue
+        b = PAINEL_BLOCOS[bid]
         # Sem o 4º cartão de RH, os 3 indicadores ocupam a linha inteira.
-        for item in layout:
-            if PAINEL_BLOCOS[item[0]][5] == "metrica":
-                item[1] = 4
-    return [tuple(i) for i in layout]
+        w = 4 if (b.tipo == "metrica" and not usuario.is_rh) else b.w
+        if x + w > PAINEL_COLUNAS:
+            x, y, altura_linha = 0, y + altura_linha, 0
+        layout.append({"id": bid, "x": x, "y": y, "w": w, "h": b.h})
+        x += w
+        altura_linha = max(altura_linha, b.h)
+    return layout
+
+
+def _int_ou(valor, padrao):
+    try:
+        return int(valor)
+    except (TypeError, ValueError):
+        return padrao
 
 
 def _painel_normalizar(itens, usuario):
-    """Valida a lista [(id, largura)]: só blocos conhecidos e permitidos, sem repetir."""
+    """Valida [{id, x, y, w, h}]: só blocos permitidos, sem repetir, dentro da grade.
+
+    Bloco sem posição (recém-adicionado) vai para baixo de tudo, com o tamanho padrão.
+    """
     vistos, layout = set(), []
-    for bloco_id, largura in itens:
-        if bloco_id in vistos or not _painel_permitido(usuario, bloco_id):
+    for item in itens:
+        bid = item.get("id")
+        if not isinstance(bid, str) or bid in vistos or not _painel_permitido(usuario, bid):
             continue
-        try:
-            largura = int(largura)
-        except (TypeError, ValueError):
-            largura = PAINEL_BLOCOS[bloco_id][3]
-        largura = max(PAINEL_BLOCOS[bloco_id][4], min(12, largura))
-        vistos.add(bloco_id)
-        layout.append((bloco_id, largura))
+        b = PAINEL_BLOCOS[bid]
+        w = max(b.min_w, min(PAINEL_COLUNAS, _int_ou(item.get("w"), b.w)))
+        h = max(b.min_h, min(PAINEL_MAX_H, _int_ou(item.get("h"), b.h)))
+        x = _int_ou(item.get("x"), None)
+        y = _int_ou(item.get("y"), None)
+        if x is None or y is None:
+            x, y = 0, max((i["y"] + i["h"] for i in layout), default=0)
+        x = max(0, min(PAINEL_COLUNAS - w, x))
+        y = max(0, min(PAINEL_MAX_Y, y))
+        vistos.add(bid)
+        layout.append({"id": bid, "x": x, "y": y, "w": w, "h": h})
     return layout
 
 
@@ -3684,7 +3722,14 @@ def _painel_layout(usuario):
     cfg = db.session.get(Configuracao, f"painel:{usuario.id}")
     if not cfg:
         return _painel_layout_padrao(usuario)
-    itens = [p.partition(":")[::2] for p in cfg.valor.split(",") if p]
+    itens = []
+    for parte in cfg.valor.split(","):
+        campos = parte.split(".")
+        if len(campos) == 5 and campos[0] in PAINEL_POR_CODIGO:
+            itens.append(dict(zip(("id", "x", "y", "w", "h"), [PAINEL_POR_CODIGO[campos[0]], *campos[1:]])))
+    if not itens and cfg.valor:
+        # Formato antigo ou corrompido: volta ao padrão em vez de mostrar vazio.
+        return _painel_layout_padrao(usuario)
     return _painel_normalizar(itens, usuario)
 
 
@@ -3695,7 +3740,7 @@ def _painel_salvar_layout(usuario, layout):
         if cfg:
             db.session.delete(cfg)
     else:
-        valor = ",".join(f"{b}:{w}" for b, w in layout)
+        valor = ",".join(f"{PAINEL_BLOCOS[i['id']].codigo}.{i['x']}.{i['y']}.{i['w']}.{i['h']}" for i in layout)
         if cfg:
             cfg.valor = valor
         else:
@@ -3788,12 +3833,11 @@ def _contexto_painel(usuario):
     agora = datetime.now(ZoneInfo("America/Sao_Paulo"))
     hoje = agora.date()
     layout = _painel_layout(usuario)
-    ids = {b for b, _ in layout}
+    ids = {i["id"] for i in layout}
     ctx = {
-        "blocos": [{"id": b, "w": w, "titulo": PAINEL_BLOCOS[b][0], "icone": PAINEL_BLOCOS[b][1],
-                    "min": PAINEL_BLOCOS[b][4], "tipo": PAINEL_BLOCOS[b][5]} for b, w in layout],
-        "catalogo": [{"id": b, "titulo": m[0], "icone": m[1]} for b, m in PAINEL_BLOCOS.items()
-                     if _painel_permitido(usuario, b)],
+        "blocos": [dict(i, bloco=PAINEL_BLOCOS[i["id"]]) for i in layout],
+        "catalogo": [{"id": bid, "titulo": b.titulo, "icone": b.icone} for bid, b in PAINEL_BLOCOS.items()
+                     if _painel_permitido(usuario, bid)],
         "data_hoje": hoje,
         "mes_referencia": MESES_PT[hoje.month - 1],
         "fmt_hhmm": fmt_hhmm,
@@ -3836,10 +3880,9 @@ def salvar_layout_painel():
     blocos = dados.get("blocos")
     if not isinstance(blocos, list) or len(blocos) > len(PAINEL_BLOCOS) * 2:
         return jsonify({"ok": False, "erro": "Layout inválido."}), 400
-    itens = [(str(b.get("id", "")), b.get("w")) for b in blocos if isinstance(b, dict)]
-    layout = _painel_normalizar(itens, current_user)
+    layout = _painel_normalizar([b for b in blocos if isinstance(b, dict)], current_user)
     _painel_salvar_layout(current_user, layout)
-    return jsonify({"ok": True, "blocos": [{"id": b, "w": w} for b, w in layout]})
+    return jsonify({"ok": True, "blocos": layout})
 
 
 @app.route("/admin")
