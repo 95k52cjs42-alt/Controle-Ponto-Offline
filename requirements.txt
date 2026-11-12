@@ -7,9 +7,9 @@ gunicorn
 psycopg2-binary
 tzdata
 resend
-dnspython
 pandas
 openpyxl
 python-dotenv
 holidays
 requests
+pywebpush

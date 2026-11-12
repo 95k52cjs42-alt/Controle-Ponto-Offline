@@ -41,13 +41,13 @@
                         <td>
                             {% set status_normalizado = (sol.status or '') | lower %}
                             {% if status_normalizado == 'pendente' %}
-                                <span class="status-badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3);">Pendente</span>
+                                <span class="status-badge tag-warn">Pendente</span>
                             {% elif status_normalizado == 'aprovada' %}
-                                <span class="status-badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3);">Aprovada</span>
+                                <span class="status-badge tag-ok">Aprovada</span>
                             {% elif status_normalizado == 'recusada' %}
-                                <span class="status-badge" style="background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3);">Recusada</span>
+                                <span class="status-badge tag-danger">Recusada</span>
                             {% else %}
-                                <span class="status-badge" style="background: rgba(148, 163, 184, 0.1); color: var(--text-muted); border: 1px solid var(--card-border);">{{ sol.status }}</span>
+                                <span class="status-badge tag-neutral">{{ sol.status }}</span>
                             {% endif %}
                         </td>
                         <td class="text-end">

@@ -1,0 +1,160 @@
+{% set campo_style = "background: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main);" %}
+{% set rotulo_ciencia = {'pendente': ('Pendente', 'tag-neutral'), 'ciente': ('Ciente', 'tag-ok'), 'contestado': ('Contestado', 'tag-danger')} %}
+
+<div class="mb-4 d-flex justify-content-between align-items-start flex-wrap gap-2">
+    <div>
+        <h3 class="fw-bold mb-1">Fechamento do mês</h3>
+        <p class="text-muted small m-0">Feche o mês para travar as edições do período, gerar o espelho de cada colaborador e exportar o consolidado para a contabilidade.</p>
+    </div>
+    {% if detalhe %}
+    <a href="{{ url_for('admin_fechamento') }}" class="btn-action-outline text-decoration-none"><i class="bi bi-arrow-left"></i> Todos os meses</a>
+    {% endif %}
+</div>
+
+{% if not detalhe %}
+<div class="dashboard-card">
+    <div class="table-responsive">
+        <table class="table table-custom align-middle small mb-0">
+            <thead>
+                <tr class="text-uppercase">
+                    <th class="ps-3">Mês</th>
+                    <th>Situação</th>
+                    <th>Fechado por</th>
+                    <th>Ciência dos colaboradores</th>
+                    <th class="text-end pe-3">Ações</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for m in meses %}
+                <tr>
+                    <td class="ps-3 fw-semibold">{{ m.rotulo }}</td>
+                    <td>
+                        {% if m.fechado %}<span class="badge rounded-pill tag-ok"><i class="bi bi-lock-fill me-1"></i>Fechado</span>
+                        {% elif m.fech %}<span class="badge rounded-pill tag-warn" title="{{ m.fech.motivo_reabertura }}"><i class="bi bi-unlock me-1"></i>Reaberto</span>
+                        {% else %}<span class="badge rounded-pill tag-neutral">Aberto</span>{% endif %}
+                    </td>
+                    <td style="color: var(--text-muted);">
+                        {% if m.fechado %}{{ m.fech.fechado_por_nome }} · {{ m.fech.fechado_em.strftime('%d/%m/%Y') }}{% else %}-{% endif %}
+                    </td>
+                    <td>
+                        {% if m.fechado %}
+                            {{ m.cientes }}/{{ m.total }} ciente(s)
+                            {% if m.contestados %}<span class="badge rounded-pill tag-danger ms-1">{{ m.contestados }} contestação(ões)</span>{% endif %}
+                        {% else %}-{% endif %}
+                    </td>
+                    <td class="text-end pe-3">
+                        <a href="{{ url_for('admin_fechamento', mes=m.chave) }}" class="btn btn-sm btn-outline-primary">
+                            {% if m.fechado %}<i class="bi bi-eye"></i> Ver{% else %}<i class="bi bi-clipboard-check"></i> Prévia e fechar{% endif %}
+                        </a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% else %}
+{% set d = detalhe %}
+<div class="dashboard-card mb-4">
+    <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
+        <div>
+            <h5 class="fw-bold mb-1 text-capitalize">{{ d.rotulo }}</h5>
+            {% if d.fechado %}
+                <span class="badge rounded-pill tag-ok"><i class="bi bi-lock-fill me-1"></i>Fechado por {{ d.fech.fechado_por_nome }} em {{ d.fech.fechado_em.strftime('%d/%m/%Y %H:%M') }}</span>
+                <p class="small text-muted mb-0 mt-2">Os valores abaixo são a fotografia do fechamento e não mudam mais. Edições de ponto, afastamentos e correções deste mês estão travadas.</p>
+            {% else %}
+                <span class="badge rounded-pill tag-neutral">Prévia (mês aberto)</span>
+                {% if d.fech and d.fech.motivo_reabertura %}
+                <p class="small mb-0 mt-2" style="color: var(--st-warn-fg);"><i class="bi bi-unlock me-1"></i>Reaberto por {{ d.fech.reaberto_por_nome }} em {{ d.fech.reaberto_em.strftime('%d/%m/%Y %H:%M') }}: {{ d.fech.motivo_reabertura }}</p>
+                {% endif %}
+            {% endif %}
+        </div>
+        <div class="d-flex gap-2 flex-wrap">
+            {% if d.fechado %}
+                <a href="{{ url_for('exportar_fechamento', ano=d.ano, mes=d.mes, format='excel') }}" class="btn btn-sm btn-outline-success"><i class="bi bi-file-earmark-excel me-1"></i> Excel</a>
+                <a href="{{ url_for('exportar_fechamento', ano=d.ano, mes=d.mes, format='csv') }}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-filetype-csv me-1"></i> CSV</a>
+                <button type="button" class="btn btn-sm btn-outline-warning" data-bs-toggle="collapse" data-bs-target="#reabrirMes"><i class="bi bi-unlock me-1"></i> Reabrir</button>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if d.fechado %}
+    <div class="collapse mt-3" id="reabrirMes">
+        <form method="POST" action="{{ url_for('reabrir_mes', ano=d.ano, mes=d.mes) }}" class="d-flex gap-2 flex-wrap align-items-end">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <div class="flex-grow-1">
+                <label for="motivoReabrir" class="form-label small fw-semibold text-muted">Motivo da reabertura (fica no log)</label>
+                <input type="text" class="form-control" id="motivoReabrir" name="motivo" minlength="5" maxlength="500" required placeholder="Ex.: corrigir atestado lançado errado" style="{{ campo_style }}">
+            </div>
+            <button type="submit" class="btn btn-warning"><i class="bi bi-unlock me-1"></i> Reabrir mês</button>
+        </form>
+    </div>
+    {% else %}
+    <div class="mt-3">
+        {% if d.incompletos or d.solicitacoes_pendentes %}
+        <div class="alert alert-warning small py-2 px-3 mb-3">
+            <i class="bi bi-exclamation-triangle me-1"></i> Antes de fechar, confira:
+            {% if d.incompletos %}<b>{{ d.incompletos }}</b> dia(s) com entrada sem saída{% endif %}{% if d.incompletos and d.solicitacoes_pendentes %} e {% endif %}
+            {% if d.solicitacoes_pendentes %}<b>{{ d.solicitacoes_pendentes }}</b> solicitação(ões) de correção pendente(s){% endif %}.
+            Depois de fechado, nada disso pode ser ajustado sem reabrir o mês.
+        </div>
+        {% endif %}
+        {% if d.pode_fechar %}
+        <form method="POST" action="{{ url_for('fechar_mes', ano=d.ano, mes=d.mes) }}"
+              onsubmit="return confirm('Fechar {{ d.rotulo }}? As edições deste mês serão travadas e os colaboradores serão avisados para dar ciência no espelho.');">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-primary"><i class="bi bi-lock me-1"></i> Fechar {{ d.rotulo }}</button>
+        </form>
+        {% else %}
+        <p class="small text-muted mb-0"><i class="bi bi-hourglass-split me-1"></i>Este mês ainda não terminou; o fechamento fica disponível a partir do dia 1º do mês seguinte.</p>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+
+<div class="dashboard-card">
+    <div class="table-responsive">
+        <table class="table table-custom align-middle small mb-0">
+            <thead>
+                <tr class="text-uppercase">
+                    <th class="ps-3">Colaborador</th>
+                    <th>Setor</th>
+                    <th class="text-center">Trabalhado</th>
+                    <th class="text-center">Extras 50%</th>
+                    <th class="text-center">Extras 100%</th>
+                    <th class="text-center">Atrasos</th>
+                    <th class="text-center">Faltas</th>
+                    <th class="text-center">Afastados</th>
+                    <th class="text-center">Incompletos</th>
+                    {% if d.fechado %}<th class="pe-3">Ciência</th>{% endif %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for l in d.linhas %}
+                {% set t = l.tot %}
+                <tr>
+                    <td class="ps-3 fw-semibold">{{ l.nome }}{% if l.contrato == 'PJ' %} <span class="badge rounded-pill tag-info ms-1">PJ</span>{% endif %}</td>
+                    <td style="color: var(--text-muted);">{{ l.setor or '-' }}</td>
+                    <td class="text-center">{{ fmt_hhmm(t.trabalhado) }}</td>
+                    <td class="text-center">{{ fmt_hhmm(t.extra_50) if t.extra_50 else '-' }}</td>
+                    <td class="text-center">{{ fmt_hhmm(t.extra_100) if t.extra_100 else '-' }}</td>
+                    <td class="text-center">{{ fmt_hhmm(t.atraso) if t.atraso else '-' }}</td>
+                    <td class="text-center">{% if t.faltas_dias %}<span class="badge rounded-pill tag-danger">{{ t.faltas_dias }}</span>{% else %}-{% endif %}</td>
+                    <td class="text-center">{{ l.afastados or '-' }}</td>
+                    <td class="text-center">{% if t.incompletos %}<span class="badge rounded-pill tag-warn">{{ t.incompletos }}</span>{% else %}-{% endif %}</td>
+                    {% if d.fechado %}
+                    {% set rc = rotulo_ciencia.get(l.espelho.ciencia_status, ('-', 'tag-neutral')) %}
+                    <td class="pe-3">
+                        <span class="badge rounded-pill {{ rc[1] }}">{{ rc[0] }}</span>
+                        {% if l.espelho.ciencia_em %}<span class="small text-muted ms-1">{{ l.espelho.ciencia_em.strftime('%d/%m %H:%M') }}</span>{% endif %}
+                        {% if l.espelho.comentario %}<div class="small mt-1" style="color: var(--st-danger-fg);"><i class="bi bi-chat-left-text me-1"></i>{{ l.espelho.comentario }}</div>{% endif %}
+                    </td>
+                    {% endif %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}

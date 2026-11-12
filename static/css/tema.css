@@ -1,0 +1,227 @@
+/*
+ * tema.css: camada compartilhada de cores por tema.
+ *
+ * Carregada DEPOIS do Bootstrap e dos <style> de cada página (admin, base,
+ * index, meu_historico, solicitar_correcao). Garante:
+ *   - cores de status legíveis nos dois temas (contraste WCAG >= 4.5);
+ *   - componentes do Bootstrap que não acompanham o tema escuro
+ *     (botões contornados, .text-primary etc.);
+ *   - cabeçalhos de tabela, selos e botão de fechar coerentes.
+ *
+ * Tema claro: [data-theme="light"] (ou sem atributo, como no index).
+ * Tema escuro: [data-theme="dark"].
+ */
+
+/* ------------------------------------------------------------------ */
+/* Tokens                                                              */
+/* ------------------------------------------------------------------ */
+:root,
+[data-theme="light"] {
+    --st-ok-fg: #047857;     --st-ok-bg: rgba(16, 185, 129, 0.12);  --st-ok-bd: rgba(16, 185, 129, 0.38);
+    --st-warn-fg: #b45309;   --st-warn-bg: rgba(245, 158, 11, 0.14); --st-warn-bd: rgba(217, 119, 6, 0.40);
+    --st-danger-fg: #b91c1c; --st-danger-bg: rgba(239, 68, 68, 0.10); --st-danger-bd: rgba(239, 68, 68, 0.38);
+    --st-info-fg: #1d4ed8;   --st-info-bg: rgba(59, 130, 246, 0.10); --st-info-bd: rgba(59, 130, 246, 0.38);
+    --st-neutral-fg: #475569; --st-neutral-bg: #eef2f7;            --st-neutral-bd: #dbe3ed;
+    --st-accent-fg: #1d4ed8;
+    --st-thead-bg: #f1f5f9;  --st-thead-fg: #475569;
+}
+
+/* Texto secundário mais legível no claro (#64748b ficava em 4.3:1 sobre cinza). */
+[data-theme="light"],
+:root:not([data-theme="dark"]) {
+    --text-muted: #526075;
+}
+
+[data-theme="dark"] {
+    --st-ok-fg: #34d399;     --st-ok-bg: rgba(16, 185, 129, 0.16);  --st-ok-bd: rgba(16, 185, 129, 0.32);
+    --st-warn-fg: #fbbf24;   --st-warn-bg: rgba(245, 158, 11, 0.15); --st-warn-bd: rgba(245, 158, 11, 0.32);
+    --st-danger-fg: #f87171; --st-danger-bg: rgba(239, 68, 68, 0.16); --st-danger-bd: rgba(239, 68, 68, 0.32);
+    --st-info-fg: #93c5fd;   --st-info-bg: rgba(59, 130, 246, 0.16); --st-info-bd: rgba(59, 130, 246, 0.34);
+    --st-neutral-fg: #cbd5e1; --st-neutral-bg: rgba(148, 163, 184, 0.12); --st-neutral-bd: rgba(148, 163, 184, 0.26);
+    --st-accent-fg: #60a5fa;
+    --st-thead-bg: rgba(15, 23, 42, 0.35); --st-thead-fg: #94a3b8;
+    /* Botão principal das telas de login (base.html): branco sobre #3b82f6 ficava em 3.7:1. */
+    --btn-bg: #2563eb;
+    --btn-hover: #1d4ed8;
+}
+
+/* ------------------------------------------------------------------ */
+/* Selos de status                                                     */
+/* ------------------------------------------------------------------ */
+.tag-ok, .tag-warn, .tag-danger, .tag-info, .tag-neutral {
+    border: 1px solid transparent;
+    font-weight: 600;
+}
+.tag-ok      { color: var(--st-ok-fg) !important;      background: var(--st-ok-bg) !important;      border-color: var(--st-ok-bd) !important; }
+.tag-warn    { color: var(--st-warn-fg) !important;    background: var(--st-warn-bg) !important;    border-color: var(--st-warn-bd) !important; }
+.tag-danger  { color: var(--st-danger-fg) !important;  background: var(--st-danger-bg) !important;  border-color: var(--st-danger-bd) !important; }
+.tag-info    { color: var(--st-info-fg) !important;    background: var(--st-info-bg) !important;    border-color: var(--st-info-bd) !important; }
+.tag-neutral { color: var(--st-neutral-fg) !important; background: var(--st-neutral-bg) !important; border-color: var(--st-neutral-bd) !important; }
+
+/* Selos que já existiam com cores fixas pensadas só para o escuro. */
+.badge-entrada { color: var(--st-ok-fg) !important; background: var(--st-ok-bg) !important; border: 1px solid var(--st-ok-bd) !important; }
+.badge-saida   { color: var(--st-danger-fg) !important; background: var(--st-danger-bg) !important; border: 1px solid var(--st-danger-bd) !important; }
+.status-pill.pendente { color: var(--st-warn-fg); background: var(--st-warn-bg); border-color: var(--st-warn-bd); }
+.status-pill.aprovada { color: var(--st-ok-fg); background: var(--st-ok-bg); border-color: var(--st-ok-bd); }
+.status-pill.recusada { color: var(--st-danger-fg); background: var(--st-danger-bg); border-color: var(--st-danger-bd); }
+.badge-role-admin { color: var(--st-accent-fg) !important; background: var(--st-info-bg) !important; border-color: var(--st-info-bd) !important; }
+
+/* ------------------------------------------------------------------ */
+/* Cabeçalhos de tabela                                                */
+/* ------------------------------------------------------------------ */
+.table-custom thead th,
+.table thead th {
+    background: var(--st-thead-bg) !important;
+    color: var(--st-thead-fg) !important;
+}
+
+/* ------------------------------------------------------------------ */
+/* Botões de ação do painel (contorno azul)                            */
+/* ------------------------------------------------------------------ */
+.btn-action-outline { color: var(--st-accent-fg); border-color: var(--st-accent-fg); }
+.btn-action-outline:hover,
+.btn-action-outline:focus-visible { background: #2563eb; border-color: #2563eb; color: #fff !important; }
+/* "Configurar" usa text-warning/border-warning: amarelo puro some no branco. */
+.btn-action-outline.text-warning { color: var(--st-warn-fg) !important; border-color: var(--st-warn-bd) !important; }
+.btn-action-outline.text-warning:hover { background: #d97706; border-color: #d97706 !important; color: #fff !important; }
+.btn-action-outline.text-primary { color: var(--st-accent-fg) !important; border-color: var(--st-accent-fg) !important; }
+.btn-action-outline.text-primary:hover { color: #fff !important; }
+
+/* ------------------------------------------------------------------ */
+/* Bootstrap no tema claro                                             */
+/* ------------------------------------------------------------------ */
+[data-theme="light"] .text-warning,
+:root:not([data-theme="dark"]) .text-warning { color: var(--st-warn-fg) !important; }
+[data-theme="light"] .btn-outline-warning,
+:root:not([data-theme="dark"]) .btn-outline-warning {
+    --bs-btn-color: #b45309; --bs-btn-border-color: #d97706;
+    --bs-btn-hover-bg: #d97706; --bs-btn-hover-border-color: #d97706; --bs-btn-hover-color: #fff;
+    --bs-btn-active-bg: #b45309; --bs-btn-active-border-color: #b45309; --bs-btn-active-color: #fff;
+}
+
+/* ------------------------------------------------------------------ */
+/* Bootstrap no tema escuro: as cores padrão foram feitas para branco  */
+/* ------------------------------------------------------------------ */
+[data-theme="dark"] .text-primary   { color: #60a5fa !important; }
+[data-theme="dark"] .text-secondary { color: #a3b1c6 !important; }
+[data-theme="dark"] .text-success   { color: #34d399 !important; }
+[data-theme="dark"] .text-danger:not(.btn-light):not(.bg-light):not(.bg-white) { color: #f87171 !important; }
+[data-theme="dark"] .btn-outline-primary {
+    --bs-btn-color: #60a5fa; --bs-btn-border-color: #3b82f6;
+    --bs-btn-hover-bg: #2563eb; --bs-btn-hover-border-color: #2563eb; --bs-btn-hover-color: #fff;
+    --bs-btn-active-bg: #2563eb; --bs-btn-active-border-color: #2563eb; --bs-btn-active-color: #fff;
+}
+[data-theme="dark"] .btn-outline-secondary {
+    --bs-btn-color: #cbd5e1; --bs-btn-border-color: #475569;
+    --bs-btn-hover-bg: #334155; --bs-btn-hover-border-color: #475569; --bs-btn-hover-color: #fff;
+    --bs-btn-active-bg: #334155; --bs-btn-active-border-color: #475569; --bs-btn-active-color: #fff;
+}
+[data-theme="dark"] .btn-outline-danger {
+    --bs-btn-color: #f87171; --bs-btn-border-color: #ef4444;
+    --bs-btn-hover-bg: #dc2626; --bs-btn-hover-border-color: #dc2626; --bs-btn-hover-color: #fff;
+    --bs-btn-active-bg: #dc2626; --bs-btn-active-border-color: #dc2626; --bs-btn-active-color: #fff;
+}
+[data-theme="dark"] .btn-outline-warning {
+    --bs-btn-color: #fbbf24; --bs-btn-border-color: #d97706;
+    --bs-btn-hover-bg: #d97706; --bs-btn-hover-border-color: #d97706; --bs-btn-hover-color: #111827;
+    --bs-btn-active-bg: #d97706; --bs-btn-active-border-color: #d97706; --bs-btn-active-color: #111827;
+}
+[data-theme="dark"] .btn-outline-success {
+    --bs-btn-color: #34d399; --bs-btn-border-color: #10b981;
+    --bs-btn-hover-bg: #059669; --bs-btn-hover-border-color: #059669; --bs-btn-hover-color: #fff;
+}
+
+/* "Ver no Histórico" e afins: texto vermelho sobre botão claro. */
+.btn-light.text-danger { color: #b91c1c !important; }
+
+/* ------------------------------------------------------------------ */
+/* Botão de fechar (X) dos modais: visível nos dois temas              */
+/* (toasts coloridos continuam com o X branco que já usam)             */
+/* ------------------------------------------------------------------ */
+[data-theme="light"] .modal .btn-close,
+:root:not([data-theme="dark"]) .modal .btn-close { filter: none !important; opacity: 0.7; }
+[data-theme="dark"] .modal .btn-close { filter: invert(1) grayscale(100%) brightness(200%) !important; opacity: 0.8; }
+.modal .btn-close:hover { opacity: 1; }
+
+/* ------------------------------------------------------------------ */
+/* Campos de formulário                                                */
+/* ------------------------------------------------------------------ */
+/* Controles nativos (calendário, relógio, listas, barras de rolagem) no tema certo. */
+[data-theme="light"], :root:not([data-theme="dark"]) { color-scheme: light; }
+[data-theme="dark"] { color-scheme: dark; }
+
+/* Campos sem estilo próprio: no escuro o Bootstrap os deixava brancos. */
+[data-theme="dark"] .form-control,
+[data-theme="dark"] .form-select,
+[data-theme="dark"] .input-group-text {
+    background-color: #0f172a;
+    color: #e2e8f0;
+    border-color: #334155;
+}
+[data-theme="dark"] .form-control:focus,
+[data-theme="dark"] .form-select:focus {
+    background-color: #0f172a;
+    color: #f8fafc;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 0.2rem rgba(59, 130, 246, 0.25);
+}
+[data-theme="dark"] .form-control:disabled,
+[data-theme="dark"] .form-select:disabled { background-color: #1e293b; color: #94a3b8; }
+
+/* Texto de exemplo (placeholder) legível. */
+.form-control::placeholder { color: #8391a7 !important; opacity: 1; }
+[data-theme="dark"] .form-control::placeholder { color: #7d8ba1 !important; }
+
+/* Setinha dos <select>: estilos inline com "background:" apagavam o ícone. */
+.form-select {
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%2364748b' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3e%3c/svg%3e") !important;
+    background-repeat: no-repeat !important;
+    background-position: right 0.75rem center !important;
+    background-size: 16px 12px !important;
+    padding-right: 2.25rem !important;
+}
+[data-theme="dark"] .form-select {
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%2394a3b8' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3e%3c/svg%3e") !important;
+}
+
+/* Rádios, caixas e interruptores desmarcados no escuro. */
+[data-theme="dark"] .form-check-input:not(:checked) {
+    background-color: #0f172a;
+    border-color: #52627a;
+}
+[data-theme="dark"] .form-switch .form-check-input:not(:checked) {
+    --bs-form-switch-bg: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='%2394a3b8'/%3e%3c/svg%3e");
+}
+
+/* ------------------------------------------------------------------ */
+/* Caixas de mensagem (alertas) no escuro                              */
+/* ------------------------------------------------------------------ */
+[data-theme="dark"] .alert-info    { --bs-alert-color: var(--st-info-fg);   --bs-alert-bg: var(--st-info-bg);   --bs-alert-border-color: var(--st-info-bd);   --bs-alert-link-color: #bfdbfe; }
+[data-theme="dark"] .alert-primary { --bs-alert-color: var(--st-info-fg);   --bs-alert-bg: var(--st-info-bg);   --bs-alert-border-color: var(--st-info-bd);   --bs-alert-link-color: #bfdbfe; }
+[data-theme="dark"] .alert-success { --bs-alert-color: var(--st-ok-fg);     --bs-alert-bg: var(--st-ok-bg);     --bs-alert-border-color: var(--st-ok-bd);     --bs-alert-link-color: #a7f3d0; }
+[data-theme="dark"] .alert-warning { --bs-alert-color: var(--st-warn-fg);   --bs-alert-bg: var(--st-warn-bg);   --bs-alert-border-color: var(--st-warn-bd);   --bs-alert-link-color: #fde68a; }
+[data-theme="dark"] .alert-danger  { --bs-alert-color: var(--st-danger-fg); --bs-alert-bg: var(--st-danger-bg); --bs-alert-border-color: var(--st-danger-bd); --bs-alert-link-color: #fecaca; }
+[data-theme="dark"] .alert .btn-close { filter: invert(1) grayscale(100%) brightness(200%); }
+
+/* ------------------------------------------------------------------ */
+/* Tabelas simples (.table sem estilo próprio) seguem o tema           */
+/* ------------------------------------------------------------------ */
+[data-theme="dark"] .table:not(.table-custom) {
+    --bs-table-bg: transparent;
+    --bs-table-color: var(--text-main, #e2e8f0);
+    --bs-table-border-color: rgba(148, 163, 184, 0.2);
+    color: var(--text-main, #e2e8f0);
+}
+
+/* Botões contornados do Bootstrap no claro: um tom mais escuro (4.3:1 -> > 4.5:1). */
+[data-theme="light"] .btn-outline-primary,
+:root:not([data-theme="dark"]) .btn-outline-primary {
+    --bs-btn-color: #1d4ed8; --bs-btn-border-color: #1d4ed8;
+    --bs-btn-hover-bg: #1d4ed8; --bs-btn-hover-border-color: #1d4ed8; --bs-btn-hover-color: #fff;
+    --bs-btn-active-bg: #1e40af; --bs-btn-active-border-color: #1e40af; --bs-btn-active-color: #fff;
+}
+[data-theme="light"] .btn-outline-secondary,
+:root:not([data-theme="dark"]) .btn-outline-secondary {
+    --bs-btn-color: #475569; --bs-btn-border-color: #94a3b8;
+    --bs-btn-hover-bg: #475569; --bs-btn-hover-border-color: #475569; --bs-btn-hover-color: #fff;
+}

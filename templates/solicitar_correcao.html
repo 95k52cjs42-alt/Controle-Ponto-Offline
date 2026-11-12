@@ -144,10 +144,7 @@
         }
 
         /* Ajuste do ícone do calendário/hora no modo escuro */
-        [data-theme="dark"] input[type="date"]::-webkit-calendar-picker-indicator,
-        [data-theme="dark"] input[type="time"]::-webkit-calendar-picker-indicator {
-            filter: invert(1);
-        }
+        /* Ícones de data/hora: color-scheme do tema.css já os deixa claros no escuro. */
 
         .btn-submit {
             background-color: var(--btn-submit-bg);
@@ -224,6 +221,7 @@
             border-color: rgba(239, 68, 68, 0.28);
         }
     </style>
+    <link href="{{ url_for('static', filename='css/tema.css') }}" rel="stylesheet">
 </head>
 <body>
 
@@ -265,9 +263,24 @@
                 <i class="bi bi-pencil-square me-1"></i> Nova Solicitação
             </h6>
 
+            {% if correcao_aberta %}
+            <div class="alert alert-info py-2 px-3 small border-0 mb-4">
+                <i class="bi bi-calendar-check me-1"></i>
+                Você pode pedir correção de dias deste mês até <b>{{ correcao_limite.strftime('%d/%m/%Y') }}</b>
+                (o mês fecha em {{ correcao_fechamento.strftime('%d/%m/%Y') }}).
+            </div>
+            {% else %}
+            <div class="alert alert-warning py-2 px-3 small border-0 mb-4">
+                <i class="bi bi-lock me-1"></i>
+                O prazo para pedir correções deste mês terminou em <b>{{ correcao_limite.strftime('%d/%m/%Y') }}</b>.
+                Se precisar ajustar algum ponto, fale com o RH.
+            </div>
+            {% endif %}
+
             <form action="{{ url_for('solicitar_correcao') }}" method="POST">
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-                
+                <fieldset {% if not correcao_aberta %}disabled{% endif %}>
+
                 <div class="row g-3">
                     <!-- Data do Ponto -->
                     <div class="col-md-6 mb-2">
@@ -277,7 +290,8 @@
                                id="campo-data-ponto"
                                class="form-control" 
                                value="{{ request.args.get('data', '') }}" 
-                               max="{{ data_hoje }}" 
+                               min="{{ data_minima }}"
+                               max="{{ data_hoje }}"
                                required>
                     </div>
 
@@ -321,6 +335,7 @@
                 <button type="submit" class="btn btn-submit w-100 py-3 rounded-4 fw-semibold shadow-sm mt-2">
                     <i class="bi bi-send me-1"></i> Enviar Solicitação
                 </button>
+                </fieldset>
             </form>
         </div>
 

@@ -3,6 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="manifest" href="{{ url_for('manifesto_pwa') }}">
+    <meta name="theme-color" content="#0f172a">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Ponto">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/apple-touch-icon.png') }}">
     <title>4Lab Orbit | App Ponto</title>
     
     <!-- Google Fonts: Outfit -->
@@ -286,7 +292,7 @@
         .btn-encerrar-sessao {
             background: transparent;
             border: none;
-            color: #adb5bd;
+            color: var(--text-muted);
             font-size: 0.875rem;
             font-weight: 600;
             cursor: pointer;
@@ -453,8 +459,8 @@
         /* ---- TEMA 3 · Outline Pop (borda colorida grossa) ---- */
         .btn-t3 {
             background: transparent !important;
-            color: #059669 !important;
-            border: 3px solid #059669;
+            color: #047857 !important;
+            border: 3px solid #047857;
             font-family: 'Outfit', sans-serif;
             font-weight: 800;
             letter-spacing: 0.5px;
@@ -596,6 +602,7 @@
         }
 
     </style>
+    <link href="{{ url_for('static', filename='css/tema.css') }}" rel="stylesheet">
 </head>
 <body class="d-flex align-items-center justify-content-center py-5">
 
@@ -686,6 +693,14 @@
                                     </a>
                                 </li>
                                 {% endfor %}
+                                {% if notificacoes_usuario|selectattr('db_id')|list %}
+                                <li class="border-top mt-1 pt-1">
+                                    <form method="POST" action="{{ url_for('marcar_notificacoes_lidas') }}" class="m-0">
+                                        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                                        <button type="submit" class="dropdown-item rounded-3 small text-center py-2"><i class="bi bi-check2-all me-1"></i> Marcar avisos como lidos</button>
+                                    </form>
+                                </li>
+                                {% endif %}
                             {% else %}
                                 <li class="text-center text-muted py-3 small">Nenhuma pendência ✨</li>
                             {% endif %}
@@ -719,6 +734,7 @@
                                 </li>
                                 <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#modalFotoPerfil"><i class="bi bi-camera"></i> Alterar Foto</a></li>
                                 <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#modalAlterarSenha"><i class="bi bi-key"></i> Alterar Senha</a></li>
+                                <li><a class="dropdown-item" href="#" id="itemLembretes" data-bs-toggle="modal" data-bs-target="#modalLembretes"><i class="bi bi-bell"></i> <span id="itemLembretesTexto">Lembretes de ponto</span></a></li>
                                 <li><hr class="dropdown-divider"></li>
                                 <li>
                                     <form action="{{ url_for('logout') }}" method="POST" class="m-0 p-0">
@@ -734,9 +750,43 @@
                 </div>
             </div>
 
+            {% for esp in espelhos_pendentes %}
+            <a href="{{ url_for('ver_espelho', ano=esp.fechamento.ano, mes=esp.fechamento.mes) }}" class="mb-3 p-3 rounded-4 d-flex align-items-center gap-3 tag-warn text-decoration-none" style="border-width: 1px; border-style: solid;">
+                <i class="bi bi-journal-check fs-4"></i>
+                <div class="small flex-grow-1">
+                    <b>Espelho de {{ esp.fechamento.rotulo }}</b><br>
+                    <span>O mês foi fechado. Confira e confirme a ciência.</span>
+                </div>
+                <i class="bi bi-chevron-right"></i>
+            </a>
+            {% endfor %}
+
+            {% if afastamento_hoje %}
+            <div class="mb-3 p-3 rounded-4 d-flex align-items-center gap-3 tag-info" style="border-width: 1px; border-style: solid;">
+                <i class="bi bi-calendar-x fs-4"></i>
+                <div class="small">
+                    <b>Hoje: {{ afastamento_hoje.rotulo }}</b><br>
+                    <span>Até {{ afastamento_hoje.data_fim.strftime('%d/%m/%Y') }}. Você não precisa bater ponto e não receberá lembretes nesses dias.</span>
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Convite para ativar os lembretes (some ao ativar ou dispensar) -->
+            <div class="d-none mb-3" id="cardConviteLembretes">
+            <div class="p-3 rounded-4 d-flex align-items-center gap-3" style="background: var(--st-info-bg); border: 1px solid var(--st-info-bd);">
+                <i class="bi bi-bell fs-4" style="color: var(--st-info-fg);"></i>
+                <div class="flex-grow-1 small" style="color: var(--text-dark);">
+                    <b>Ative os lembretes de ponto</b><br>
+                    <span style="color: var(--text-muted);">Aviso antes da entrada e da saída, e se esquecer de bater.</span>
+                </div>
+                <button type="button" class="btn btn-sm fw-semibold" id="btnConviteAtivar" style="background:var(--btn-main-bg);color:var(--btn-main-text);">Ativar</button>
+                <button type="button" class="btn-close" id="btnConviteFechar" aria-label="Dispensar"></button>
+            </div>
+            </div>
+
             <!-- Relógio Suave -->
             <div class="clock-box text-center mb-4">
-                <span class="small fw-semibold text-uppercase" id="data-extenso" style="color: #adb5bd !important;">--</span>
+                <span class="small fw-semibold text-uppercase" id="data-extenso" style="color: var(--text-muted) !important;">--</span>
                 <div class="clock-display my-1" id="clock">00:00:00</div>
                 <div class="mt-2 small fw-bold" style="color: var(--text-muted, #6c757d);">
                     <i class="bi bi-clock-history me-1 text-primary"></i> ÚLTIMO: {{ ultimo_ponto|default('--:--') }}
@@ -781,9 +831,9 @@
                     </div>
                 </div>
 
-                {% if current_user and current_user.is_authenticated and current_user.is_admin %}
+                {% if current_user and current_user.is_authenticated and current_user.tem_gestao %}
                     <a href="{{ url_for('admin_panel') }}" class="btn btn-admin-outline text-decoration-none text-center mt-1 small">
-                        <i class="bi bi-shield-lock me-1"></i> Painel Administrativo
+                        <i class="bi bi-shield-lock me-1"></i> Painel de Gestão
                     </a>
                 {% endif %}
 
@@ -814,7 +864,7 @@
                             {% if current_user and current_user.is_authenticated and current_user.foto_url %}
                                 <img src="{{ current_user.foto_url }}" class="rounded-circle object-fit-cover mb-2" style="width:90px;height:90px;border:2px solid var(--btn-main-bg);">
                             {% else %}
-                                <div class="rounded-circle d-inline-flex align-items-center justify-content-center fw-bold fs-2 text-white mb-2" style="width:90px;height:90px;background:var(--btn-main-bg);">
+                                <div class="rounded-circle d-inline-flex align-items-center justify-content-center fw-bold fs-2 mb-2" style="width:90px;height:90px;background:var(--btn-main-bg);color:var(--btn-main-text);">
                                     {{ current_user.nome[0]|upper if current_user and current_user.is_authenticated and current_user.nome else 'U' }}
                                 </div>
                             {% endif %}
@@ -824,7 +874,7 @@
                     </div>
                     <div class="modal-footer border-top py-2">
                         <button type="button" class="btn btn-light btn-sm" data-bs-dismiss="modal">Cancelar</button>
-                        <button type="submit" class="btn btn-primary btn-sm" style="background:var(--btn-main-bg);border-color:var(--btn-main-bg);"><i class="bi bi-upload me-1"></i> Enviar Foto</button>
+                        <button type="submit" class="btn btn-primary btn-sm" style="background:var(--btn-main-bg);border-color:var(--btn-main-bg);color:var(--btn-main-text);"><i class="bi bi-upload me-1"></i> Enviar Foto</button>
                     </div>
                 </form>
             </div>
@@ -860,7 +910,7 @@
                     </div>
                     <div class="modal-footer border-top py-2">
                         <button type="button" class="btn btn-light btn-sm" data-bs-dismiss="modal">Cancelar</button>
-                        <button type="submit" class="btn btn-primary btn-sm" style="background:var(--btn-main-bg);border-color:var(--btn-main-bg);"><i class="bi bi-check-lg me-1"></i> Salvar</button>
+                        <button type="submit" class="btn btn-primary btn-sm" style="background:var(--btn-main-bg);border-color:var(--btn-main-bg);color:var(--btn-main-text);"><i class="bi bi-check-lg me-1"></i> Salvar</button>
                     </div>
                 </form>
             </div>
@@ -893,7 +943,7 @@
         // 1.5 LÓGICA DO SALDO EM TEMPO REAL (fuso America/Sao_Paulo)
         (function () {
             const pontos = {{ pontos_today|tojson }};
-            const cargaMin = {{ carga_diaria_min|default(480) }};
+            const cargaMin = {{ jornada.carga_diaria_min if jornada else 480 }};
             const tz = 'America/Sao_Paulo';
 
             function parseHora(h) {
@@ -970,10 +1020,10 @@
                 if (!sEl) return;
                 if (c.saldoSeg >= 0) {
                     sEl.textContent = '+' + fmtHMS(c.saldoSeg) + 'h';
-                    sEl.style.color = '#198754';
+                    sEl.style.color = 'var(--st-ok-fg)';
                 } else {
                     sEl.textContent = fmtHMS(c.saldoSeg) + 'h';
-                    sEl.style.color = '#dc3545';
+                    sEl.style.color = 'var(--st-danger-fg)';
                 }
             }
 
@@ -1042,6 +1092,161 @@
             });
         });
 
+
+        // 5. LEMBRETES DE PONTO (notificações push)
+        (function () {
+            const CSRF = document.querySelector('input[name="_csrf_token"]')?.value || '';
+            const suportado = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+            const ehIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+            const instalado = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+            const el = (id) => document.getElementById(id);
+            let registro = null, servidor = { ativo: false, chave: null };
+
+            const b64ParaBytes = (b64) => {
+                const pad = '='.repeat((4 - (b64.length % 4)) % 4);
+                const bruto = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
+                return Uint8Array.from([...bruto].map((c) => c.charCodeAt(0)));
+            };
+            const post = (url, corpo) => fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF },
+                body: JSON.stringify(corpo || {}),
+            });
+
+            function mostrar(id, sim) { const e = el(id); if (e) e.classList.toggle('d-none', !sim); }
+            function status(texto, classe) {
+                const s = el('lembretesStatus');
+                if (!s) return;
+                s.textContent = texto;
+                s.className = 'badge rounded-pill ' + classe;
+                const item = el('itemLembretesTexto');
+                if (item) item.textContent = texto === 'Ativados neste aparelho' ? 'Lembretes: ativados' : 'Lembretes de ponto';
+            }
+            function mensagem(texto) { const m = el('lembretesMensagem'); if (m) { m.textContent = texto || ''; mostrar('lembretesMensagem', !!texto); } }
+
+            async function inscricaoAtual() {
+                return registro ? registro.pushManager.getSubscription() : null;
+            }
+
+            async function atualizar() {
+                ['btnLembretesAtivar', 'btnLembretesDesativar', 'btnLembretesTeste', 'lembretesIos', 'lembretesBloqueado'].forEach((id) => mostrar(id, false));
+                if (!suportado) {
+                    if (ehIOS && !instalado) { status('Instale o app para ativar', 'tag-warn'); mostrar('lembretesIos', true); }
+                    else status('Não suportado neste navegador', 'tag-neutral');
+                    return false;
+                }
+                if (!servidor.ativo) { status('Indisponível no momento', 'tag-neutral'); return false; }
+                if (Notification.permission === 'denied') { status('Bloqueado pelo navegador', 'tag-danger'); mostrar('lembretesBloqueado', true); return false; }
+                const insc = await inscricaoAtual();
+                if (insc) {
+                    status('Ativados neste aparelho', 'tag-ok');
+                    mostrar('btnLembretesDesativar', true); mostrar('btnLembretesTeste', true);
+                    return true;
+                }
+                status('Desativados', 'tag-neutral');
+                mostrar('btnLembretesAtivar', true);
+                return false;
+            }
+
+            async function ativar() {
+                mensagem('');
+                try {
+                    const permissao = await Notification.requestPermission();
+                    if (permissao !== 'granted') { await atualizar(); return; }
+                    let insc = await inscricaoAtual();
+                    if (!insc) {
+                        insc = await registro.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ParaBytes(servidor.chave) });
+                    }
+                    const r = await post('/api/push/inscrever', insc.toJSON());
+                    if (!r.ok) throw new Error('servidor recusou a inscrição');
+                    mensagem('Pronto! Você vai receber os lembretes neste aparelho.');
+                    try { localStorage.setItem('lembretesConvite', 'ok'); } catch (_) {}
+                    mostrar('cardConviteLembretes', false);
+                } catch (e) {
+                    mensagem('Não foi possível ativar: ' + e.message);
+                }
+                await atualizar();
+            }
+
+            async function desativar() {
+                const insc = await inscricaoAtual();
+                if (insc) {
+                    await post('/api/push/cancelar', { endpoint: insc.endpoint });
+                    await insc.unsubscribe();
+                }
+                mensagem('Lembretes desativados neste aparelho.');
+                await atualizar();
+            }
+
+            async function testar() {
+                const r = await post('/api/push/teste');
+                const d = r.ok ? await r.json() : { enviados: 0 };
+                mensagem(d.enviados ? 'Teste enviado. Ele deve aparecer em alguns segundos.' : 'Nenhum aparelho recebeu o teste. Tente desativar e ativar de novo.');
+            }
+
+            document.addEventListener('DOMContentLoaded', async () => {
+                el('btnLembretesAtivar')?.addEventListener('click', ativar);
+                el('btnLembretesDesativar')?.addEventListener('click', desativar);
+                el('btnLembretesTeste')?.addEventListener('click', testar);
+                el('btnConviteAtivar')?.addEventListener('click', () => bootstrap.Modal.getOrCreateInstance(el('modalLembretes')).show());
+                el('btnConviteFechar')?.addEventListener('click', () => {
+                    try { localStorage.setItem('lembretesConvite', 'dispensado'); } catch (_) {}
+                    mostrar('cardConviteLembretes', false);
+                });
+                el('modalLembretes')?.addEventListener('show.bs.modal', () => { mensagem(''); atualizar(); });
+
+                try {
+                    const r = await fetch('/api/push/chave');
+                    if (r.ok) servidor = await r.json();
+                } catch (_) {}
+                if (suportado) {
+                    try { registro = await navigator.serviceWorker.register('/sw.js', { scope: '/' }); } catch (_) {}
+                }
+                const ativo = await atualizar();
+                let visto = null;
+                try { visto = localStorage.getItem('lembretesConvite'); } catch (_) {}
+                const podeOferecer = (suportado && servidor.ativo && Notification.permission !== 'denied') || (ehIOS && !instalado);
+                if (!ativo && !visto && podeOferecer) mostrar('cardConviteLembretes', true);
+            });
+        })();
+
     </script>
+
+    <!-- Modal: Lembretes de ponto (push) -->
+    <div class="modal fade" id="modalLembretes" tabindex="-1" aria-labelledby="modalLembretesLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content" style="background: var(--pastel-card); color: var(--text-dark); border: 1px solid var(--border-soft); border-radius: var(--radius-md);">
+                <div class="modal-header" style="border-color: var(--border-soft);">
+                    <h5 class="modal-title fw-bold" id="modalLembretesLabel"><i class="bi bi-bell me-2"></i>Lembretes de ponto</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="small mb-3" style="color: var(--text-muted);">
+                        Receba avisos neste aparelho alguns minutos antes da entrada e da saída, e se esquecer de bater a entrada.
+                    </p>
+                    <div class="d-flex align-items-center gap-2 mb-3">
+                        <span class="badge rounded-pill tag-neutral" id="lembretesStatus">Verificando…</span>
+                    </div>
+                    <div class="alert alert-info small py-2 px-3 d-none" id="lembretesIos">
+                        <i class="bi bi-phone me-1"></i>
+                        No iPhone, os lembretes só funcionam com o app instalado: toque em <b>Compartilhar</b>
+                        <i class="bi bi-box-arrow-up"></i> e depois em <b>Adicionar à Tela de Início</b>. Abra o app pelo ícone e ative aqui.
+                    </div>
+                    <div class="alert alert-warning small py-2 px-3 d-none" id="lembretesBloqueado">
+                        <i class="bi bi-slash-circle me-1"></i>
+                        As notificações estão bloqueadas neste navegador. Libere nas configurações do site (ícone de cadeado ao lado do endereço) e tente de novo.
+                    </div>
+                    <div class="small mb-0 d-none" id="lembretesMensagem" style="color: var(--text-muted);"></div>
+                </div>
+                <div class="modal-footer d-flex justify-content-between" style="border-color: var(--border-soft);">
+                    <button type="button" class="btn btn-light btn-sm d-none" id="btnLembretesTeste"><i class="bi bi-send me-1"></i> Enviar teste</button>
+                    <div class="d-flex gap-2 ms-auto">
+                        <button type="button" class="btn btn-light btn-sm d-none" id="btnLembretesDesativar">Desativar</button>
+                        <button type="button" class="btn btn-primary btn-sm d-none" id="btnLembretesAtivar" style="background:var(--btn-main-bg);border-color:var(--btn-main-bg);color:var(--btn-main-text);"><i class="bi bi-bell me-1"></i> Ativar lembretes</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 </body>
 </html>

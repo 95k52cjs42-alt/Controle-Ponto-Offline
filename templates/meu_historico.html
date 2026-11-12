@@ -154,9 +154,7 @@
             box-shadow: 0 0 0 4px var(--blue-glow);
         }
 
-        [data-theme="dark"] input[type="date"]::-webkit-calendar-picker-indicator {
-            filter: invert(1);
-        }
+        /* Ícones de data/hora: color-scheme do tema.css já os deixa claros no escuro. */
 
         /* Tabela Customizada (Garantindo compatibilidade total no Dark Mode) */
         .table-custom {
@@ -220,18 +218,23 @@
             transform: translateY(-2px);
         }
     </style>
+    <link href="{{ url_for('static', filename='css/tema.css') }}" rel="stylesheet">
 </head>
 <body class="py-5">
 
     <div class="container fade-in-up" style="max-width: 900px;">
         
         <!-- Cabeçalho -->
-        <div class="d-flex justify-content-between align-items-center mb-4">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-4">
             <div>
                 <h3 class="fw-bold m-0">Meu Histórico de Pontos</h3>
                 <span class="text-muted small">Consulte e solicite correções dos seus registros</span>
             </div>
             <div class="d-flex align-items-center gap-2">
+                <a href="{{ url_for('meus_espelhos') }}" class="nav-btn" title="Espelhos dos meses fechados">
+                    <i class="bi bi-journal-check"></i> Espelhos
+                </a>
+
                 <!-- DROPDOWN DE EXPORTAÇÃO -->
                 <div class="dropdown">
                     <button class="nav-btn dropdown-toggle" type="button" id="dropdownExport" data-bs-toggle="dropdown" aria-expanded="false">
@@ -331,6 +334,37 @@
             </form>
         </div>
 
+        <!-- Resumo do período (mesmo cálculo da folha de ponto) -->
+        <div class="custom-card p-3 mb-4">
+            <div class="row g-3 text-center small">
+                <div class="col-6 col-md">
+                    <div class="text-muted">Trabalhado</div>
+                    <div class="fw-bold fs-5">{{ fmt_hhmm(totais.trabalhado) }}h</div>
+                </div>
+                {% if not is_pj %}
+                <div class="col-6 col-md">
+                    <div class="text-muted">Extras {{ totais.extra_util_pct }}%</div>
+                    <div class="fw-bold fs-5" style="color: var(--st-ok-fg);">{{ fmt_hhmm(totais.extra_50) }}h</div>
+                </div>
+                <div class="col-6 col-md">
+                    <div class="text-muted">Extras {{ totais.extra_descanso_pct }}%</div>
+                    <div class="fw-bold fs-5" style="color: var(--st-ok-fg);">{{ fmt_hhmm(totais.extra_100) }}h</div>
+                </div>
+                <div class="col-6 col-md">
+                    <div class="text-muted">Atrasos</div>
+                    <div class="fw-bold fs-5" style="color: var(--st-danger-fg);">{{ fmt_hhmm(totais.atraso) }}h</div>
+                </div>
+                <div class="col-6 col-md">
+                    <div class="text-muted">Faltas</div>
+                    <div class="fw-bold fs-5" style="color: var(--st-danger-fg);">{{ totais.faltas_dias }}</div>
+                </div>
+                {% endif %}
+            </div>
+            {% if not is_pj %}
+            <div class="text-muted text-center mt-2" style="font-size: 0.75rem;">Variações de até 10 min no dia não contam (tolerância da CLT). Extras e atrasos não se compensam.</div>
+            {% endif %}
+        </div>
+
         <!-- Tabela -->
         <div class="table-responsive">
             <table class="table table-custom align-middle">
@@ -359,31 +393,38 @@
                                             <strong>{{ p.tipo }}:</strong> {{ p.hora }}
                                         </span>
                                     {% else %}
-                                        <span class="text-muted small italic">Nenhum ponto batido</span>
+                                        <span class="text-muted small italic">{% if item.afastamento %}{{ item.afastamento }} (dia abonado){% else %}Nenhum ponto batido{% endif %}</span>
                                     {% endfor %}
                                 </div>
                             </td>
 
                             <!-- Saldo do Dia (minutos faltantes/excedentes) -->
                             <td class="text-center" style="white-space: nowrap;">
-                                {% if item.saldo.tem_registro %}
+                                {% if item.afastamento and not item.saldo.tem_registro %}
+                                    <span class="badge rounded-pill px-2 py-1 small fw-bold tag-info"><i class="bi bi-calendar-x me-1"></i>{{ item.afastamento }}</span>
+                                {% elif item.falta %}
+                                    <span class="badge rounded-pill px-2 py-1 small fw-bold tag-danger">Falta</span>
+                                {% elif item.saldo.tem_registro %}
                                     <div class="d-flex flex-column align-items-center gap-1">
                                         <span class="small fw-semibold" style="color: var(--text-muted);">
                                             {{ item.saldo.total_trabalhado_fmt }}
                                         </span>
                                         {% if item.saldo.is_excedente %}
-                                            <span class="badge rounded-pill px-2 py-1 small fw-bold" style="background: rgba(16, 185, 129, 0.15); color: #34d399;">
+                                            <span class="badge rounded-pill px-2 py-1 small fw-bold tag-ok">
                                                 <i class="bi bi-arrow-up-short"></i>{{ item.saldo.diferenca_fmt }}
                                             </span>
                                         {% elif item.saldo.is_faltante %}
-                                            <span class="badge rounded-pill px-2 py-1 small fw-bold" style="background: rgba(239, 68, 68, 0.2); color: #fca5a5;">
+                                            <span class="badge rounded-pill px-2 py-1 small fw-bold tag-danger">
                                                 <i class="bi bi-arrow-down-short"></i>{{ item.saldo.diferenca_fmt }}
                                             </span>
                                         {% else %}
-                                            <span class="badge rounded-pill px-2 py-1 small fw-bold" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd;">
-                                                <i class="bi bi-dash"></i> 0min
+                                            <span class="badge rounded-pill px-2 py-1 small fw-bold tag-info">
+                                                <i class="bi bi-dash"></i> {{ item.saldo.neutro }}
                                             </span>
                                         {% endif %}
+                                        {% for alerta in item.alertas %}
+                                            <span class="badge rounded-pill px-2 py-1 small tag-warn" style="font-size: 0.68rem;"><i class="bi bi-exclamation-triangle me-1"></i>{{ alerta }}</span>
+                                        {% endfor %}
                                     </div>
                                 {% else %}
                                     <span class="text-muted small">--</span>

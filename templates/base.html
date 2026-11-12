@@ -3,6 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="manifest" href="{{ url_for('manifesto_pwa') }}">
+    <meta name="theme-color" content="#0f172a">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Ponto">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/apple-touch-icon.png') }}">
     <title>{% block title %}4Lab Orbit | App Ponto{% endblock %}</title>
 
     <!-- Google Fonts & Icons -->
@@ -209,6 +215,7 @@
             border-color: var(--border-color) !important;
         }
     </style>
+    <link href="{{ url_for('static', filename='css/tema.css') }}" rel="stylesheet">
 </head>
 <body>
 
@@ -242,10 +249,10 @@
                                 </a>
                             </li>
 
-                            {% if current_user.is_admin %}
+                            {% if current_user.tem_gestao %}
                                 <li class="nav-item">
                                     <a href="{{ url_for('admin_panel') }}" class="nav-link-custom text-primary fw-semibold">
-                                        <i class="bi bi-shield-lock me-1"></i> Painel Admin
+                                        <i class="bi bi-shield-lock me-1"></i> Painel de Gestão
                                     </a>
                                 </li>
                             {% endif %}
@@ -278,6 +285,14 @@
                                                 </a>
                                             </li>
                                         {% endfor %}
+                                        {% if notificacoes_usuario|selectattr('db_id')|list %}
+                                        <li>
+                                            <form method="POST" action="{{ url_for('marcar_notificacoes_lidas') }}" class="m-0">
+                                                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                                                <button type="submit" class="dropdown-item small text-center py-2"><i class="bi bi-check2-all me-1"></i> Marcar avisos como lidos</button>
+                                            </form>
+                                        </li>
+                                        {% endif %}
                                     {% else %}
                                         <li><span class="dropdown-item text-muted text-center small py-3">Nenhuma notificação no momento</span></li>
                                     {% endif %}

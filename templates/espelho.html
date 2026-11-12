@@ -1,0 +1,93 @@
+{% extends 'base.html' %}
+
+{% block title %}Espelho de ponto | 4Lab Orbit{% endblock %}
+
+{% block content %}
+{% set t = c.totais %}
+<div class="row justify-content-center py-4">
+    <div class="col-xl-10">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+            <div>
+                <h3 class="fw-bold mb-1">Espelho de ponto · {{ e.fechamento.rotulo|capitalize }}</h3>
+                <p class="text-muted small mb-0">Fechado pelo RH em {{ e.fechamento.fechado_em.strftime('%d/%m/%Y') }} · código {{ e.hash[:12] }}</p>
+            </div>
+            <div class="d-flex gap-2">
+                <a href="{{ url_for('meus_espelhos') }}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-arrow-left me-1"></i> Meus espelhos</a>
+                <a href="{{ url_for('espelho_pdf', ano=e.fechamento.ano, mes=e.fechamento.mes) }}" class="btn btn-sm btn-outline-primary"><i class="bi bi-file-earmark-pdf me-1"></i> Baixar PDF</a>
+            </div>
+        </div>
+
+        <!-- Ciência -->
+        <div class="pastel-card p-3 mb-3">
+            {% if e.ciencia_status == 'ciente' %}
+                <div class="d-flex align-items-center gap-2" style="color: var(--st-ok-fg);">
+                    <i class="bi bi-check-circle-fill fs-5"></i>
+                    <span class="small">Você deu ciência neste espelho em <b>{{ e.ciencia_em.strftime('%d/%m/%Y às %H:%M') }}</b>.</span>
+                </div>
+            {% else %}
+                {% if e.ciencia_status == 'contestado' %}
+                <div class="alert alert-danger small py-2 px-3">
+                    <i class="bi bi-chat-left-text me-1"></i> Você contestou em {{ e.ciencia_em.strftime('%d/%m/%Y às %H:%M') }}: “{{ e.comentario }}”. O RH vai verificar; se o espelho for corrigido, você receberá um novo aviso.
+                </div>
+                {% endif %}
+                <p class="small mb-2">Confira os dias e os totais abaixo. Se estiver tudo certo, confirme a ciência; se algo estiver errado, conte ao RH.</p>
+                <div class="d-flex gap-2 flex-wrap">
+                    <form method="POST" action="{{ url_for('dar_ciencia_espelho', ano=e.fechamento.ano, mes=e.fechamento.mes) }}">
+                        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="acao" value="ciente">
+                        <button type="submit" class="btn btn-success btn-sm"><i class="bi bi-check-lg me-1"></i> Estou ciente</button>
+                    </form>
+                    <button type="button" class="btn btn-outline-danger btn-sm" data-bs-toggle="collapse" data-bs-target="#contestar"><i class="bi bi-flag me-1"></i> Contestar</button>
+                </div>
+                <div class="collapse mt-2" id="contestar">
+                    <form method="POST" action="{{ url_for('dar_ciencia_espelho', ano=e.fechamento.ano, mes=e.fechamento.mes) }}">
+                        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="acao" value="contestar">
+                        <textarea name="comentario" class="form-control mb-2" rows="2" minlength="5" maxlength="1000" required placeholder="Ex.: no dia 14 eu saí às 18h, não às 17h"></textarea>
+                        <button type="submit" class="btn btn-danger btn-sm">Enviar contestação</button>
+                    </form>
+                </div>
+            {% endif %}
+        </div>
+
+        <!-- Totais -->
+        <div class="pastel-card p-3 mb-3">
+            <div class="row g-3 text-center small">
+                <div class="col-6 col-md"><div class="text-muted">Trabalhado</div><div class="fw-bold fs-5">{{ fmt_hhmm(t.trabalhado) }}h</div></div>
+                {% if not c.is_pj %}
+                <div class="col-6 col-md"><div class="text-muted">Extras {{ t.extra_util_pct }}%</div><div class="fw-bold fs-5" style="color: var(--st-ok-fg);">{{ fmt_hhmm(t.extra_50) }}h</div></div>
+                <div class="col-6 col-md"><div class="text-muted">Extras {{ t.extra_descanso_pct }}%</div><div class="fw-bold fs-5" style="color: var(--st-ok-fg);">{{ fmt_hhmm(t.extra_100) }}h</div></div>
+                <div class="col-6 col-md"><div class="text-muted">Atrasos</div><div class="fw-bold fs-5" style="color: var(--st-danger-fg);">{{ fmt_hhmm(t.atraso) }}h</div></div>
+                <div class="col-6 col-md"><div class="text-muted">Faltas</div><div class="fw-bold fs-5" style="color: var(--st-danger-fg);">{{ t.faltas_dias }}</div></div>
+                <div class="col-6 col-md"><div class="text-muted">Afastados</div><div class="fw-bold fs-5">{{ c.total_dias_afastados }}</div></div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Dias -->
+        <div class="pastel-card p-2">
+            <div class="table-responsive">
+                <table class="table table-sm align-middle small mb-0" style="color: var(--text-main);">
+                    <thead>
+                        <tr>{% for col in c.tabela_linhas[0] %}<th class="text-center">{{ col }}</th>{% endfor %}</tr>
+                    </thead>
+                    <tbody>
+                        {% for linha in c.tabela_linhas[1:] %}
+                        {% set situacao = linha[-1] %}
+                        <tr>
+                            {% for cel in linha[:-1] %}<td class="text-center">{{ cel }}</td>{% endfor %}
+                            <td class="text-center">
+                                {% if situacao in ('FALTA', 'INCOMPLETO') %}<span class="badge rounded-pill tag-danger">{{ situacao }}</span>
+                                {% elif situacao and situacao.isupper() and situacao != '-' %}<span class="badge rounded-pill tag-info">{{ situacao }}</span>
+                                {% elif 'acima' in situacao or 'ntervalo' in situacao or 'Interjornada' in situacao %}<span class="badge rounded-pill tag-warn">{{ situacao }}</span>
+                                {% else %}{{ situacao }}{% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

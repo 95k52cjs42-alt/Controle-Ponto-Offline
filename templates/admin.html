@@ -23,7 +23,7 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
 
     <!-- Chart.js para os gráficos -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 
     <style>
         /* TEMA ESCURO (Padrão) */
@@ -542,6 +542,7 @@
             border-color: var(--blue-accent) !important;
         }
     </style>
+    <link href="{{ url_for('static', filename='css/tema.css') }}" rel="stylesheet">
 </head>
 <body>
 
@@ -565,28 +566,44 @@
                     <i class="bi bi-house-door"></i> Início
                 </a>
 
-                <button type="button" class="nav-btn active js-admin-nav" data-admin-view="painel" data-target-url="{{ url_for('admin_panel') }}">
-                    <i class="bi bi-shield-check"></i> Painel Admin
+                <button type="button" class="nav-btn js-admin-nav{% if initial_view == 'painel' %} active{% endif %}" data-admin-view="painel" data-target-url="{{ url_for('admin_panel') }}">
+                    <i class="bi bi-shield-check"></i> Painel
                 </button>
 
-                <button type="button" class="nav-btn js-admin-nav" data-admin-view="usuarios" data-target-url="{{ url_for('admin_usuarios') }}">
+                <button type="button" class="nav-btn js-admin-nav{% if initial_view == 'usuarios' %} active{% endif %}" data-admin-view="usuarios" data-target-url="{{ url_for('admin_usuarios') }}">
                     <i class="bi bi-people"></i> Usuários
                 </button>
 
-                <button type="button" class="nav-btn js-admin-nav" data-admin-view="historico" data-target-url="{{ url_for('admin_historico') }}" title="Histórico Geral">
+                {% if current_user.is_rh %}
+                <button type="button" class="nav-btn js-admin-nav{% if initial_view == 'historico' %} active{% endif %}" data-admin-view="historico" data-target-url="{{ url_for('admin_historico') }}" title="Histórico Geral">
                     <i class="bi bi-clock-history text-primary"></i> Histórico Geral
                 </button>
 
-                <button type="button" class="nav-btn js-admin-nav position-relative" data-admin-view="solicitacoes" data-target-url="{{ url_for('admin_solicitacoes') }}" title="Ver Ajustes">
+                <button type="button" class="nav-btn js-admin-nav position-relative{% if initial_view == 'solicitacoes' %} active{% endif %}" data-admin-view="solicitacoes" data-target-url="{{ url_for('admin_solicitacoes') }}" title="Ver Ajustes">
                     <i class="bi bi-pencil-square"></i> Solicitações
                     {% if total_solicitacoes_pendentes and total_solicitacoes_pendentes > 0 %}
                         <span class="notification-dot"></span>
                     {% endif %}
                 </button>
 
-                <button type="button" class="nav-btn js-admin-nav" data-admin-view="logs" data-target-url="{{ url_for('admin_logs') }}" title="Logs">
+                <button type="button" class="nav-btn js-admin-nav{% if initial_view == 'afastamentos' %} active{% endif %}" data-admin-view="afastamentos" data-target-url="{{ url_for('admin_afastamentos') }}" title="Férias, atestados e folgas">
+                    <i class="bi bi-calendar-x"></i> Afastamentos
+                </button>
+
+                <button type="button" class="nav-btn js-admin-nav{% if initial_view == 'fechamento' %} active{% endif %}" data-admin-view="fechamento" data-target-url="{{ url_for('admin_fechamento') }}" title="Fechamento do mês e espelhos">
+                    <i class="bi bi-lock"></i> Fechamento
+                </button>
+                {% endif %}
+
+                {% if current_user.is_ti %}
+                <button type="button" class="nav-btn js-admin-nav{% if initial_view == 'logs' %} active{% endif %}" data-admin-view="logs" data-target-url="{{ url_for('admin_logs') }}" title="Logs">
                     <i class="bi bi-journal-text"></i> Logs
                 </button>
+
+                <button type="button" class="nav-btn js-admin-nav{% if initial_view == 'parametros' %} active{% endif %}" data-admin-view="parametros" data-target-url="{{ url_for('admin_parametros') }}" title="Parâmetros de jornada">
+                    <i class="bi bi-sliders"></i> Parâmetros
+                </button>
+                {% endif %}
 
                 <div class="user-pill">
                     <div class="avatar-circle">
@@ -626,6 +643,9 @@
         {% endwith %}
 
         <div id="adminContent">
+        {% if conteudo_inicial %}
+        {{ conteudo_inicial }}
+        {% else %}
             <!-- Cabeçalho do Dashboard -->
             <div class="mb-4">
                 <h3 class="fw-bold mb-1">Visão Geral & Indicadores</h3>
@@ -651,7 +671,7 @@
                         <i class="bi bi-check-circle-fill"></i>
                     </div>
                     <div>
-                        <span class="text-muted small d-block">Horas Certas (Conformes)</span>
+                        <span class="text-muted small d-block">Dias conformes ({{ mes_referencia|default('mês') }})</span>
                         <h4 class="fw-bold mb-0 text-success">{{ conformes|default(0) }}</h4>
                     </div>
                 </div>
@@ -662,8 +682,9 @@
                         <i class="bi bi-exclamation-triangle-fill"></i>
                     </div>
                     <div>
-                        <span class="text-muted small d-block">Incompletas / Erros</span>
-                        <h4 class="fw-bold mb-0 text-danger">{{ incompletos|default(0) }}</h4>
+                        <span class="text-muted small d-block">Incompletos / faltas ({{ mes_referencia|default('mês') }})</span>
+                        <h4 class="fw-bold mb-0 text-danger">{{ (incompletos|default(0)) + (faltas|default(0)) }}
+                            <span class="small fw-normal text-muted ms-1">{{ incompletos|default(0) }} incompleto(s) · {{ faltas|default(0) }} falta(s)</span></h4>
                     </div>
                 </div>
             </div>
@@ -673,6 +694,7 @@
         <div class="row mb-4">
             <div class="col-12">
                 <div class="d-flex flex-wrap gap-3">
+                    {% if current_user.is_rh %}
                     <button class="quick-action-btn" data-bs-toggle="modal" data-bs-target="#modalExportarPonto">
                         <i class="bi bi-file-earmark-spreadsheet"></i> 
                         Exportar Relatório
@@ -698,10 +720,19 @@
                         Novo Colaborador
                     </button>
 
+                    {% endif %}
+
+                    {% if current_user.is_ti %}
+                    <a href="{{ url_for('admin_parametros') }}#setores" class="quick-action-btn text-decoration-none">
+                        <i class="bi bi-building"></i>
+                        Setores
+                    </a>
+
                     <button type="button" class="quick-action-btn" data-bs-toggle="modal" data-bs-target="#modalInformarFeriado">
                         <i class="bi bi-calendar-event"></i> 
                         Informar Feriado
                     </button>
+                    {% endif %}
                 </div>
             </div>
         </div>
@@ -710,21 +741,19 @@
         <div class="row g-4 mb-4">
             <div class="col-lg-8">
                 <div class="dashboard-card h-100">
-                    <h5 class="fw-bold mb-3">Fluxo de Registros da Semana</h5>
-                    <div style="height: 280px; position: relative;">
-                        <div id="weeklyChartContainer" data-labels='{{ labels_semana|default([])|tojson }}' data-values='{{ dados_semana|default([])|tojson }}'>
-                            <canvas id="weeklyChart"></canvas>
-                        </div>
+                    <h5 class="fw-bold mb-1">Presença nos últimos 7 dias</h5>
+                    <p class="text-muted small mb-3">Colaboradores que registraram ponto em cada dia.</p>
+                    <div style="height: 260px; position: relative;" id="weeklyChartContainer" data-labels='{{ labels_semana|default([])|tojson }}' data-values='{{ dados_semana|default([])|tojson }}'>
+                        <canvas id="weeklyChart"></canvas>
                     </div>
                 </div>
             </div>
             <div class="col-lg-4">
                 <div class="dashboard-card h-100">
-                    <h5 class="fw-bold mb-3">Conformidade de Pontos</h5>
-                    <div style="height: 280px; position: relative; display: flex; align-items: center; justify-content: center;">
-                        <div id="complianceChartContainer" data-conformes="{{ conformes|default(0) }}" data-incompletos="{{ incompletos|default(0) }}">
-                            <canvas id="complianceChart"></canvas>
-                        </div>
+                    <h5 class="fw-bold mb-1">Conformidade de pontos</h5>
+                    <p class="text-muted small mb-3">Dias de trabalho de {{ mes_referencia|default('este mês') }} até ontem.</p>
+                    <div style="height: 260px; position: relative;" id="complianceChartContainer" data-conformes="{{ conformes|default(0) }}" data-incompletos="{{ incompletos|default(0) }}" data-faltas="{{ faltas|default(0) }}">
+                        <canvas id="complianceChart"></canvas>
                     </div>
                 </div>
             </div>
@@ -736,7 +765,7 @@
                 <div class="dashboard-card">
                     <div class="d-flex justify-content-between align-items-center mb-3">
                         <h5 class="fw-bold m-0">Atividades Recentes</h5>
-                        <a href="{{ url_for('admin_historico') }}" class="text-primary small text-decoration-none">Ver histórico geral</a>
+                        {% if current_user.is_rh %}<a href="{{ url_for('admin_historico') }}" class="text-primary small text-decoration-none">Ver histórico geral</a>{% endif %}
                     </div>
 
                     <div class="activity-list">
@@ -769,6 +798,7 @@
                 <div class="dashboard-card mb-4">
                     <div class="d-flex justify-content-between align-items-center mb-3">
                         <h5 class="fw-bold m-0"><i class="bi bi-calendar-check text-primary me-2"></i>Feriados do Mês</h5>
+{% if current_user.is_ti %}
                         <div class="d-flex gap-2">
                             <form method="POST" action="{{ url_for('sincronizar_feriados') }}" class="d-inline" title="Adicionar automaticamente os feriados nacionais e da região configurada">
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
@@ -780,6 +810,7 @@
                                 <i class="bi bi-plus-lg"></i> Novo
                             </button>
                         </div>
+{% endif %}
                     </div>
                     <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
                         <span class="badge rounded-pill py-1 px-3" id="regiaoBadge" style="background: rgba(37, 99, 235, 0.15); color: var(--text-main); border: 1px solid var(--card-border); font-weight: 500;">
@@ -790,6 +821,7 @@
                                 {% else %}{{ regiao_uf }}{% if regiao_cidade %} – {{ regiao_cidade }}{% endif %}{% if regiao_fonte == 'manual' %} (manual){% endif %}{% endif %}
                             </span>
                         </span>
+{% if current_user.is_ti %}
                         <button type="button" class="btn btn-sm btn-outline-secondary rounded-3" id="btnDetectarRegiao" title="Detectar a região pela sua localização atual">
                             <i class="bi bi-crosshair"></i> Detectar região
                         </button>
@@ -803,6 +835,7 @@
                             </select>
                             <button type="submit" class="btn btn-sm btn-outline-secondary rounded-3" title="Aplicar região"><i class="bi bi-check-lg"></i></button>
                         </form>
+{% endif %}
                         <input type="hidden" id="regiaoFonte" value="{{ regiao_fonte }}">
                     </div>
                     {% if feriados %}
@@ -814,12 +847,14 @@
                                         <span class="fw-medium" style="color: var(--text-main);">{{ f.descricao }}</span>
                                     </div>
                                     {% if f.id %}
+{% if current_user.is_ti %}
                                     <form method="POST" action="{{ url_for('excluir_feriado', id=f.id) }}" class="d-inline" onsubmit="return confirm('Deseja remover este feriado?');">
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                                         <button type="submit" class="btn btn-link text-danger p-0 border-0 shadow-none ms-2" title="Excluir feriado">
                                             <i class="bi bi-trash"></i>
                                         </button>
                                     </form>
+{% endif %}
                                     {% endif %}
                                 </div>
                             {% endfor %}
@@ -856,6 +891,7 @@
                     </div>
                 </div>
             </div>
+        {% endif %}
         </div>
         </div>
 
@@ -865,56 +901,6 @@
     <!-- MODAIS POSICIONADOS CORRETAMENTE NA RAIZ -->
     <!-- ========================================== -->
 
-    <!-- Modal: Gerenciar Departamentos -->
-    <div class="modal fade" id="modalDepartamentos" tabindex="-1" aria-hidden="true">
-        <div class="modal-dialog modal-dialog-centered">
-            <div class="modal-content" style="background: var(--card-bg); border: 1px solid var(--card-border); color: var(--text-main); border-radius: var(--radius-main); padding: 1rem;">
-                <div class="modal-header border-0 pb-1">
-                    <h5 class="modal-title fw-bold d-flex align-items-center gap-2" style="font-size: 1.2rem;">
-                        <i class="bi bi-building text-info"></i> Gestão de Departamentos
-                    </h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                
-                <div class="modal-body pt-2">
-                    <form method="POST" action="{{ url_for('gerenciar_departamentos') }}" class="mb-4">
-                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-                        <label class="form-label text-muted small fw-semibold">Novo Departamento / Setor</label>
-                        <div class="input-group">
-                            <input type="text" name="nome" class="form-control" placeholder="Ex: Tecnologia, Recursos Humanos" required style="background: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main); border-radius: var(--radius-btn) 0 0 var(--radius-btn);">
-                            <button type="submit" class="btn btn-primary px-3" style="border-radius: 0 var(--radius-btn) var(--radius-btn) 0;">
-                                <i class="bi bi-plus-lg me-1"></i> Criar
-                            </button>
-                        </div>
-                    </form>
-
-                    <h6 class="fw-bold small text-muted text-uppercase mb-2">Departamentos Existentes</h6>
-                    <div style="max-height: 220px; overflow-y: auto;" class="d-flex flex-column gap-2">
-                        {% if departamentos %}
-                            {% for d in departamentos %}
-                                <div class="d-flex align-items-center justify-content-between p-2 rounded-3" style="background: var(--bg-dark); border: 1px solid var(--card-border);">
-                                    <div>
-                                        <span class="fw-semibold text-main small d-block"><i class="bi bi-building me-1 text-info"></i>{{ d.nome }}</span>
-                                        <span class="text-muted" style="font-size: 0.75rem;">{{ d.usuarios|length }} colaborador(es)</span>
-                                    </div>
-                                    <form action="{{ url_for('excluir_departamento', id=d.id) }}" method="POST" onsubmit="return confirm('Deseja excluir este departamento?');">
-                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-                                        <button type="submit" class="btn btn-sm text-danger border-0 bg-transparent p-1" title="Excluir">
-                                            <i class="bi bi-trash"></i>
-                                        </button>
-                                    </form>
-                                </div>
-                            {% endfor %}
-                        {% else %}
-                            <p class="text-muted small text-center py-3 mb-0">Nenhum departamento cadastrado.</p>
-                        {% endif %}
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Modal: Enviar Lembrete Geral -->
     <div class="modal fade" id="modalLembrete" tabindex="-1" aria-hidden="true">
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content" style="background: var(--card-bg); border: 1px solid var(--card-border); color: var(--text-main); border-radius: var(--radius-main); padding: 1rem;">
@@ -1055,6 +1041,51 @@
                                 <option value="CLT">CLT</option>
                                 <option value="PJ">PJ</option>
                             </select>
+                        </div>
+                        <div class="mb-3">
+                            <label for="novoDepartamento" class="form-label text-muted small">Departamento / Setor</label>
+                            <select name="departamento_id" id="novoDepartamento" class="form-select" style="background: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main);">
+                                <option value="none">Nenhum Departamento</option>
+                                {% for d in departamentos %}
+                                    <option value="{{ d.id }}">{{ d.nome }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+
+                        <label class="form-label text-muted small d-block">Acesso inicial</label>
+                        <div class="d-flex gap-3 mb-3 small">
+                            <div class="form-check">
+                                <input class="form-check-input js-modo-acesso" type="radio" name="modo_acesso" id="modoSenha" value="senha" checked>
+                                <label class="form-check-label" for="modoSenha">Definir senha agora</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input js-modo-acesso" type="radio" name="modo_acesso" id="modoConvite" value="convite">
+                                <label class="form-check-label" for="modoConvite">Enviar convite por e-mail</label>
+                            </div>
+                        </div>
+
+                        <div id="novoSenhaCampos">
+                            <div class="mb-2">
+                                <label for="novoSenha" class="form-label text-muted small">Senha inicial</label>
+                                <div class="input-group">
+                                    <input type="password" class="form-control js-senha-politica" id="novoSenha" name="senha" autocomplete="new-password" required data-confirmar="#novoSenhaConfirmar" style="background: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main);">
+                                    <button type="button" class="btn btn-outline-secondary" data-pw-toggle="#novoSenha,#novoSenhaConfirmar" title="Mostrar/ocultar"><i class="bi bi-eye"></i></button>
+                                    <button type="button" class="btn btn-outline-secondary" data-pw-gerar="#novoSenha,#novoSenhaConfirmar" title="Gerar senha forte"><i class="bi bi-magic"></i> Gerar</button>
+                                    <button type="button" class="btn btn-outline-secondary" data-pw-copiar="#novoSenha" title="Copiar senha"><i class="bi bi-clipboard"></i></button>
+                                </div>
+                            </div>
+                            <div class="mb-2">
+                                <label for="novoSenhaConfirmar" class="form-label text-muted small">Confirmar senha</label>
+                                <input type="password" class="form-control" id="novoSenhaConfirmar" name="confirmar_senha" autocomplete="new-password" required style="background: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main);">
+                            </div>
+                            <div class="form-text small text-muted mb-2">Mínimo 8 caracteres, com maiúscula, minúscula, número e um de @ # *.</div>
+                            <div class="form-check form-switch small">
+                                <input class="form-check-input" type="checkbox" name="exigir_troca" id="novoExigirTroca" checked>
+                                <label class="form-check-label" for="novoExigirTroca">Exigir troca de senha no primeiro acesso</label>
+                            </div>
+                        </div>
+                        <div id="novoConviteInfo" class="alert alert-info py-2 px-3 small mb-0 border-0 d-none" style="background: rgba(37, 99, 235, 0.15); color: var(--text-main);">
+                            <i class="bi bi-envelope me-1 text-primary"></i> O colaborador recebe um link por e-mail para definir a própria senha. Requer o envio de e-mails (Resend) configurado.
                         </div>
                     </div>
                     <div class="modal-footer border-0">
@@ -1237,6 +1268,17 @@
             updateIcon(newTheme);
         });
 
+        // Liga os scripts de cada aba depois que o conteúdo dela está na página
+        // (vale tanto para troca de aba via fetch quanto para a 1ª carga).
+        function aposCarregarView(viewName, contentWrap) {
+            setActiveNav(viewName);
+            if (typeof window.bindAdminSearch === 'function') window.bindAdminSearch();
+            if (viewName === 'painel') initCharts();
+            if (viewName === 'painel') initRegionControls();
+            if (viewName === 'historico') initHistoricoFadeAlert(contentWrap);
+            if (viewName === 'parametros') initParametros();
+        }
+
         function setActiveNav(viewName) {
             document.querySelectorAll('.js-admin-nav').forEach(button => {
                 const isActive = button.dataset.adminView === viewName;
@@ -1318,11 +1360,7 @@
                 if (url !== _currentUrl) {
                     history.pushState({}, '', url);
                 }
-                setActiveNav(viewName);
-                if (typeof window.bindAdminSearch === 'function') window.bindAdminSearch();
-                if (viewName === 'painel') initCharts();
-                if (viewName === 'painel') initRegionControls();
-                if (viewName === 'historico') initHistoricoFadeAlert(contentWrap);
+                aposCarregarView(viewName, contentWrap);
             } catch (err) {
                 if (err.name !== 'AbortError') {
                     console.error('Error loading fragment:', err);
@@ -1345,10 +1383,16 @@
         // painel renderizado, entao carrega o fragmento da aba correta
         // (o backend informa qual e via variavel Jinja "initial_view").
         // ---------------------------------------------------------------
-        const _validAdminViews = ['painel', 'usuarios', 'historico', 'solicitacoes', 'logs'];
+        const _validAdminViews = ['painel', 'usuarios', 'historico', 'solicitacoes', 'logs', 'parametros', 'afastamentos', 'fechamento'];
         (function carregarViewInicial() {
             const initialView = {{ initial_view|tojson }};
-            if (_validAdminViews.includes(initialView) && initialView !== 'painel') {
+            const veioDoServidor = {{ 'true' if conteudo_inicial else 'false' }};
+            if (veioDoServidor) {
+                // Espera o resto da página: funções como initParametros são
+                // definidas em blocos <script> mais abaixo.
+                document.addEventListener('DOMContentLoaded', () =>
+                    aposCarregarView(initialView, document.getElementById('adminContent')));
+            } else if (_validAdminViews.includes(initialView) && initialView !== 'painel') {
                 loadAdminView(initialView, window.location.pathname + window.location.search);
             }
         })();
@@ -1522,70 +1566,85 @@
 
         let weeklyChart, complianceChart;
 
+        // Cores lidas do tema atual (claro/escuro) a cada desenho.
+        function corTema(nome, padrao) {
+            const v = getComputedStyle(document.documentElement).getPropertyValue(nome).trim();
+            return v || padrao;
+        }
+
         function initCharts() {
             // Destruir gráficos existentes se houver para evitar sobreposição
-            if (weeklyChart) weeklyChart.destroy();
-            if (complianceChart) complianceChart.destroy();
+            if (weeklyChart) { weeklyChart.destroy(); weeklyChart = null; }
+            if (complianceChart) { complianceChart.destroy(); complianceChart = null; }
+            if (typeof Chart === 'undefined') return;
+            Chart.defaults.font.family = "'Outfit', sans-serif";
 
+            const texto = corTema('--text-muted', '#94a3b8');
+            const grade = 'rgba(148, 163, 184, 0.15)';
             const weeklyCont = document.getElementById('weeklyChartContainer');
             const complianceCont = document.getElementById('complianceChartContainer');
 
             if (weeklyCont && document.getElementById('weeklyChart')) {
-                const labels = JSON.parse(weeklyCont.dataset.labels || '["Seg", "Ter", "Qua", "Qui", "Sex"]');
-                const values = JSON.parse(weeklyCont.dataset.values || '[0, 0, 0, 0, 0]');
-                
-                const ctxWeekly = document.getElementById('weeklyChart').getContext('2d');
-                weeklyChart = new Chart(ctxWeekly, {
-                    type: 'line',
+                const labels = JSON.parse(weeklyCont.dataset.labels || '[]');
+                const values = JSON.parse(weeklyCont.dataset.values || '[]');
+                weeklyChart = new Chart(document.getElementById('weeklyChart').getContext('2d'), {
+                    type: 'bar',
                     data: {
                         labels: labels,
                         datasets: [{
-                            label: 'Registros Realizados',
+                            label: 'Colaboradores com ponto',
                             data: values,
-                            borderColor: '#2563eb',
-                            backgroundColor: 'rgba(37, 99, 235, 0.1)',
-                            borderWidth: 3,
-                            fill: true,
-                            tension: 0.4
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: { legend: { display: false } },
-                        scales: {
-                            y: { beginAtZero: true, grid: { color: 'rgba(148, 163, 184, 0.1)' }, ticks: { color: '#94a3b8', stepSize: 1 } },
-                            x: { grid: { display: false }, ticks: { color: '#94a3b8' } }
-                        }
-                    }
-                });
-            }
-
-            if (complianceCont && document.getElementById('complianceChart')) {
-                const conformes = parseInt(complianceCont.dataset.conformes || '0');
-                const incompletos = parseInt(complianceCont.dataset.incompletos || '0');
-                
-                const ctxCompliance = document.getElementById('complianceChart').getContext('2d');
-                complianceChart = new Chart(ctxCompliance, {
-                    type: 'doughnut',
-                    data: {
-                        labels: ['Horas Certas', 'Incompletas / Faltas'],
-                        datasets: [{
-                            data: (conformes === 0 && incompletos === 0) ? [1, 0] : [conformes, incompletos],
-                            backgroundColor: (conformes === 0 && incompletos === 0) ? ['#e2e8f0', '#ef4444'] : ['#10b981', '#ef4444'],
-                            borderWidth: 0
+                            backgroundColor: 'rgba(37, 99, 235, 0.75)',
+                            hoverBackgroundColor: '#2563eb',
+                            borderRadius: 8,
+                            maxBarThickness: 42,
                         }]
                     },
                     options: {
                         responsive: true,
                         maintainAspectRatio: false,
                         plugins: {
-                            legend: { position: 'bottom', labels: { color: '#94a3b8', boxWidth: 12 } }
+                            legend: { display: false },
+                            tooltip: { callbacks: { label: (c) => `${c.parsed.y} colaborador(es)` } },
+                        },
+                        scales: {
+                            y: { beginAtZero: true, grid: { color: grade }, ticks: { color: texto, precision: 0 } },
+                            x: { grid: { display: false }, ticks: { color: texto } }
+                        }
+                    }
+                });
+            }
+
+            if (complianceCont && document.getElementById('complianceChart')) {
+                const conformes = parseInt(complianceCont.dataset.conformes || '0', 10);
+                const incompletos = parseInt(complianceCont.dataset.incompletos || '0', 10);
+                const faltas = parseInt(complianceCont.dataset.faltas || '0', 10);
+                const vazio = conformes + incompletos + faltas === 0;
+                complianceChart = new Chart(document.getElementById('complianceChart').getContext('2d'), {
+                    type: 'doughnut',
+                    data: {
+                        labels: vazio ? ['Sem dias fechados ainda'] : ['Conformes', 'Incompletos', 'Faltas'],
+                        datasets: [{
+                            data: vazio ? [1] : [conformes, incompletos, faltas],
+                            backgroundColor: vazio ? [grade] : ['#10b981', '#f59e0b', '#ef4444'],
+                            borderWidth: 0
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        cutout: '62%',
+                        plugins: {
+                            legend: { position: 'bottom', labels: { color: texto, boxWidth: 12 } },
+                            tooltip: { enabled: !vazio },
                         }
                     }
                 });
             }
         }
+
+        // Redesenha com as cores do novo tema.
+        document.getElementById('themeToggleBtn')?.addEventListener('click', () => setTimeout(initCharts, 0));
 
         // Inicialização na carga da página
         document.addEventListener('DOMContentLoaded', initCharts);
@@ -1769,6 +1828,8 @@
         });
     </script>
 <!-- Modal Global Configurar Usuário -->
+<!-- Os campos usam o atributo form= para pertencer a formulários separados
+     (dados/contrato e senha: RH; papéis: TI), declarados vazios no fim do modal. -->
 <div class="modal fade" id="modalConfigurarUsuario" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content" style="background: var(--card-bg); border: 1px solid var(--card-border); color: var(--text-main); border-radius: var(--radius-main);">
@@ -1776,47 +1837,90 @@
                 <h6 class="modal-title fw-bold"><i class="bi bi-sliders me-1 text-primary"></i> Configurar: <span id="modalUserName"></span></h6>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
-            <form id="formConfigurarUsuario" method="POST">
-                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-                <div class="modal-body py-3">
-                    <div class="mb-3">
-                        <label class="form-label small fw-semibold text-muted">Tipo de Contrato</label>
-                        <select name="tipo_contrato" id="modalUserTipoContrato" class="form-select form-select-sm" style="background: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main);">
-                            <option value="CLT">CLT</option>
-                            <option value="PJ">PJ</option>
-                        </select>
-                        <div class="form-text small text-muted">PJ não gera alertas de faltas, banco de horas nem comparação com carga horária.</div>
-                    </div>
+            <div class="modal-body py-3">
+                {% if current_user.is_rh %}
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold text-muted" for="modalUserTipoContrato">Tipo de Contrato</label>
+                    <select name="tipo_contrato" id="modalUserTipoContrato" form="formConfigurarUsuario" class="form-select form-select-sm" style="background: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main);">
+                        <option value="CLT">CLT</option>
+                        <option value="PJ">PJ</option>
+                    </select>
+                </div>
 
-                    <div class="mb-3">
-                        <label class="form-label small fw-semibold text-muted">Departamento / Setor</label>
-                        <select name="departamento_id" id="modalUserDepartamento" class="form-select form-select-sm" style="background: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main);">
-                            <option value="none">Nenhum Departamento</option>
-                            {% for d in departamentos %}
-                                <option value="{{ d.id }}">{{ d.nome }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
+                <div class="mb-2">
+                    <label class="form-label small fw-semibold text-muted" for="modalUserDepartamento">Departamento / Setor</label>
+                    <select name="departamento_id" id="modalUserDepartamento" form="formConfigurarUsuario" class="form-select form-select-sm" style="background: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main);">
+                        <option value="none">Nenhum Departamento</option>
+                        {% for d in departamentos %}
+                            <option value="{{ d.id }}">{{ d.nome }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <button type="submit" form="formConfigurarUsuario" class="btn btn-primary btn-sm w-100 mb-1"><i class="bi bi-check-lg me-1"></i> Salvar dados</button>
 
-                    <h6 class="fw-bold small text-primary mb-2"><i class="bi bi-shield-lock me-1"></i> Permissões Granulares</h6>
-                    <div id="alertAdminGeral" class="alert alert-info py-2 px-3 small mb-3 border-0 d-none" style="background: rgba(37, 99, 235, 0.15); color: var(--text-main);">
-                        <i class="bi bi-info-circle me-1 text-primary"></i> Usuário é <b>Administrador Geral</b>.
+                <!-- Alterar senha (RH) -->
+                <div class="border-top border-secondary border-opacity-25 mt-3 pt-3">
+                    <div id="secaoSenhaUsuario">
+                        <button type="button" class="btn btn-outline-warning btn-sm w-100" data-bs-toggle="collapse" data-bs-target="#collapseAlterarSenha" aria-expanded="false" aria-controls="collapseAlterarSenha">
+                            <i class="bi bi-key me-1"></i> Alterar senha
+                        </button>
+                        <div class="collapse" id="collapseAlterarSenha">
+                            <div class="pt-3">
+                                <label for="admNovaSenha" class="form-label small fw-semibold text-muted">Nova senha</label>
+                                <div class="input-group input-group-sm mb-2">
+                                    <input type="password" class="form-control js-senha-politica" id="admNovaSenha" name="nova_senha" form="formSenhaUsuario" autocomplete="new-password" required data-confirmar="#admConfirmarSenha" style="background: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main);">
+                                    <button type="button" class="btn btn-outline-secondary" data-pw-toggle="#admNovaSenha,#admConfirmarSenha" title="Mostrar/ocultar"><i class="bi bi-eye"></i></button>
+                                    <button type="button" class="btn btn-outline-secondary" data-pw-gerar="#admNovaSenha,#admConfirmarSenha" title="Gerar senha forte"><i class="bi bi-magic"></i> Gerar</button>
+                                    <button type="button" class="btn btn-outline-secondary" data-pw-copiar="#admNovaSenha" title="Copiar senha"><i class="bi bi-clipboard"></i></button>
+                                </div>
+                                <label for="admConfirmarSenha" class="form-label small fw-semibold text-muted">Confirmar nova senha</label>
+                                <input type="password" class="form-control form-control-sm mb-2" id="admConfirmarSenha" name="confirmar_senha" form="formSenhaUsuario" autocomplete="new-password" required style="background: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main);">
+                                <div class="form-text small text-muted mb-2">Mínimo 8 caracteres, com maiúscula, minúscula, número e um de @ # *.</div>
+                                <div class="form-check form-switch small mb-2">
+                                    <input class="form-check-input" type="checkbox" name="exigir_troca" id="admExigirTroca" form="formSenhaUsuario" checked>
+                                    <label class="form-check-label" for="admExigirTroca">Exigir troca no próximo acesso</label>
+                                </div>
+                                <div class="small text-muted mb-2"><i class="bi bi-info-circle me-1"></i>As sessões abertas do colaborador serão encerradas.</div>
+                                <button type="submit" form="formSenhaUsuario" class="btn btn-warning btn-sm w-100"><i class="bi bi-key-fill me-1"></i> Salvar nova senha</button>
+                            </div>
+                        </div>
                     </div>
-
-                    <div class="row g-3">
-                        <div class="col-6"><div class="form-check form-switch small"><input class="form-check-input" type="checkbox" name="pode_ver_dashboard" id="perm_dash"><label class="form-check-label" for="perm_dash">Ver Dashboard</label></div></div>
-                        <div class="col-6"><div class="form-check form-switch small"><input class="form-check-input" type="checkbox" name="pode_ver_historico" id="perm_hist"><label class="form-check-label" for="perm_hist">Ver Históricos</label></div></div>
-                        <div class="col-6"><div class="form-check form-switch small"><input class="form-check-input" type="checkbox" name="pode_lancar_ponto_manual" id="perm_ponto"><label class="form-check-label" for="perm_ponto">Lançar Ponto</label></div></div>
-                        <div class="col-6"><div class="form-check form-switch small"><input class="form-check-input" type="checkbox" name="pode_aprovar_solicitacoes" id="perm_solic"><label class="form-check-label" for="perm_solic">Aprovar Correções</label></div></div>
-                        <div class="col-6"><div class="form-check form-switch small"><input class="form-check-input" type="checkbox" name="pode_exportar_relatorios" id="perm_exp"><label class="form-check-label" for="perm_exp">Exportar Relatórios</label></div></div>
-                        <div class="col-6"><div class="form-check form-switch small"><input class="form-check-input" type="checkbox" name="pode_gerenciar_feriados" id="perm_fer"><label class="form-check-label" for="perm_fer">Gerenciar Feriados</label></div></div>
+                    <div id="avisoSenhaPropria" class="small text-muted d-none">
+                        <i class="bi bi-info-circle me-1"></i> Para alterar a sua própria senha, use a opção do seu perfil.
                     </div>
                 </div>
-                <div class="modal-footer border-top border-secondary border-opacity-25 py-2">
-                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
-                    <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-check-lg me-1"></i> Salvar</button>
+                {% endif %}
+
+                {% if current_user.is_ti %}
+                <!-- Papéis de acesso (TI) -->
+                <div class="{% if current_user.is_rh %}border-top border-secondary border-opacity-25 mt-3 pt-3{% endif %}">
+                    <h6 class="fw-bold small text-primary mb-2"><i class="bi bi-shield-lock me-1"></i> Papéis de acesso</h6>
+                    <div class="d-flex flex-column gap-2 mb-2">
+                        <div class="form-check form-switch small">
+                            <input class="form-check-input" type="checkbox" name="is_rh" id="papelRh" form="formPapeisUsuario">
+                            <label class="form-check-label" for="papelRh"><b>RH</b>: colaboradores, ponto, correções e relatórios</label>
+                        </div>
+                        <div class="form-check form-switch small">
+                            <input class="form-check-input" type="checkbox" name="is_ti" id="papelTi" form="formPapeisUsuario">
+                            <label class="form-check-label" for="papelTi"><b>TI</b>: parâmetros, feriados, departamentos, acessos e logs</label>
+                        </div>
+                    </div>
+                    <div class="small text-muted mb-2"><i class="bi bi-info-circle me-1"></i>Sem nenhum papel, a pessoa é colaborador comum. A mudança encerra as sessões dela.</div>
+                    <div id="avisoPapelProprio" class="small text-warning mb-2 d-none"><i class="bi bi-exclamation-triangle me-1"></i>Você está alterando os seus próprios papéis e precisará entrar novamente.</div>
+                    <button type="submit" form="formPapeisUsuario" class="btn btn-outline-primary btn-sm w-100"><i class="bi bi-shield-check me-1"></i> Salvar papéis</button>
                 </div>
-            </form>
+                {% endif %}
+            </div>
+            <div class="modal-footer border-top border-secondary border-opacity-25 py-2">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Fechar</button>
+            </div>
+            {% if current_user.is_rh %}
+            <form id="formConfigurarUsuario" method="POST"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}"></form>
+            <form id="formSenhaUsuario" method="POST"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}"></form>
+            {% endif %}
+            {% if current_user.is_ti %}
+            <form id="formPapeisUsuario" method="POST"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}"></form>
+            {% endif %}
         </div>
     </div>
 </div>
@@ -1826,21 +1930,178 @@
     if (modalConfigurar) {
         modalConfigurar.addEventListener('show.bs.modal', function (event) {
             const button = event.relatedTarget;
-            const form = document.getElementById('formConfigurarUsuario');
-            
-            form.action = `/admin/usuarios/${button.getAttribute('data-user-id')}/atualizar`;
+            const userId = button.getAttribute('data-user-id');
+            const isSelf = button.getAttribute('data-is-self') === 'true';
             document.getElementById('modalUserName').textContent = button.getAttribute('data-user-nome');
-            document.getElementById('modalUserDepartamento').value = button.getAttribute('data-user-departamento');
-            document.getElementById('modalUserTipoContrato').value = button.getAttribute('data-tipo-contrato') || 'CLT';
-            
-            const isAdmin = button.getAttribute('data-is-admin') === 'true';
-            document.getElementById('alertAdminGeral').classList.toggle('d-none', !isAdmin);
-            
-            ['dashboard', 'historico', 'ponto', 'solic', 'exp', 'fer'].forEach(p => {
-                document.getElementById(`perm_${p}`).checked = button.getAttribute(`data-perm-${p}`) === 'true';
-            });
+
+            // RH: dados do colaborador e senha.
+            const formDados = document.getElementById('formConfigurarUsuario');
+            if (formDados) {
+                formDados.action = `/admin/usuarios/${userId}/atualizar`;
+                document.getElementById('modalUserDepartamento').value = button.getAttribute('data-user-departamento');
+                document.getElementById('modalUserTipoContrato').value = button.getAttribute('data-tipo-contrato') || 'CLT';
+
+                document.getElementById('formSenhaUsuario').action = `/admin/usuarios/${userId}/senha`;
+                document.getElementById('secaoSenhaUsuario').classList.toggle('d-none', isSelf);
+                document.getElementById('avisoSenhaPropria').classList.toggle('d-none', !isSelf);
+                ['admNovaSenha', 'admConfirmarSenha'].forEach(id => {
+                    const el = document.getElementById(id);
+                    el.value = '';
+                    el.type = 'password';
+                    el.setCustomValidity('');
+                });
+                document.getElementById('admExigirTroca').checked = true;
+                const collapse = document.getElementById('collapseAlterarSenha');
+                if (collapse.classList.contains('show')) {
+                    bootstrap.Collapse.getOrCreateInstance(collapse, { toggle: false }).hide();
+                }
+            }
+
+            // TI: papéis de acesso.
+            const formPapeis = document.getElementById('formPapeisUsuario');
+            if (formPapeis) {
+                formPapeis.action = `/admin/usuarios/${userId}/papeis`;
+                document.getElementById('papelRh').checked = button.getAttribute('data-is-rh') === 'true';
+                document.getElementById('papelTi').checked = button.getAttribute('data-is-ti') === 'true';
+                document.getElementById('avisoPapelProprio').classList.toggle('d-none', !isSelf);
+            }
         });
     }
+
+    // Aba Parâmetros (TI): aviso de vigência retroativa e validações do formulário.
+    // Fica aqui porque <script> dentro de fragmentos carregados via fetch não executa.
+    function initParametros() {
+        document.querySelectorAll('.js-carga-propria').forEach(sw => {
+            sw.addEventListener('change', () => {
+                document.querySelector(sw.dataset.alvo).classList.toggle('d-none', !sw.checked);
+            });
+        });
+        if (location.hash) {
+            const alvo = document.querySelector(location.hash);
+            if (alvo) alvo.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+        const vig = document.getElementById('pVigencia');
+        const aviso = document.getElementById('pVigenciaAviso');
+        const form = document.getElementById('formParametros');
+        if (!vig || !form) return;
+        const textoPadrao = aviso.textContent;
+        const atualizar = () => {
+            const retro = vig.value && vig.value < vig.dataset.hoje;
+            aviso.classList.toggle('text-warning', !!retro);
+            aviso.classList.toggle('text-muted', !retro);
+            aviso.textContent = retro
+                ? 'Data no passado: os cálculos desde essa data serão refeitos com as novas regras.'
+                : textoPadrao;
+        };
+        vig.addEventListener('input', atualizar);
+        form.addEventListener('submit', (e) => {
+            if (!form.querySelector('input[name="dias_trabalho"]:checked')) {
+                e.preventDefault();
+                alert('Selecione pelo menos um dia de trabalho.');
+                return;
+            }
+            if (vig.value < vig.dataset.hoje &&
+                !confirm('A data escolhida está no passado. Os cálculos desde essa data serão refeitos com as novas regras. Continuar?')) {
+                e.preventDefault();
+            }
+        });
+    }
+
+    // ----- Utilitários de senha (cadastro e alteração pelo administrador) -----
+    function senhaProblema(s) {
+        if (s.length < 8) return 'A senha deve ter pelo menos 8 caracteres.';
+        if (!/[A-Z]/.test(s)) return 'A senha deve conter pelo menos uma letra maiúscula.';
+        if (!/[a-z]/.test(s)) return 'A senha deve conter pelo menos uma letra minúscula.';
+        if (!/\d/.test(s)) return 'A senha deve conter pelo menos um número.';
+        if (!/[@#*]/.test(s)) return 'A senha deve conter pelo menos um caractere especial (@, # ou *).';
+        return '';
+    }
+
+    function gerarSenhaForte(tamanho = 12) {
+        // Sem caracteres ambíguos (0/O, 1/l/I) para facilitar o repasse.
+        const grupos = ['ABCDEFGHJKLMNPQRSTUVWXYZ', 'abcdefghijkmnopqrstuvwxyz', '23456789', '@#*'];
+        const todos = grupos.join('');
+        const aleatorio = (n) => {
+            const buf = new Uint32Array(1);
+            crypto.getRandomValues(buf);
+            return buf[0] % n;
+        };
+        const chars = grupos.map(g => g[aleatorio(g.length)]);
+        while (chars.length < tamanho) chars.push(todos[aleatorio(todos.length)]);
+        for (let i = chars.length - 1; i > 0; i--) {
+            const j = aleatorio(i + 1);
+            [chars[i], chars[j]] = [chars[j], chars[i]];
+        }
+        return chars.join('');
+    }
+
+    function validarSenhaCampo(campo) {
+        const confirmar = document.querySelector(campo.dataset.confirmar);
+        campo.setCustomValidity(campo.required ? senhaProblema(campo.value) : '');
+        if (confirmar) {
+            confirmar.setCustomValidity(
+                confirmar.required && confirmar.value !== campo.value ? 'A confirmação da senha não confere.' : ''
+            );
+        }
+    }
+
+    document.addEventListener('input', (e) => {
+        if (e.target.matches('.js-senha-politica')) validarSenhaCampo(e.target);
+        const principal = document.querySelector(`.js-senha-politica[data-confirmar="#${e.target.id}"]`);
+        if (principal) validarSenhaCampo(principal);
+    });
+
+    document.addEventListener('click', (e) => {
+        const gerar = e.target.closest('[data-pw-gerar]');
+        if (gerar) {
+            const senha = gerarSenhaForte();
+            const campos = gerar.dataset.pwGerar.split(',').map(sel => document.querySelector(sel));
+            campos.forEach(c => { c.value = senha; c.type = 'text'; });
+            validarSenhaCampo(campos[0]);
+            return;
+        }
+        const toggle = e.target.closest('[data-pw-toggle]');
+        if (toggle) {
+            toggle.dataset.pwToggle.split(',').map(sel => document.querySelector(sel)).forEach(c => {
+                c.type = c.type === 'password' ? 'text' : 'password';
+            });
+            return;
+        }
+        const copiar = e.target.closest('[data-pw-copiar]');
+        if (copiar) {
+            const campo = document.querySelector(copiar.dataset.pwCopiar);
+            if (!campo.value) return;
+            const icone = copiar.querySelector('i');
+            const feito = () => {
+                icone.className = 'bi bi-clipboard-check';
+                setTimeout(() => { icone.className = 'bi bi-clipboard'; }, 1500);
+            };
+            if (navigator.clipboard && window.isSecureContext) {
+                navigator.clipboard.writeText(campo.value).then(feito).catch(() => {});
+            } else {
+                const tipo = campo.type;
+                campo.type = 'text';
+                campo.select();
+                try { document.execCommand('copy'); feito(); } catch (_) {}
+                campo.type = tipo;
+            }
+        }
+    });
+
+    // Novo colaborador: alterna entre senha definida agora e convite por e-mail.
+    document.querySelectorAll('.js-modo-acesso').forEach(radio => {
+        radio.addEventListener('change', () => {
+            const convite = document.getElementById('modoConvite').checked;
+            document.getElementById('novoSenhaCampos').classList.toggle('d-none', convite);
+            document.getElementById('novoConviteInfo').classList.toggle('d-none', !convite);
+            ['novoSenha', 'novoSenhaConfirmar'].forEach(id => {
+                const el = document.getElementById(id);
+                el.required = !convite;
+                el.setCustomValidity('');
+            });
+            if (!convite) validarSenhaCampo(document.getElementById('novoSenha'));
+        });
+    });
 </script>
 
 </body>

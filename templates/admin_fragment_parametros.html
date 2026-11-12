@@ -1,0 +1,392 @@
+{% set campo_style = "background: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main);" %}
+<div class="mb-4 d-flex justify-content-between align-items-start flex-wrap gap-2">
+    <div>
+        <h3 class="fw-bold mb-1">Parâmetros de Jornada</h3>
+        <p class="text-muted small m-0">Regras usadas no cálculo de faltas, atrasos e horas extras. Cada alteração vale a partir da data escolhida e fica registrada nos logs.</p>
+    </div>
+    <span class="badge rounded-pill py-2 px-3" style="background: rgba(37, 99, 235, 0.15); color: var(--text-main); border: 1px solid var(--card-border); font-weight: 500;">
+        <i class="bi bi-calendar-check me-1"></i>
+        {% if jornada.padrao %}Regras padrão do sistema{% else %}Vigente desde {{ jornada.vigente_desde.strftime('%d/%m/%Y') }}{% endif %}
+    </span>
+</div>
+
+{% for prox in jornada_proximas %}
+<div class="alert alert-info py-2 px-3 small border-0" style="background: rgba(37, 99, 235, 0.12); color: var(--text-main);">
+    <i class="bi bi-clock-history me-1 text-primary"></i>
+    Há uma alteração agendada para <b>{{ prox.vigente_desde.strftime('%d/%m/%Y') }}</b>
+    (carga de {{ prox.carga_diaria_fmt }}, {{ prox.dias_trabalho_texto }}).
+</div>
+{% endfor %}
+
+<form method="POST" action="{{ url_for('admin_parametros') }}" id="formParametros">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+
+    <div class="row g-4">
+        <!-- Jornada -->
+        <div class="col-lg-6">
+            <div class="dashboard-card h-100">
+                <h5 class="fw-bold mb-1"><i class="bi bi-briefcase me-2 text-primary"></i>Jornada</h5>
+                <p class="text-muted small mb-3">Base para faltas, atrasos e extras.</p>
+
+                <div class="mb-3">
+                    <label for="pCarga" class="form-label small fw-semibold text-muted">Carga horária diária</label>
+                    <input type="time" class="form-control" id="pCarga" name="carga_diaria" required value="{{ min_para_hhmm(jornada.carga_diaria_min) }}" style="{{ campo_style }} max-width: 160px;">
+                    <div class="form-text small text-muted">Horas a cumprir em cada dia de trabalho.</div>
+                </div>
+
+                <label class="form-label small fw-semibold text-muted d-block">Dias de trabalho</label>
+                <div class="d-flex flex-wrap gap-2 mb-1">
+                    {% for nome in dias_semana %}
+                    <input type="checkbox" class="btn-check" name="dias_trabalho" value="{{ loop.index0 }}" id="pDia{{ loop.index0 }}" autocomplete="off" {% if loop.index0 in jornada.dias_trabalho %}checked{% endif %}>
+                    <label class="btn btn-sm btn-outline-primary" for="pDia{{ loop.index0 }}">{{ nome[:3] }}</label>
+                    {% endfor %}
+                </div>
+                <div class="form-text small text-muted mb-3">Feriados cadastrados nunca contam como dia de trabalho.</div>
+
+                <div class="row g-3">
+                    <div class="col-sm-6">
+                        <label for="pIntervalo" class="form-label small fw-semibold text-muted">Intervalo mínimo (min)</label>
+                        <input type="number" class="form-control" id="pIntervalo" name="intervalo_minimo_min" min="{{ limites.intervalo_minimo_min[0] }}" max="{{ limites.intervalo_minimo_min[1] }}" required value="{{ jornada.intervalo_minimo_min }}" style="{{ campo_style }}">
+                        <div class="form-text small text-muted">CLT: 1h para jornada acima de 6h.</div>
+                    </div>
+                    <div class="col-sm-6">
+                        <label for="pInterjornada" class="form-label small fw-semibold text-muted">Interjornada mínima</label>
+                        <input type="time" class="form-control" id="pInterjornada" name="interjornada" required value="{{ min_para_hhmm(jornada.interjornada_min) }}" style="{{ campo_style }}">
+                        <div class="form-text small text-muted">Descanso entre um dia e outro. CLT: 11h.</div>
+                    </div>
+                    <div class="col-sm-6">
+                        <label for="pEntrada" class="form-label small fw-semibold text-muted">Horário de entrada</label>
+<input type="time" class="form-control" id="pEntrada" name="horario_entrada" value="{{ min_para_hhmm(jornada.horario_entrada_min) if jornada.horario_entrada_min is not none else '' }}" style="{{ campo_style }}">
+                    </div>
+                    <div class="col-sm-6">
+                        <label for="pSaida" class="form-label small fw-semibold text-muted">Horário de saída</label>
+<input type="time" class="form-control" id="pSaida" name="horario_saida" value="{{ min_para_hhmm(jornada.horario_saida_min) if jornada.horario_saida_min is not none else '' }}" style="{{ campo_style }}">
+                    </div>
+                    <div class="col-12">
+                        <div class="form-text small text-muted mt-0">Usado nos lembretes de ponto. Setores podem ter horário próprio. Deixe em branco para não enviar lembretes.</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tolerâncias e extras -->
+        <div class="col-lg-6">
+            <div class="dashboard-card h-100">
+                <h5 class="fw-bold mb-1"><i class="bi bi-cash-coin me-2 text-success"></i>Tolerâncias e horas extras</h5>
+                <p class="text-muted small mb-3">
+                    A empresa paga as horas extras.
+                    <span class="badge rounded-pill tag-ok ms-1">Aplicado na folha de ponto e no histórico</span>
+                </p>
+
+                <div class="row g-3 mb-3">
+                    <div class="col-sm-6">
+                        <label for="pTolMarc" class="form-label small fw-semibold text-muted">Tolerância por marcação (min)</label>
+                        <input type="number" class="form-control" id="pTolMarc" name="tolerancia_marcacao_min" min="{{ limites.tolerancia_marcacao_min[0] }}" max="{{ limites.tolerancia_marcacao_min[1] }}" required value="{{ jornada.tolerancia_marcacao_min }}" style="{{ campo_style }}">
+                    </div>
+                    <div class="col-sm-6">
+                        <label for="pTolDia" class="form-label small fw-semibold text-muted">Tolerância diária (min)</label>
+                        <input type="number" class="form-control" id="pTolDia" name="tolerancia_diaria_min" min="{{ limites.tolerancia_diaria_min[0] }}" max="{{ limites.tolerancia_diaria_min[1] }}" required value="{{ jornada.tolerancia_diaria_min }}" style="{{ campo_style }}">
+                    </div>
+                    <div class="col-12">
+                        <div class="form-text small text-muted mt-0">CLT art. 58 §1º: variações de até 5 min por marcação, somando até 10 min no dia, não contam como extra nem atraso.</div>
+                    </div>
+                </div>
+
+                <div class="row g-3 mb-3">
+                    <div class="col-sm-6">
+                        <label for="pExtraUtil" class="form-label small fw-semibold text-muted">Adicional em dia útil (%)</label>
+                        <input type="number" class="form-control" id="pExtraUtil" name="extra_util_pct" min="{{ limites.extra_util_pct[0] }}" max="{{ limites.extra_util_pct[1] }}" required value="{{ jornada.extra_util_pct }}" style="{{ campo_style }}">
+                    </div>
+                    <div class="col-sm-6">
+                        <label for="pExtraDesc" class="form-label small fw-semibold text-muted">Domingo e feriado (%)</label>
+                        <input type="number" class="form-control" id="pExtraDesc" name="extra_descanso_pct" min="{{ limites.extra_descanso_pct[0] }}" max="{{ limites.extra_descanso_pct[1] }}" required value="{{ jornada.extra_descanso_pct }}" style="{{ campo_style }}">
+                    </div>
+                    <div class="col-sm-6">
+                        <label for="pLimite" class="form-label small fw-semibold text-muted">Alerta acima de (min extras/dia)</label>
+                        <input type="number" class="form-control" id="pLimite" name="limite_extras_dia_min" min="{{ limites.limite_extras_dia_min[0] }}" max="{{ limites.limite_extras_dia_min[1] }}" required value="{{ jornada.limite_extras_dia_min }}" style="{{ campo_style }}">
+                        <div class="form-text small text-muted">CLT: até 2h (120 min) por dia.</div>
+                    </div>
+                    <div class="col-12">
+                        <div class="form-text small text-muted mt-0">Mínimo legal de 50%. Confirme com a contabilidade se há convenção coletiva com percentuais maiores.</div>
+                    </div>
+                </div>
+
+                <div class="d-flex align-items-center gap-3 flex-wrap">
+                    <div class="form-check form-switch small mb-0">
+                        <input class="form-check-input" type="checkbox" name="noturno_ativo" id="pNoturno" {% if jornada.noturno_ativo %}checked{% endif %}>
+                        <label class="form-check-label" for="pNoturno">Calcular adicional noturno (22h às 5h)</label>
+                    </div>
+                    <div class="input-group input-group-sm" style="width: 130px;">
+                        <input type="number" class="form-control" name="noturno_pct" aria-label="Percentual do adicional noturno" min="{{ limites.noturno_pct[0] }}" max="{{ limites.noturno_pct[1] }}" required value="{{ jornada.noturno_pct }}" style="{{ campo_style }}">
+                        <span class="input-group-text">%</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Vigência + salvar -->
+    <div class="dashboard-card mt-4">
+        <div class="d-flex align-items-end gap-3 flex-wrap">
+            <div>
+                <label for="pVigencia" class="form-label small fw-semibold text-muted">Vale a partir de</label>
+                <input type="date" class="form-control" id="pVigencia" name="vigente_desde" required value="{{ hoje_iso }}" data-hoje="{{ hoje_iso }}" style="{{ campo_style }}">
+            </div>
+            <div class="flex-grow-1 small text-muted pb-2" id="pVigenciaAviso">
+                As regras novas valem a partir desta data. Os dias anteriores continuam calculados com as regras da época.
+            </div>
+            <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg me-1"></i> Salvar regras</button>
+        </div>
+    </div>
+</form>
+
+<!-- Setores e cargas horárias -->
+<div class="dashboard-card mt-4" id="setores">
+    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+        <div>
+            <h5 class="fw-bold mb-1"><i class="bi bi-building me-2 text-info"></i>Setores e cargas horárias</h5>
+            <p class="text-muted small mb-0">Cada setor pode ter carga e dias próprios; sem isso, segue a jornada padrão ({{ jornada.carga_diaria_fmt }}, {{ jornada.dias_trabalho_texto }}). Tolerâncias e adicionais de extra valem para todos.</p>
+        </div>
+        <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="collapse" data-bs-target="#novoSetor" aria-expanded="false" aria-controls="novoSetor">
+            <i class="bi bi-plus-lg me-1"></i> Novo setor
+        </button>
+    </div>
+
+    <!-- Novo setor -->
+    <div class="collapse mb-3" id="novoSetor">
+        <form method="POST" action="{{ url_for('gerenciar_departamentos') }}" class="p-3 rounded-3" style="border: 1px dashed var(--card-border);">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <div class="row g-3 align-items-end">
+                <div class="col-md-4">
+                    <label for="novoSetorNome" class="form-label small fw-semibold text-muted">Nome do setor</label>
+                    <input type="text" class="form-control" id="novoSetorNome" name="nome" maxlength="100" required placeholder="Ex.: Desenvolvimento" style="{{ campo_style }}">
+                </div>
+                <div class="col-md-8">
+                    <div class="form-check form-switch small mb-2">
+                        <input class="form-check-input js-carga-propria" type="checkbox" name="carga_propria" id="novoSetorPropria" data-alvo="#novoSetorCarga">
+                        <label class="form-check-label" for="novoSetorPropria">Carga horária própria (senão, usa a jornada padrão)</label>
+                    </div>
+                </div>
+            </div>
+            <div class="row g-3 mt-0 d-none" id="novoSetorCarga">
+                <div class="col-md-3">
+                    <label for="novoSetorHoras" class="form-label small fw-semibold text-muted">Carga diária</label>
+                    <input type="time" class="form-control" id="novoSetorHoras" name="carga_diaria" value="{{ min_para_hhmm(jornada.carga_diaria_min) }}" style="{{ campo_style }}">
+                </div>
+                <div class="col-md-9">
+                    <label class="form-label small fw-semibold text-muted d-block">Dias de trabalho</label>
+                    <div class="d-flex flex-wrap gap-2">
+                        {% for nome in dias_semana %}
+                        <input type="checkbox" class="btn-check" name="dias_trabalho" value="{{ loop.index0 }}" id="novoSetorDia{{ loop.index0 }}" autocomplete="off" {% if loop.index0 in jornada.dias_trabalho %}checked{% endif %}>
+                        <label class="btn btn-sm btn-outline-primary" for="novoSetorDia{{ loop.index0 }}">{{ nome[:3] }}</label>
+                        {% endfor %}
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <label for="novoSetorEntrada" class="form-label small fw-semibold text-muted">Entrada</label>
+<input type="time" class="form-control" id="novoSetorEntrada" name="horario_entrada" value="{{ min_para_hhmm(jornada.horario_entrada_min) if jornada.horario_entrada_min is not none else '' }}" style="{{ campo_style }}">
+                </div>
+                <div class="col-md-3">
+                    <label for="novoSetorSaida" class="form-label small fw-semibold text-muted">Saída</label>
+<input type="time" class="form-control" id="novoSetorSaida" name="horario_saida" value="{{ min_para_hhmm(jornada.horario_saida_min) if jornada.horario_saida_min is not none else '' }}" style="{{ campo_style }}">
+                </div>
+                <div class="col-md-6 small text-muted d-flex align-items-end pb-2">Horário usado nos lembretes. Em branco: segue o horário da jornada padrão.</div>
+            </div>
+            <div class="text-end mt-3">
+                <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-check-lg me-1"></i> Cadastrar setor</button>
+            </div>
+        </form>
+    </div>
+
+    {% if setores %}
+    <div class="table-responsive">
+        <table class="table table-custom align-middle small mb-0">
+            <thead>
+                <tr class="text-uppercase" style="color: var(--text-muted);">
+                    <th class="ps-3">Setor</th>
+                    <th>Carga</th>
+                    <th>Dias de trabalho</th>
+                    <th>Horário</th>
+                    <th>Colaboradores</th>
+                    <th class="text-end pe-3">Ações</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in setores %}
+                {% set dep = item.dep %}
+                {% set js = item.jornada %}
+                <tr>
+                    <td class="ps-3 fw-semibold">{{ dep.nome }}</td>
+                    <td>
+                        {{ js.carga_diaria_fmt }}
+                        {% if not item.propria %}<span class="badge bg-secondary rounded-pill ms-1">padrão</span>{% endif %}
+                        {% if item.proxima %}<span class="badge bg-info text-dark rounded-pill ms-1" title="Alteração agendada">{{ (item.proxima.carga_diaria_min // 60) }}h{% if item.proxima.carga_diaria_min % 60 %}{{ '%02d' % (item.proxima.carga_diaria_min % 60) }}{% endif %} a partir de {{ item.proxima.vigente_desde.strftime('%d/%m') }}</span>{% endif %}
+                    </td>
+                    <td>{{ js.dias_trabalho_texto }}</td>
+                    <td style="white-space: nowrap;">{{ js.horario_texto or '-' }}</td>
+                    <td>{{ item.membros }}</td>
+                    <td class="text-end pe-3" style="white-space: nowrap;">
+                        <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="collapse" data-bs-target="#editarSetor{{ dep.id }}" aria-expanded="false">
+                            <i class="bi bi-pencil"></i> Editar
+                        </button>
+                        <form method="POST" action="{{ url_for('excluir_departamento', id=dep.id) }}" class="d-inline" onsubmit="return confirm('Excluir o setor {{ dep.nome|e }}?');">
+                            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-sm btn-outline-danger" {% if item.membros %}disabled title="Mova os colaboradores para outro setor antes de excluir"{% else %}title="Excluir setor"{% endif %}>
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </form>
+                    </td>
+                </tr>
+                <tr class="collapse" id="editarSetor{{ dep.id }}">
+                    <td colspan="6" class="p-0">
+                        <form method="POST" action="{{ url_for('editar_departamento', id=dep.id) }}" class="p-3" style="background: var(--bg-dark);">
+                            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                            <div class="row g-3 align-items-end">
+                                <div class="col-md-4">
+                                    <label for="setorNome{{ dep.id }}" class="form-label small fw-semibold text-muted">Nome</label>
+                                    <input type="text" class="form-control form-control-sm" id="setorNome{{ dep.id }}" name="nome" maxlength="100" required value="{{ dep.nome }}" style="{{ campo_style }}">
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="form-check form-switch small mb-1">
+                                        <input class="form-check-input js-carga-propria" type="checkbox" name="carga_propria" id="setorPropria{{ dep.id }}" data-alvo="#setorCarga{{ dep.id }}" {% if item.propria %}checked{% endif %}>
+                                        <label class="form-check-label" for="setorPropria{{ dep.id }}">Carga horária própria</label>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <label for="setorVig{{ dep.id }}" class="form-label small fw-semibold text-muted">Vale a partir de</label>
+                                    <input type="date" class="form-control form-control-sm" id="setorVig{{ dep.id }}" name="vigente_desde" required value="{{ hoje_iso }}" style="{{ campo_style }}">
+                                </div>
+                            </div>
+                            <div class="row g-3 mt-0 {% if not item.propria %}d-none{% endif %}" id="setorCarga{{ dep.id }}">
+                                <div class="col-md-3">
+                                    <label for="setorHoras{{ dep.id }}" class="form-label small fw-semibold text-muted">Carga diária</label>
+                                    <input type="time" class="form-control form-control-sm" id="setorHoras{{ dep.id }}" name="carga_diaria" value="{{ min_para_hhmm(js.carga_diaria_min) }}" style="{{ campo_style }}">
+                                </div>
+                                <div class="col-md-9">
+                                    <label class="form-label small fw-semibold text-muted d-block">Dias de trabalho</label>
+                                    <div class="d-flex flex-wrap gap-2">
+                                        {% for nome in dias_semana %}
+                                        <input type="checkbox" class="btn-check" name="dias_trabalho" value="{{ loop.index0 }}" id="setor{{ dep.id }}Dia{{ loop.index0 }}" autocomplete="off" {% if loop.index0 in js.dias_trabalho %}checked{% endif %}>
+                                        <label class="btn btn-sm btn-outline-primary" for="setor{{ dep.id }}Dia{{ loop.index0 }}">{{ nome[:3] }}</label>
+                                        {% endfor %}
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <label for="setorEntrada{{ dep.id }}" class="form-label small fw-semibold text-muted">Entrada</label>
+<input type="time" class="form-control form-control-sm" id="setorEntrada{{ dep.id }}" name="horario_entrada" value="{{ min_para_hhmm(js.horario_entrada_min) if js.horario_entrada_min is not none else '' }}" style="{{ campo_style }}">
+                                </div>
+                                <div class="col-md-3">
+                                    <label for="setorSaida{{ dep.id }}" class="form-label small fw-semibold text-muted">Saída</label>
+<input type="time" class="form-control form-control-sm" id="setorSaida{{ dep.id }}" name="horario_saida" value="{{ min_para_hhmm(js.horario_saida_min) if js.horario_saida_min is not none else '' }}" style="{{ campo_style }}">
+                                </div>
+                            </div>
+                            <div class="d-flex justify-content-between align-items-center mt-3 flex-wrap gap-2">
+                                <span class="small text-muted">A nova carga vale a partir da data escolhida; dias anteriores mantêm a regra da época.</span>
+                                <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-check-lg me-1"></i> Salvar setor</button>
+                            </div>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="text-muted small mb-0">Nenhum setor cadastrado. Todos os colaboradores seguem a jornada padrão.</p>
+    {% endif %}
+</div>
+
+<!-- Lembretes de ponto -->
+<div class="dashboard-card mt-4" id="lembretes">
+    <h5 class="fw-bold mb-1"><i class="bi bi-bell me-2 text-primary"></i>Lembretes de ponto</h5>
+    <p class="text-muted small mb-3">
+        Notificações no celular/computador de quem ativar os lembretes (menu do usuário &gt; Lembretes de ponto). Usam o horário de entrada e saída da jornada ou do setor.
+        {% if not push_ativo %}<br><span class="badge rounded-pill tag-danger mt-1">Push desligado: chaves VAPID ausentes ou inválidas no servidor</span>{% endif %}
+    </p>
+    <form method="POST" action="{{ url_for('admin_parametros_lembretes') }}" class="row g-3 align-items-end">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="col-12">
+            <div class="form-check form-switch small">
+                <input class="form-check-input" type="checkbox" name="lembretes_ativos" id="pLembretesAtivos" {% if lembretes.ativos %}checked{% endif %}>
+                <label class="form-check-label" for="pLembretesAtivos">Enviar lembretes de ponto</label>
+            </div>
+        </div>
+        <div class="col-sm-4">
+            <label for="pAntec1" class="form-label small fw-semibold text-muted">1º aviso (min antes)</label>
+            <input type="number" class="form-control" id="pAntec1" name="lembrete_antecedencia_1" min="0" max="60" required value="{{ lembretes_cfg_bruto.a1 }}" style="{{ campo_style }}">
+        </div>
+        <div class="col-sm-4">
+            <label for="pAntec2" class="form-label small fw-semibold text-muted">2º aviso (min antes)</label>
+            <input type="number" class="form-control" id="pAntec2" name="lembrete_antecedencia_2" min="0" max="60" required value="{{ lembretes_cfg_bruto.a2 }}" style="{{ campo_style }}">
+        </div>
+        <div class="col-sm-4">
+            <label for="pEsquec" class="form-label small fw-semibold text-muted">"Esqueceu a entrada" após (min)</label>
+            <input type="number" class="form-control" id="pEsquec" name="lembrete_esquecimento_min" min="5" max="120" required value="{{ lembretes.esquecimento_min }}" style="{{ campo_style }}">
+        </div>
+        <div class="col-12 d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <span class="small text-muted">Os avisos antes da entrada e da saída valem para os dois; use 0 para desligar um deles. O aviso de esquecimento também fica no sino do app.</span>
+            <button type="submit" class="btn btn-outline-primary"><i class="bi bi-check-lg me-1"></i> Salvar lembretes</button>
+        </div>
+    </form>
+</div>
+
+<!-- Prazo de correção -->
+{% set jan_inicio, jan_fechamento, jan_limite = correcao_janela %}
+<div class="dashboard-card mt-4" id="correcoes">
+    <h5 class="fw-bold mb-1"><i class="bi bi-pencil-square me-2 text-warning"></i>Correções de ponto</h5>
+    <p class="text-muted small mb-3">O mês fecha no último dia. O colaborador pode pedir correção de dias do mês atual até o prazo abaixo; depois disso, só o RH ajusta.</p>
+    <form method="POST" action="{{ url_for('admin_parametros_correcao') }}" class="d-flex align-items-end gap-3 flex-wrap">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div>
+            <label for="pCorrecaoDias" class="form-label small fw-semibold text-muted">Pedidos até</label>
+            <div class="input-group" style="width: 260px;">
+                <input type="number" class="form-control" id="pCorrecaoDias" name="correcao_dias_antes_fechamento" min="0" max="15" required value="{{ correcao_dias }}" style="{{ campo_style }}">
+                <span class="input-group-text">dia(s) antes do fechamento</span>
+            </div>
+        </div>
+        <div class="small text-muted pb-2 flex-grow-1">
+            Neste mês: fechamento em <b>{{ jan_fechamento.strftime('%d/%m/%Y') }}</b>, pedidos até <b>{{ jan_limite.strftime('%d/%m/%Y') }}</b>.
+        </div>
+        <button type="submit" class="btn btn-outline-primary"><i class="bi bi-check-lg me-1"></i> Salvar prazo</button>
+    </form>
+</div>
+
+<!-- Histórico de versões -->
+<div class="mt-4">
+    <h5 class="fw-bold mb-2"><i class="bi bi-clock-history me-2 text-primary"></i>Histórico de versões</h5>
+    {% if historico_jornada %}
+    <div class="table-responsive">
+        <table class="table table-custom align-middle small">
+            <thead>
+                <tr class="text-uppercase" style="color: var(--text-muted);">
+                    <th class="ps-3">Vale desde</th>
+                    <th>Carga</th>
+                    <th>Dias</th>
+                    <th>Tolerância</th>
+                    <th>Extras</th>
+                    <th>Alterado por</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for v in historico_jornada %}
+                {% set j = v.para_jornada() %}
+                <tr>
+                    <td class="ps-3 fw-semibold" style="white-space: nowrap;">
+                        {{ v.vigente_desde.strftime('%d/%m/%Y') }}
+                        {% if not jornada.padrao and v.vigente_desde == jornada.vigente_desde %}<span class="badge bg-success rounded-pill ms-1">vigente</span>{% endif %}
+                    </td>
+                    <td>{{ j.carga_diaria_fmt }}</td>
+                    <td>{{ j.dias_trabalho_texto }}</td>
+                    <td>{{ j.tolerancia_marcacao_min }} / {{ j.tolerancia_diaria_min }} min</td>
+                    <td>{{ j.extra_util_pct }}% / {{ j.extra_descanso_pct }}%{% if j.noturno_ativo %} · noturno {{ j.noturno_pct }}%{% endif %}</td>
+                    <td style="color: var(--text-muted);">{{ v.alterado_por_nome or '-' }}{% if v.alterado_em %} · {{ v.alterado_em.strftime('%d/%m/%Y %H:%M') }}{% endif %}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="text-muted small">Nenhuma alteração ainda: o sistema usa as regras padrão (8h, segunda a sexta, tolerância 5/10 min, extras 50%/100%).</p>
+    {% endif %}
+</div>
+

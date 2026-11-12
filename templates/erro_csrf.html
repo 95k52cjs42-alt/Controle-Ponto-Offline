@@ -1,0 +1,21 @@
+{% extends 'base.html' %}
+
+{% block title %}Página desatualizada | 4Lab Orbit{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center align-items-center py-4" style="min-height: 75vh;">
+    <div class="col-sm-10 col-md-6 col-lg-5 col-xl-4">
+        <div class="pastel-card p-4 p-md-5 text-center">
+            <i class="bi bi-arrow-clockwise text-warning" style="font-size: 2.5rem;"></i>
+            <h4 class="fw-bold mt-2 mb-2 text-dark">Página desatualizada</h4>
+            <p class="text-muted small mb-4">
+                Sua sessão foi renovada depois que esta página foi aberta (por exemplo, um novo login ou outra aba),
+                então a ação <b>não foi executada</b>. Volte, recarregue a página e tente de novo.
+            </p>
+            <a href="{{ voltar }}" class="btn btn-primary w-100">
+                <i class="bi bi-arrow-left me-1"></i> Voltar e tentar novamente
+            </a>
+        </div>
+    </div>
+</div>
+{% endblock %}

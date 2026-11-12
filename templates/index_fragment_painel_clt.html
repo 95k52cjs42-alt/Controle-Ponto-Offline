@@ -4,6 +4,6 @@
                     </div>
                     <hr class="my-2 opacity-25">
                     <div class="d-flex justify-content-between align-items-center small">
-                        <span style="color:var(--text-muted);">Saldo vs 8h</span>
+                        <span style="color:var(--text-muted);">Saldo vs {{ jornada.carga_diaria_fmt if jornada else "8h" }}</span>
                         <span class="fw-bold" id="saldoHoje">--:--</span>
                     </div>

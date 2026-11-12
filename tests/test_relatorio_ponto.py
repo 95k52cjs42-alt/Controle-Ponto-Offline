@@ -80,7 +80,8 @@ class RelatorioPontoTests(unittest.TestCase):
                 email=email,
                 senha_hash=generate_password_hash("Abcdef1@", method="scrypt"),
                 email_confirmado=True,
-                is_admin=admin,
+                is_rh=admin,
+                is_ti=admin,
                 tipo_contrato=tipo_contrato,
                 auth_version=0,
             )
@@ -113,11 +114,11 @@ class RelatorioPontoTests(unittest.TestCase):
         text = response.data.decode("utf-8-sig")
         return list(csv.reader(io.StringIO(text)))
 
-    @staticmethod
-    def dia_util_anterior(hoje, dias=3):
+    def dia_util_anterior(self, hoje, dias=3):
         d = hoje - timedelta(days=dias)
-        while d.weekday() >= 5:
-            d -= timedelta(days=1)
+        with self.app.app_context():
+            while not self.module.eh_dia_util(d):
+                d -= timedelta(days=1)
         return d
 
     # ------------------------------------------------------------------
@@ -189,8 +190,6 @@ class RelatorioPontoTests(unittest.TestCase):
         self.assertEqual(linhas[inicio.strftime("%d/%m/%Y")][-1], "FALTA")
         self.assertGreaterEqual(dados["total_faltas_dias"], 1)
         self.assertGreater(dados["total_segundos_faltantes"], 0)
-        self.assertLess(dados["balanco_segundos"], 0)
-        self.assertTrue(dados["texto_balanco"].startswith("-"))
 
     def test_registro_completo_gera_horas_e_nao_conta_falta(self):
         user_id = self.make_user()
@@ -205,8 +204,8 @@ class RelatorioPontoTests(unittest.TestCase):
         self.assertEqual(dados["tabela_linhas"][1][2], "18:00")
         self.assertEqual(dados["tabela_linhas"][1][3], "09:00h")
         self.assertEqual(dados["total_segundos_extras"], 3600)
+        self.assertEqual(dados["totais"]["extra_50"], 3600)
         self.assertEqual(dados["total_faltas_dias"], 0)
-        self.assertEqual(dados["balanco_segundos"], 3600)
 
     def test_pj_nao_acumula_horas_faltantes(self):
         user_id = self.make_user(email="pj@example.com", tipo_contrato="PJ")
@@ -232,11 +231,12 @@ class RelatorioPontoTests(unittest.TestCase):
         self.assertEqual(dados["max_pares"], 2)
         self.assertEqual(
             dados["tabela_linhas"][0],
-            ["Dia", "Entrada 1", "Saída 1", "Entrada 2", "Saída 2", "Total / Status"],
+            ["Dia", "Entrada 1", "Saída 1", "Entrada 2", "Saída 2",
+             "Trabalhado", "Extras 50%", "Extras 100%", "Atraso/Falta", "Situação"],
         )
         self.assertEqual(
             dados["tabela_linhas"][1],
-            [dia.strftime("%d/%m/%Y"), "08:00", "12:00", "13:00", "19:00", "10:00h"],
+            [dia.strftime("%d/%m/%Y"), "08:00", "12:00", "13:00", "19:00", "10:00h", "02:00", "", "", "Ok"],
         )
 
     def test_registro_fora_do_periodo_e_ignorado(self):
@@ -325,7 +325,9 @@ class RelatorioPontoTests(unittest.TestCase):
             rows = self.csv_rows(response)
             self.assertEqual(len(rows), 2)
             self.assertEqual(rows[1][0], dia.strftime("%d/%m/%Y"))
-            self.assertEqual(rows[1][-1], "09:00h")  # 08:00 -> 17:00
+            self.assertEqual(rows[1][rows[0].index("Trabalhado")], "09:00h")  # 08:00 -> 17:00
+            self.assertEqual(rows[1][rows[0].index("Extras 50%")], "01:00")
+            self.assertEqual(rows[1][-1], "Sem intervalo")  # 9h seguidas, sem pausa
 
             pdf = client.get(url.replace("format=csv", "format=pdf"))
             self.assertEqual(pdf.status_code, 200)

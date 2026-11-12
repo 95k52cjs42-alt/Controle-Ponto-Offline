@@ -2,23 +2,21 @@
     <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
         <div>
             <h3 class="fw-bold mb-1">Usuários Cadastrados</h3>
-            <p class="text-muted small mb-0">Gerencie acessos e consulte o histórico individual de cada colaborador</p>
+            <p class="text-muted small mb-0">
+                {% if current_user.is_rh %}Gerencie colaboradores e consulte o histórico individual de cada um{% else %}Defina os papéis de acesso (RH e TI) de cada pessoa{% endif %}
+            </p>
         </div>
         <div class="d-flex align-items-center gap-3">
-            <form action="{{ url_for('toggle_verificacao_email') }}" method="POST" class="d-inline">
-                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-                <div class="form-check form-switch mb-0">
-                    <input class="form-check-input" type="checkbox" role="switch" id="toggleVerificacaoEmail"
-                           onchange="this.form.submit()" {% if email_verificacao_ativa %}checked{% endif %}
-                           title="Ativar ou desativar a confirmação de e-mail no cadastro público">
-                    <label class="form-check-label text-muted small" for="toggleVerificacaoEmail">
-                        <i class="bi bi-envelope-check me-1"></i>Verificação de e-mail
-                    </label>
-                </div>
-            </form>
+            {% if current_user.is_ti %}
+            <a href="{{ url_for('admin_parametros') }}#setores" class="btn-action-outline text-decoration-none">
+                <i class="bi bi-building"></i> Setores
+            </a>
+            {% endif %}
+            {% if current_user.is_rh %}
             <button type="button" class="btn-action-outline" data-bs-toggle="modal" data-bs-target="#modalNovoUsuario">
                 <i class="bi bi-person-plus"></i> Novo Colaborador
             </button>
+            {% endif %}
         </div>
     </div>
 
@@ -49,11 +47,11 @@
                         </h6>
                         <span class="text-muted small user-email d-block" style="font-size: 0.8rem;">{{ u.email }}</span>
                         {% if u.departamento_rel %}
-                            <span class="badge bg-secondary text-light rounded-pill mt-1" style="font-size: 0.7rem;">
+                            <span class="badge tag-neutral rounded-pill mt-1" style="font-size: 0.7rem;">
                                 <i class="bi bi-building me-1"></i>{{ u.departamento_rel.nome }}
                             </span>
                         {% else %}
-                            <span class="badge bg-dark text-muted border border-secondary rounded-pill mt-1" style="font-size: 0.7rem;">
+                            <span class="badge tag-neutral fw-normal rounded-pill mt-1" style="font-size: 0.7rem;">
                                 Sem depto.
                             </span>
                         {% endif %}
@@ -61,10 +59,17 @@
                 </div>
 
                 <div class="user-role">
-                    {% if u.is_admin %}
-                        <span class="badge-role-admin"><i class="bi bi-shield-check me-1"></i> Administrador</span>
-                    {% else %}
-                        <span class="badge-role-func"><i class="bi bi-person me-1"></i> Funcionário</span>
+                    {% if u.is_rh %}
+                        <span class="badge-role-admin"><i class="bi bi-people me-1"></i> RH</span>
+                    {% endif %}
+                    {% if u.is_ti %}
+                        <span class="badge-role-admin"><i class="bi bi-cpu me-1"></i> TI</span>
+                    {% endif %}
+                    {% if not u.tem_gestao %}
+                        <span class="badge-role-func"><i class="bi bi-person me-1"></i> Colaborador</span>
+                    {% endif %}
+                    {% if u.precisa_redefinir_senha %}
+                        <span class="badge bg-warning text-dark rounded-pill small ms-1" style="font-size: 0.7rem;" title="Ainda não trocou a senha inicial">Troca de senha pendente</span>
                     {% endif %}
                     {% if not u.email_confirmado %}
                         <span class="badge bg-warning text-dark rounded-pill small ms-1" style="font-size: 0.7rem;">Pendente</span>
@@ -74,7 +79,7 @@
                 <div class="user-actions">
                     <button type="button"
                             class="btn-action-outline text-warning border-warning btn-configurar-usuario"
-                            title="Gerenciar Permissões e Departamento"
+                            title="{% if current_user.is_rh %}Dados, senha{% if current_user.is_ti %} e papéis{% endif %}{% else %}Papéis de acesso{% endif %}"
                             data-bs-toggle="modal"
                             data-bs-target="#modalConfigurarUsuario"
                             data-user-id="{{ u.id }}"
@@ -82,16 +87,13 @@
                             data-user-email="{{ u.email }}"
                             data-user-departamento="{{ u.departamento_id if u.departamento_id else 'none' }}"
                             data-tipo-contrato="{{ u.tipo_contrato if u.tipo_contrato else 'CLT' }}"
-                            data-is-admin="{{ 'true' if u.is_admin else 'false' }}"
-                            data-perm-dashboard="{{ 'true' if u.tem_permissao('pode_ver_dashboard') else 'false' }}"
-                            data-perm-historico="{{ 'true' if u.tem_permissao('pode_ver_historico') else 'false' }}"
-                            data-perm-ponto="{{ 'true' if u.tem_permissao('pode_lancar_ponto_manual') else 'false' }}"
-                            data-perm-solic="{{ 'true' if u.tem_permissao('pode_aprovar_solicitacoes') else 'false' }}"
-                            data-perm-exp="{{ 'true' if u.tem_permissao('pode_exportar_relatorios') else 'false' }}"
-                            data-perm-fer="{{ 'true' if u.tem_permissao('pode_gerenciar_feriados') else 'false' }}">
+                            data-is-rh="{{ 'true' if u.is_rh else 'false' }}"
+                            data-is-ti="{{ 'true' if u.is_ti else 'false' }}"
+                            data-is-self="{{ 'true' if current_user and u.id == current_user.id else 'false' }}">
                         <i class="bi bi-gear-fill"></i> Configurar
                     </button>
 
+                    {% if current_user.is_rh %}
                     <a href="{{ url_for('admin_historico', usuario_id=u.id) }}" class="btn-action-outline">
                         <i class="bi bi-clock-history"></i> Histórico
                     </a>
@@ -103,21 +105,17 @@
                             data-user-nome="{{ u.nome }}">
                         <i class="bi bi-file-earmark-spreadsheet"></i> Folha
                     </button>
+                    {% endif %}
 
                     {% if current_user and u.id != current_user.id %}
-                        <form action="{{ url_for('toggle_admin', user_id=u.id) }}" method="POST" class="d-inline">
-                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-                            <button type="submit" class="btn-action-outline btn-toggle-admin">
-                                <i class="bi bi-person-gear"></i>
-                                {% if u.is_admin %} Remover Admin {% else %} Tornar Admin {% endif %}
-                            </button>
-                        </form>
+                        {% if current_user.is_rh %}
                         <form action="{{ url_for('excluir_usuario', user_id=u.id) }}" method="POST" class="d-inline-block" onsubmit="return confirm('Tem certeza que deseja excluir este colaborador? Esta ação não pode ser desfeita.');">
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                             <button type="submit" class="btn-delete-user" title="Excluir Usuário" style="height: 38px;">
                                 <i class="bi bi-trash"></i>
                             </button>
                         </form>
+                        {% endif %}
                     {% else %}
                         <span class="text-muted small px-2">(Sua Conta)</span>
                     {% endif %}

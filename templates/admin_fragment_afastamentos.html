@@ -1,0 +1,119 @@
+{% set campo_style = "background: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main);" %}
+{% set tag_tipo = {'ferias': 'tag-info', 'atestado': 'tag-warn', 'licenca': 'tag-neutral', 'folga': 'tag-ok', 'outro': 'tag-neutral'} %}
+
+{% macro tabela(lista, vazio) %}
+    {% if lista %}
+    <div class="table-responsive">
+        <table class="table table-custom align-middle small mb-0">
+            <thead>
+                <tr class="text-uppercase">
+                    <th class="ps-3">Colaborador</th>
+                    <th>Tipo</th>
+                    <th>Período</th>
+                    <th class="text-center">Dias</th>
+                    <th>Observação</th>
+                    <th>Lançado por</th>
+                    <th class="text-end pe-3">Ações</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for a in lista %}
+                <tr>
+                    <td class="ps-3 fw-semibold">{{ a.usuario.nome }}</td>
+                    <td><span class="badge rounded-pill {{ tag_tipo.get(a.tipo, 'tag-neutral') }}">{{ a.rotulo }}</span></td>
+                    <td style="white-space: nowrap;">{{ a.data_inicio.strftime('%d/%m/%Y') }} – {{ a.data_fim.strftime('%d/%m/%Y') }}</td>
+                    <td class="text-center">{{ a.dias }}</td>
+                    <td style="max-width: 260px;">{{ a.observacao or '-' }}</td>
+                    <td style="color: var(--text-muted); white-space: nowrap;">{{ a.criado_por_nome or '-' }}</td>
+                    <td class="text-end pe-3" style="white-space: nowrap;">
+                        {% if a.anexo_nome %}
+                        <a href="{{ url_for('anexo_afastamento', id=a.id) }}" class="btn btn-sm btn-outline-secondary" title="Baixar anexo ({{ a.anexo_nome }})">
+                            <i class="bi bi-paperclip"></i>
+                        </a>
+                        {% endif %}
+                        <form method="POST" action="{{ url_for('excluir_afastamento', id=a.id) }}" class="d-inline"
+                              onsubmit="return confirm('Cancelar {{ a.rotulo|lower }} de {{ a.usuario.nome|e }}? Os dias voltam a contar como dias de trabalho.');">
+                            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-sm btn-outline-danger" title="Cancelar afastamento"><i class="bi bi-x-lg"></i></button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="text-muted small mb-0">{{ vazio }}</p>
+    {% endif %}
+{% endmacro %}
+
+<div class="mb-4 d-flex justify-content-between align-items-start flex-wrap gap-2">
+    <div>
+        <h3 class="fw-bold mb-1">Afastamentos</h3>
+        <p class="text-muted small m-0">Férias, atestados, licenças e folgas. Os dias lançados não contam como falta e não geram lembretes de ponto.</p>
+    </div>
+    <button type="button" class="btn-action-outline" data-bs-toggle="collapse" data-bs-target="#novoAfastamento" aria-expanded="false" aria-controls="novoAfastamento">
+        <i class="bi bi-plus-lg"></i> Lançar afastamento
+    </button>
+</div>
+
+<!-- Lançar afastamento -->
+<div class="collapse mb-4" id="novoAfastamento">
+    <div class="dashboard-card">
+        <form method="POST" action="{{ url_for('admin_afastamentos') }}" enctype="multipart/form-data" class="row g-3">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <div class="col-md-5">
+                <label for="afColab" class="form-label small fw-semibold text-muted">Colaborador</label>
+                <select class="form-select" id="afColab" name="usuario_id" required style="{{ campo_style }}">
+                    <option value="">Selecione…</option>
+                    {% for u in colaboradores %}
+                    <option value="{{ u.id }}">{{ u.nome }} ({{ u.email }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label for="afTipo" class="form-label small fw-semibold text-muted">Tipo</label>
+                <select class="form-select" id="afTipo" name="tipo" required style="{{ campo_style }}">
+                    {% for chave, rotulo in tipos.items() %}
+                    <option value="{{ chave }}">{{ rotulo }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2 col-6">
+                <label for="afInicio" class="form-label small fw-semibold text-muted">De</label>
+                <input type="date" class="form-control" id="afInicio" name="data_inicio" required value="{{ hoje_iso }}" style="{{ campo_style }}">
+            </div>
+            <div class="col-md-2 col-6">
+                <label for="afFim" class="form-label small fw-semibold text-muted">Até</label>
+                <input type="date" class="form-control" id="afFim" name="data_fim" required value="{{ hoje_iso }}" style="{{ campo_style }}">
+            </div>
+            <div class="col-md-7">
+                <label for="afObs" class="form-label small fw-semibold text-muted">Observação (opcional)</label>
+                <input type="text" class="form-control" id="afObs" name="observacao" maxlength="500" placeholder="Ex.: férias referentes ao período aquisitivo 2025/2026" style="{{ campo_style }}">
+            </div>
+            <div class="col-md-5">
+                <label for="afAnexo" class="form-label small fw-semibold text-muted">Anexo (opcional: PDF, JPG ou PNG, até 2 MB)</label>
+                <input type="file" class="form-control" id="afAnexo" name="anexo" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" style="{{ campo_style }}">
+            </div>
+            <div class="col-12 d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <span class="small text-muted"><i class="bi bi-shield-lock me-1"></i>Atestados são dados de saúde: só o RH acessa, e cada abertura do anexo fica registrada nos logs.</span>
+                <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg me-1"></i> Lançar</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="dashboard-card mb-4">
+    <h5 class="fw-bold mb-3"><i class="bi bi-hourglass-split me-2 text-warning"></i>Em curso hoje <span class="badge rounded-pill tag-neutral ms-1">{{ em_curso|length }}</span></h5>
+    {{ tabela(em_curso, "Ninguém afastado hoje.") }}
+</div>
+
+<div class="dashboard-card mb-4">
+    <h5 class="fw-bold mb-3"><i class="bi bi-calendar-event me-2 text-primary"></i>Próximos <span class="badge rounded-pill tag-neutral ms-1">{{ proximos|length }}</span></h5>
+    {{ tabela(proximos, "Nenhum afastamento agendado.") }}
+</div>
+
+<div class="dashboard-card">
+    <h5 class="fw-bold mb-3"><i class="bi bi-clock-history me-2 text-secondary"></i>Anteriores</h5>
+    {{ tabela(anteriores, "Nenhum afastamento anterior.") }}
+</div>

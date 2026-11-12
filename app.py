@@ -11,6 +11,7 @@ import holidays
 import calendar
 
 from collections import defaultdict, deque
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, date
 from functools import wraps
 from urllib.parse import parse_qsl, urlencode, urlsplit
@@ -21,8 +22,10 @@ import requests
 
 from flask import (
     Flask,
+    g,
     flash,
     get_flashed_messages,
+    has_request_context,
     jsonify,
     redirect,
     render_template,
@@ -34,6 +37,7 @@ from flask import (
     session,
     abort,
 )
+from markupsafe import Markup
 from flask_login import (
     LoginManager,
     UserMixin,
@@ -46,10 +50,10 @@ from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.middleware.proxy_fix import ProxyFix
+from werkzeug.utils import secure_filename
 from PIL import Image, ImageOps, UnidentifiedImageError
 from dotenv import load_dotenv
 import resend
-import dns.resolver
 
 # Bibliotecas para a geração do PDF (ReportLab)
 from reportlab.lib import colors
@@ -138,7 +142,7 @@ public_base_url = _normalise_public_base_url(os.environ.get("PUBLIC_BASE_URL", "
 if not public_base_url:
     if IS_PRODUCTION:
         raise RuntimeError("PUBLIC_BASE_URL ausente: configure a URL pública da aplicação.")
-    public_base_url = "http://localhost:5000"
+    public_base_url = "http://localhost:1234"
 app.config["PUBLIC_BASE_URL"] = public_base_url
 app.config["PREFERRED_URL_SCHEME"] = urlsplit(public_base_url).scheme or "https"
 
@@ -160,6 +164,11 @@ if IS_PRODUCTION and not cookie_secure:
     raise RuntimeError("Produção exige COOKIE_SECURE=true (HTTPS).")
 app.config["SESSION_COOKIE_SECURE"] = cookie_secure
 app.config["REMEMBER_COOKIE_SECURE"] = cookie_secure
+# Nome próprio: outro app Flask no mesmo host (cookies não separam por porta)
+# usaria o padrão "session" e sobrescreveria a sessão, quebrando o CSRF.
+# Com HTTPS, o prefixo __Host- impede que subdomínios definam o cookie.
+app.config["SESSION_COOKIE_NAME"] = "__Host-ponto_session" if cookie_secure else "ponto_session"
+app.config["REMEMBER_COOKIE_NAME"] = "__Host-ponto_remember" if cookie_secure else "ponto_remember"
 app.config["TRUST_PROXY_HEADERS"] = _env_bool("TRUST_PROXY_HEADERS", False)
 if app.config["TRUST_PROXY_HEADERS"]:
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
@@ -201,16 +210,13 @@ app.config["UPLOAD_MAX_DIMENSION"] = 4096
 app.config["UPLOAD_MAX_PIXELS"] = 16_000_000
 app.config["RESET_TOKEN_TTL_SECONDS"] = 30 * 60
 app.config["INVITE_TOKEN_TTL_SECONDS"] = 24 * 60 * 60
-app.config["CONFIRM_TOKEN_TTL_SECONDS"] = 24 * 60 * 60
 app.config["RATE_LIMIT_ENABLED"] = _env_bool("RATE_LIMIT_ENABLED", True)
 app.config["RATE_LIMITS"] = {
     "login": (10, 300),
     "forgot_password": (5, 900),
-    "cadastro": (5, 900),
     "upload": (10, 900),
     "reset_password": (10, 900),
     "definir_senha_usuario": (10, 900),
-    "confirm_email": (10, 900),
     "api_localizacao": (30, 900),
 }
 app.config["CSRF_FIELD_NAME"] = "_csrf_token"
@@ -223,7 +229,6 @@ login_manager.login_view = "login"
 login_manager.login_message_category = "warning"
 login_manager.session_protection = "strong"
 
-CARGA_HORARIA_DIARIA = timedelta(hours=8)
 
 # Siglas e nomes das UFs brasileiras (para o seletor manual e validações)
 UFS_BRASIL = {
@@ -427,9 +432,10 @@ def _reverse_geocode(lat, lng):
         return None, None
 
 
-# Função auxiliar para verificar se a data cai em dia útil (Segunda a Sexta)
-def eh_dia_util(data_obj):
-    if data_obj.weekday() >= 5:
+# Dia útil = dia de trabalho da jornada vigente (padrão: segunda a sexta) e
+# que não seja feriado.
+def eh_dia_util(data_obj, departamento_id=None):
+    if data_obj.weekday() not in jornada_vigente(data_obj, departamento_id).dias_trabalho:
         return False
 
     try:
@@ -579,20 +585,12 @@ def _feriados_do_mes(hoje):
 
 def verificar_conformidade_clt(data_anterior, hora_saida, data_atual, hora_entrada):
     """
-    Verifica intervalo interjornada (mínimo 11h).
+    Verifica o intervalo interjornada mínimo (parâmetro da TI; CLT: 11h).
     """
     dt_saida = datetime.strptime(f"{data_anterior} {hora_saida}", "%d/%m/%Y %H:%M:%S")
     dt_entrada = datetime.strptime(f"{data_atual} {hora_entrada}", "%d/%m/%Y %H:%M:%S")
-    return (dt_entrada - dt_saida) >= timedelta(hours=11)
-
-def verificar_dominio_email(email):
-    try:
-        local, dominio = email.strip().lower().rsplit("@", 1)
-        if not local or not dominio or "." not in dominio:
-            return False
-        return len(dns.resolver.resolve(dominio, "MX")) > 0
-    except Exception:
-        return False
+    minimo = jornada_vigente(dt_entrada.date()).interjornada_min
+    return (dt_entrada - dt_saida) >= timedelta(minutes=minimo)
 
 # ==========================================
 #          MODELOS DO BANCO DE DADOS
@@ -609,12 +607,16 @@ class Notificacao(db.Model):
 
 class LogAuditoria(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    usuario_id = db.Column(db.Integer, db.ForeignKey('usuario.id'), nullable=False)
+    # Ao excluir um usuário o log é preservado (Portaria 671): o banco zera o
+    # vínculo (ON DELETE SET NULL) e o nome do autor fica em ``usuario_nome``,
+    # gravado no momento da ação.
+    usuario_id = db.Column(db.Integer, db.ForeignKey('usuario.id', ondelete='SET NULL'), nullable=True)
+    usuario_nome = db.Column(db.String(100), nullable=True)
     acao = db.Column(db.String(200), nullable=False)
     entidade_id = db.Column(db.Integer, nullable=True)
     data_criacao = db.Column(db.DateTime, default=lambda: datetime.now(ZoneInfo("America/Sao_Paulo")))
 
-    usuario = db.relationship("Usuario", backref="logs")
+    usuario = db.relationship("Usuario", backref=db.backref("logs", passive_deletes=True))
 
 class Departamento(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -648,35 +650,424 @@ class Configuracao(db.Model):
     chave = db.Column(db.String(50), primary_key=True)
     valor = db.Column(db.String(255), nullable=False)
 
+
+DIAS_SEMANA = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"]
+
+
+@dataclass(frozen=True)
+class Jornada:
+    """Regras de jornada e horas extras (parametrizadas pela TI).
+
+    Os valores padrão reproduzem o comportamento original do sistema
+    (8h de segunda a sexta, interjornada de 11h) e os limites da CLT.
+    """
+    carga_diaria_min: int = 480
+    dias_trabalho: tuple = (0, 1, 2, 3, 4)  # 0 = segunda ... 6 = domingo
+    tolerancia_marcacao_min: int = 5        # CLT art. 58 §1º: até 5 min por marcação
+    tolerancia_diaria_min: int = 10         # ... e até 10 min no dia
+    intervalo_minimo_min: int = 60          # CLT art. 71: 1h para jornada > 6h
+    interjornada_min: int = 660             # CLT art. 66: 11h entre jornadas
+    limite_extras_dia_min: int = 120        # CLT art. 59: até 2h extras por dia
+    extra_util_pct: int = 50                # CF art. 7º XVI: no mínimo 50%
+    extra_descanso_pct: int = 100           # domingos e feriados
+    noturno_ativo: bool = False
+    noturno_pct: int = 20                   # CLT art. 73: no mínimo 20%
+    horario_entrada_min: int = None         # minutos desde 00:00 (None = sem horário fixo)
+    horario_saida_min: int = None
+    vigente_desde: date = None
+    padrao: bool = field(default=False, compare=False)
+    setor: str = field(default=None, compare=False)  # setor com carga própria, se houver
+
+    @property
+    def carga_diaria_seg(self):
+        return self.carga_diaria_min * 60
+
+    @property
+    def carga_diaria_fmt(self):
+        h, m = divmod(self.carga_diaria_min, 60)
+        return f"{h}h" if not m else f"{h}h{m:02d}"
+
+    @property
+    def dias_trabalho_texto(self):
+        return ", ".join(DIAS_SEMANA[d] for d in sorted(self.dias_trabalho))
+
+    @property
+    def horario_texto(self):
+        if self.horario_entrada_min is None or self.horario_saida_min is None:
+            return None
+        fmt = lambda m: f"{m // 60:02d}:{m % 60:02d}"
+        return f"{fmt(self.horario_entrada_min)} às {fmt(self.horario_saida_min)}"
+
+
+# (campo, rótulo, mínimo, máximo) dos parâmetros numéricos editáveis pela TI.
+JORNADA_LIMITES = [
+    ("carga_diaria_min", "Carga diária", 60, 720),
+    ("tolerancia_marcacao_min", "Tolerância por marcação", 0, 5),
+    ("tolerancia_diaria_min", "Tolerância diária", 0, 10),
+    ("intervalo_minimo_min", "Intervalo mínimo", 0, 240),
+    ("interjornada_min", "Interjornada mínima", 660, 1440),
+    ("limite_extras_dia_min", "Limite de extras por dia", 0, 240),
+    ("extra_util_pct", "Adicional em dia útil", 50, 200),
+    ("extra_descanso_pct", "Adicional em domingo/feriado", 50, 300),
+    ("noturno_pct", "Adicional noturno", 20, 100),
+]
+
+
+class ParametroJornada(db.Model):
+    """Versão das regras de jornada, válida a partir de ``vigente_desde``.
+
+    Nunca se sobrescreve uma versão antiga com outra data: meses passados
+    continuam sendo calculados com a regra que valia na época.
+    """
+    __tablename__ = "parametro_jornada"
+    id = db.Column(db.Integer, primary_key=True)
+    vigente_desde = db.Column(db.Date, nullable=False, unique=True)
+    carga_diaria_min = db.Column(db.Integer, nullable=False)
+    dias_trabalho = db.Column(db.String(20), nullable=False)  # ex.: "0,1,2,3,4"
+    tolerancia_marcacao_min = db.Column(db.Integer, nullable=False)
+    tolerancia_diaria_min = db.Column(db.Integer, nullable=False)
+    intervalo_minimo_min = db.Column(db.Integer, nullable=False)
+    interjornada_min = db.Column(db.Integer, nullable=False)
+    limite_extras_dia_min = db.Column(db.Integer, nullable=False)
+    extra_util_pct = db.Column(db.Integer, nullable=False)
+    extra_descanso_pct = db.Column(db.Integer, nullable=False)
+    noturno_ativo = db.Column(db.Boolean, nullable=False, default=False)
+    noturno_pct = db.Column(db.Integer, nullable=False)
+    horario_entrada_min = db.Column(db.Integer, nullable=True)
+    horario_saida_min = db.Column(db.Integer, nullable=True)
+    alterado_por_nome = db.Column(db.String(100), nullable=True)
+    alterado_em = db.Column(db.DateTime, default=lambda: datetime.now(ZoneInfo("America/Sao_Paulo")))
+
+    def para_jornada(self):
+        return Jornada(
+            carga_diaria_min=self.carga_diaria_min,
+            dias_trabalho=tuple(int(d) for d in self.dias_trabalho.split(",") if d != ""),
+            tolerancia_marcacao_min=self.tolerancia_marcacao_min,
+            tolerancia_diaria_min=self.tolerancia_diaria_min,
+            intervalo_minimo_min=self.intervalo_minimo_min,
+            interjornada_min=self.interjornada_min,
+            limite_extras_dia_min=self.limite_extras_dia_min,
+            extra_util_pct=self.extra_util_pct,
+            extra_descanso_pct=self.extra_descanso_pct,
+            noturno_ativo=bool(self.noturno_ativo),
+            noturno_pct=self.noturno_pct,
+            horario_entrada_min=self.horario_entrada_min,
+            horario_saida_min=self.horario_saida_min,
+            vigente_desde=self.vigente_desde,
+        )
+
+
+class JornadaSetor(db.Model):
+    """Carga horária e dias de trabalho próprios de um setor, por vigência.
+
+    Tolerâncias, intervalos e percentuais de extra continuam vindo da
+    jornada geral (``ParametroJornada``).
+    """
+    __tablename__ = "jornada_setor"
+    __table_args__ = (db.UniqueConstraint("departamento_id", "vigente_desde", name="uq_jornada_setor_vigencia"),)
+    id = db.Column(db.Integer, primary_key=True)
+    departamento_id = db.Column(db.Integer, db.ForeignKey("departamento.id", ondelete="CASCADE"), nullable=False, index=True)
+    vigente_desde = db.Column(db.Date, nullable=False)
+    carga_diaria_min = db.Column(db.Integer, nullable=False)
+    dias_trabalho = db.Column(db.String(20), nullable=False)
+    horario_entrada_min = db.Column(db.Integer, nullable=True)  # None = usa o horário da jornada geral
+    horario_saida_min = db.Column(db.Integer, nullable=True)
+    alterado_por_nome = db.Column(db.String(100), nullable=True)
+    alterado_em = db.Column(db.DateTime, default=lambda: datetime.now(ZoneInfo("America/Sao_Paulo")))
+
+    departamento = db.relationship("Departamento", backref=db.backref(
+        "jornadas", lazy=True, passive_deletes=True, order_by="JornadaSetor.vigente_desde.desc()"))
+
+    @property
+    def dias_tupla(self):
+        return tuple(int(d) for d in self.dias_trabalho.split(",") if d != "")
+
+
+JORNADA_PADRAO = Jornada(padrao=True)
+
+
+class PushInscricao(db.Model):
+    """Aparelho/navegador inscrito para receber notificações push."""
+    __tablename__ = "push_inscricao"
+    id = db.Column(db.Integer, primary_key=True)
+    usuario_id = db.Column(db.Integer, db.ForeignKey("usuario.id", ondelete="CASCADE"), nullable=False, index=True)
+    endpoint = db.Column(db.Text, nullable=False)
+    endpoint_hash = db.Column(db.String(64), nullable=False, unique=True)
+    p256dh = db.Column(db.String(255), nullable=False)
+    auth = db.Column(db.String(255), nullable=False)
+    user_agent = db.Column(db.String(255), nullable=True)
+    criado_em = db.Column(db.DateTime, default=lambda: datetime.now(ZoneInfo("America/Sao_Paulo")))
+
+
+AFASTAMENTO_TIPOS = {
+    "ferias": "Férias",
+    "atestado": "Atestado médico",
+    "licenca": "Licença",
+    "folga": "Folga / abono",
+    "outro": "Outro",
+}
+AFASTAMENTO_ANEXO_MAX = 2 * 1024 * 1024
+AFASTAMENTO_ANEXO_TIPOS = {b"%PDF": "application/pdf", b"\xff\xd8\xff": "image/jpeg", b"\x89PNG": "image/png"}
+
+
+class Afastamento(db.Model):
+    """Período em que o colaborador está dispensado do ponto (abonado).
+
+    O anexo (ex.: atestado) fica no banco porque o disco do Heroku é
+    temporário. É dado de saúde (LGPD): só o RH acessa e cada acesso é logado.
+    """
+    __tablename__ = "afastamento"
+    id = db.Column(db.Integer, primary_key=True)
+    usuario_id = db.Column(db.Integer, db.ForeignKey("usuario.id", ondelete="CASCADE"), nullable=False, index=True)
+    tipo = db.Column(db.String(20), nullable=False)
+    data_inicio = db.Column(db.Date, nullable=False)
+    data_fim = db.Column(db.Date, nullable=False)
+    observacao = db.Column(db.String(500), nullable=True)
+    anexo_nome = db.Column(db.String(255), nullable=True)
+    anexo_tipo = db.Column(db.String(50), nullable=True)
+    anexo_dados = db.deferred(db.Column(db.LargeBinary, nullable=True))
+    criado_por_nome = db.Column(db.String(100), nullable=True)
+    criado_em = db.Column(db.DateTime, default=lambda: datetime.now(ZoneInfo("America/Sao_Paulo")))
+
+    usuario = db.relationship("Usuario", backref=db.backref("afastamentos", lazy=True, passive_deletes=True))
+
+    @property
+    def rotulo(self):
+        return AFASTAMENTO_TIPOS.get(self.tipo, self.tipo)
+
+    @property
+    def dias(self):
+        return (self.data_fim - self.data_inicio).days + 1
+
+
+def _afastamentos_cache():
+    """{usuario_id: [(inicio, fim, tipo), ...]} — carregado uma vez por contexto."""
+    try:
+        cache = g.get("_afastamentos")
+    except RuntimeError:
+        return {}
+    if cache is None:
+        cache = defaultdict(list)
+        for uid, ini, fim, tipo in db.session.query(
+            Afastamento.usuario_id, Afastamento.data_inicio, Afastamento.data_fim, Afastamento.tipo
+        ).all():
+            cache[uid].append((ini, fim, tipo))
+        g._afastamentos = cache
+    return cache
+
+
+def _limpar_cache_afastamentos():
+    try:
+        g.pop("_afastamentos", None)
+    except Exception:
+        pass
+
+
+def afastamento_no_dia(usuario_id, data_ref):
+    """Tipo do afastamento que cobre a data (ou None)."""
+    for ini, fim, tipo in _afastamentos_cache().get(usuario_id, []):
+        if ini <= data_ref <= fim:
+            return tipo
+    return None
+
+
+class FechamentoMes(db.Model):
+    """Mês de apuração fechado pelo RH (trava edições daquele período)."""
+    __tablename__ = "fechamento_mes"
+    __table_args__ = (db.UniqueConstraint("ano", "mes", name="uq_fechamento_ano_mes"),)
+    id = db.Column(db.Integer, primary_key=True)
+    ano = db.Column(db.Integer, nullable=False)
+    mes = db.Column(db.Integer, nullable=False)
+    fechado = db.Column(db.Boolean, nullable=False, default=True)
+    fechado_em = db.Column(db.DateTime, nullable=True)
+    fechado_por_nome = db.Column(db.String(100), nullable=True)
+    reaberto_em = db.Column(db.DateTime, nullable=True)
+    reaberto_por_nome = db.Column(db.String(100), nullable=True)
+    motivo_reabertura = db.Column(db.String(500), nullable=True)
+
+    @property
+    def rotulo(self):
+        return f"{MESES_PT[self.mes - 1]}/{self.ano}"
+
+
+class EspelhoMensal(db.Model):
+    """Fotografia imutável do espelho de ponto de um colaborador no fechamento.
+
+    ``hash`` identifica o conteúdo; a ciência guarda o hash que a pessoa viu.
+    """
+    __tablename__ = "espelho_mensal"
+    __table_args__ = (db.UniqueConstraint("fechamento_id", "usuario_id", name="uq_espelho_fechamento_usuario"),)
+    id = db.Column(db.Integer, primary_key=True)
+    fechamento_id = db.Column(db.Integer, db.ForeignKey("fechamento_mes.id", ondelete="CASCADE"), nullable=False, index=True)
+    usuario_id = db.Column(db.Integer, db.ForeignKey("usuario.id", ondelete="CASCADE"), nullable=False, index=True)
+    usuario_nome = db.Column(db.String(100), nullable=True)
+    dados = db.Column(db.Text, nullable=False)
+    hash = db.Column(db.String(64), nullable=False)
+    ciencia_status = db.Column(db.String(20), nullable=False, default="pendente")  # pendente | ciente | contestado
+    ciencia_em = db.Column(db.DateTime, nullable=True)
+    ciencia_ip = db.Column(db.String(64), nullable=True)
+    ciencia_user_agent = db.Column(db.String(255), nullable=True)
+    ciencia_hash = db.Column(db.String(64), nullable=True)
+    comentario = db.Column(db.String(1000), nullable=True)
+
+    fechamento = db.relationship("FechamentoMes", backref=db.backref("espelhos", lazy=True, passive_deletes=True))
+    usuario = db.relationship("Usuario")
+
+    @property
+    def conteudo(self):
+        import json as _json
+        return _json.loads(self.dados)
+
+
+def _meses_fechados():
+    """{(ano, mes)} fechados — cache por contexto."""
+    try:
+        cache = g.get("_meses_fechados")
+    except RuntimeError:
+        return set()
+    if cache is None:
+        cache = {(a, m) for a, m in db.session.query(FechamentoMes.ano, FechamentoMes.mes).filter(FechamentoMes.fechado.is_(True)).all()}
+        g._meses_fechados = cache
+    return cache
+
+
+def _limpar_cache_fechamento():
+    try:
+        g.pop("_meses_fechados", None)
+    except Exception:
+        pass
+
+
+def mes_fechado(data_ref):
+    return (data_ref.year, data_ref.month) in _meses_fechados()
+
+
+def fechado_no_intervalo(inicio, fim):
+    """Primeiro mês fechado que o intervalo toca (ou None)."""
+    for ano, mes in sorted(_meses_fechados()):
+        ini_m = date(ano, mes, 1)
+        fim_m = date(ano, mes, calendar.monthrange(ano, mes)[1])
+        if inicio <= fim_m and fim >= ini_m:
+            return (ano, mes)
+    return None
+
+
+def msg_mes_fechado(ano, mes):
+    return (f"O mês de {MESES_PT[mes - 1]}/{ano} está fechado. Para alterar, o RH precisa "
+            f"reabri-lo na aba Fechamento.")
+
+
+class LembreteEnviado(db.Model):
+    """Garante um único envio de cada lembrete por pessoa/dia (mesmo com vários processos)."""
+    __tablename__ = "lembrete_enviado"
+    __table_args__ = (db.UniqueConstraint("usuario_id", "data", "tipo", name="uq_lembrete_dia_tipo"),)
+    id = db.Column(db.Integer, primary_key=True)
+    usuario_id = db.Column(db.Integer, db.ForeignKey("usuario.id", ondelete="CASCADE"), nullable=False, index=True)
+    data = db.Column(db.Date, nullable=False)
+    tipo = db.Column(db.String(30), nullable=False)
+    enviado_em = db.Column(db.DateTime, default=lambda: datetime.now(ZoneInfo("America/Sao_Paulo")))
+
+
+def _versoes_jornada():
+    """Versões ordenadas da mais nova para a mais antiga (cache por requisição)."""
+    try:
+        cache = g.get("_versoes_jornada")
+    except RuntimeError:
+        # Fora de contexto de app: regra padrão.
+        return []
+    if cache is None:
+        # Erros de banco não são engolidos: no PostgreSQL deixariam a
+        # transação inválida para o resto da requisição.
+        cache = [
+            v.para_jornada()
+            for v in ParametroJornada.query.order_by(ParametroJornada.vigente_desde.desc()).all()
+        ]
+        g._versoes_jornada = cache
+    return cache
+
+
+def _versoes_setor():
+    """{departamento_id: [(vigente_desde, carga_min, dias, nome_setor), ...]} (mais nova primeiro)."""
+    try:
+        cache = g.get("_versoes_setor")
+    except RuntimeError:
+        return {}
+    if cache is None:
+        cache = defaultdict(list)
+        linhas = (
+            db.session.query(JornadaSetor, Departamento.nome)
+            .join(Departamento, Departamento.id == JornadaSetor.departamento_id)
+            .order_by(JornadaSetor.vigente_desde.desc())
+            .all()
+        )
+        for js, nome in linhas:
+            cache[js.departamento_id].append((js.vigente_desde, js.carga_diaria_min, js.dias_tupla, nome,
+                                              js.horario_entrada_min, js.horario_saida_min))
+        g._versoes_setor = cache
+    return cache
+
+
+def _limpar_cache_jornada():
+    try:
+        g.pop("_versoes_jornada", None)
+        g.pop("_versoes_setor", None)
+    except Exception:
+        pass
+
+
+def jornada_vigente(data_ref=None, departamento_id=None):
+    """Regras válidas na data informada (padrão: hoje).
+
+    Com ``departamento_id``, a carga diária e os dias de trabalho do setor
+    (se ele tiver carga própria vigente na data) substituem os gerais.
+    """
+    if data_ref is None:
+        data_ref = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
+    elif isinstance(data_ref, datetime):
+        data_ref = data_ref.date()
+    base = JORNADA_PADRAO
+    for versao in _versoes_jornada():
+        if versao.vigente_desde <= data_ref:
+            base = versao
+            break
+    if departamento_id:
+        for desde, carga, dias, nome, entrada, saida in _versoes_setor().get(departamento_id, []):
+            if desde <= data_ref:
+                horarios = {}
+                if entrada is not None and saida is not None:
+                    horarios = {"horario_entrada_min": entrada, "horario_saida_min": saida}
+                return replace(base, carga_diaria_min=carga, dias_trabalho=dias, setor=nome, **horarios)
+    return base
+
 class Usuario(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     nome = db.Column(db.String(100), nullable=False)
     email = db.Column(db.String(100), unique=True, nullable=False)
     senha_hash = db.Column(db.String(200), nullable=False)
-    is_admin = db.Column(db.Boolean, default=False)
+    # Papéis (acumuláveis): RH opera pessoas e ponto; TI parametriza o sistema.
+    is_rh = db.Column(db.Boolean, nullable=False, default=False)
+    is_ti = db.Column(db.Boolean, nullable=False, default=False)
+    # Coluna legada "is_admin": só lida pela migração que criou os papéis.
+    admin_legado = db.Column("is_admin", db.Boolean, default=False)
     email_confirmado = db.Column(db.Boolean, default=False)
     precisa_redefinir_senha = db.Column(db.Boolean, default=False)
     auth_version = db.Column(db.Integer, nullable=False, default=0)
     foto_url = db.Column(db.String(255), nullable=True)
     departamento_id = db.Column(db.Integer, db.ForeignKey('departamento.id'), nullable=True)
     tipo_contrato = db.Column(db.String(10), nullable=False, default="CLT")
-    permissoes = db.Column(db.Text, nullable=True) # Guarda JSON ex: {"pode_ver_dashboard": true, ...}
     data_cadastro = db.Column(db.DateTime, default=lambda: datetime.now(ZoneInfo("America/Sao_Paulo")))
     pontos = db.relationship("RegistroPonto", backref="usuario", lazy=True)
     solicitacoes = db.relationship("SolicitacaoCorrecao", backref="usuario", lazy=True)
     security_tokens = db.relationship("SecurityToken", back_populates="usuario", lazy=True, cascade="all, delete-orphan")
 
-    def tem_permissao(self, permissao):
-        if self.is_admin:
-            return True
-        if not self.permissoes:
-            return False
-        try:
-            import json
-            perms = json.loads(self.permissoes)
-            return perms.get(permissao, False)
-        except:
-            return False
+    @property
+    def tem_gestao(self):
+        """Acessa o painel de gestão (RH e/ou TI)."""
+        return bool(self.is_rh or self.is_ti)
+
+    @property
+    def papeis_texto(self):
+        return " + ".join(p for p, on in (("RH", self.is_rh), ("TI", self.is_ti)) if on) or "Colaborador"
 
     def get_reset_token(self, expires_sec=None):
         return issue_security_token(self.id, SecurityToken.PURPOSE_RESET, expires_sec or app.config["RESET_TOKEN_TTL_SECONDS"])[0]
@@ -685,12 +1076,6 @@ class Usuario(UserMixin, db.Model):
     def verify_reset_token(token):
         return peek_security_token(token, SecurityToken.PURPOSE_RESET)
 
-    def get_confirmation_token(self, expires_sec=None):
-        return issue_security_token(self.id, SecurityToken.PURPOSE_CONFIRM, expires_sec or app.config["CONFIRM_TOKEN_TTL_SECONDS"])[0]
-
-    @staticmethod
-    def verify_confirmation_token(token):
-        return peek_security_token(token, SecurityToken.PURPOSE_CONFIRM)
 
 class SecurityToken(db.Model):
     """Tokens opacos de uso único; somente o digest é persistido."""
@@ -724,7 +1109,7 @@ def _token_digest(raw_token):
 
 def issue_security_token(usuario_id, purpose, ttl_seconds, *, email=None, nome=None, senha_hash=None):
     """Cria um token opaco, aleatório, expirável e de uso único."""
-    if purpose not in {SecurityToken.PURPOSE_RESET, SecurityToken.PURPOSE_INVITE, SecurityToken.PURPOSE_CONFIRM}:
+    if purpose not in {SecurityToken.PURPOSE_RESET, SecurityToken.PURPOSE_INVITE}:
         raise ValueError("purpose de token inválido")
     raw_token = secrets.token_urlsafe(48)
     agora = _local_now()
@@ -974,11 +1359,17 @@ def _csrf_is_valid():
 def enforce_csrf_and_rate_limits():
     if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
         if not _csrf_is_valid():
-            abort(403, description="Token CSRF inválido ou ausente.")
+            app.logger.info("CSRF recusado em %s %s", request.method, request.path)
+            if request.path.startswith("/api/") or request.is_json:
+                abort(403, description="Token CSRF inválido ou ausente.")
+            # Formulário enviado de uma página desatualizada (sessão renovada,
+            # login em outra aba etc.): explica e oferece voltar, sem executar nada.
+            voltar = _internal_referrer_path(url_for("index") if current_user.is_authenticated else url_for("login"))
+            return render_template("erro_csrf.html", voltar=voltar), 403
     rate_endpoint = request.endpoint
     if rate_endpoint in {
-        "login", "cadastro", "forgot_password", "upload_foto_perfil", "reset_password",
-        "definir_senha_usuario", "confirm_email", "api_localizacao",
+        "login", "forgot_password", "upload_foto_perfil", "reset_password",
+        "definir_senha_usuario", "api_localizacao",
     }:
         _rate_limit("upload" if rate_endpoint == "upload_foto_perfil" else rate_endpoint)
 
@@ -1007,8 +1398,8 @@ def add_security_headers(response):
     if app.config["SESSION_COOKIE_SECURE"] and request.is_secure:
         response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
     if request.endpoint in {
-        "login", "cadastro", "forgot_password", "reset_password", "definir_senha_usuario",
-        "confirm_email", "logout", "redefinir_senha_forca", "alterar_senha",
+        "login", "forgot_password", "reset_password", "definir_senha_usuario",
+        "logout", "redefinir_senha_forca", "alterar_senha",
     }:
         response.headers.setdefault("Cache-Control", "no-store")
     return response
@@ -1051,14 +1442,66 @@ def load_user(user_id):
         return None
     return user
 
-def admin_required(f):
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if not current_user.is_authenticated or not current_user.is_admin:
-            flash("Acesso permitido apenas para administradores.", "danger")
-            return redirect(url_for("index"))
-        return f(*args, **kwargs)
-    return decorated_function
+def _papel_required(checar, mensagem):
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            if not current_user.is_authenticated or not checar(current_user):
+                flash(mensagem, "danger")
+                return redirect(url_for("index"))
+            return f(*args, **kwargs)
+        return decorated_function
+    return decorator
+
+
+# RH: colaboradores, ponto, correções, relatórios. TI: parâmetros, feriados,
+# departamentos, acessos e logs. ``gestao_required``: telas comuns aos dois.
+rh_required = _papel_required(lambda u: u.is_rh, "Acesso permitido apenas ao RH.")
+ti_required = _papel_required(lambda u: u.is_ti, "Acesso permitido apenas à TI.")
+gestao_required = _papel_required(lambda u: u.tem_gestao, "Acesso permitido apenas ao RH e à TI.")
+
+def _migrar_log_auditoria(inspector):
+    """Logs de auditoria sobrevivem à exclusão do usuário (Portaria 671).
+
+    Garante ``usuario_nome``, ``usuario_id`` anulável e FK com
+    ON DELETE SET NULL. Idempotente: só executa DDL quando algo falta.
+    Só o PostgreSQL (Supabase) é usado em produção; em outros bancos (ex.: o
+    SQLite dos testes) o ``create_all`` já cria a tabela no formato novo.
+    """
+    from sqlalchemy import text
+
+    if db.engine.name != "postgresql":
+        return
+
+    colunas = {c["name"]: c for c in inspector.get_columns("log_auditoria")}
+    fks = [
+        fk for fk in inspector.get_foreign_keys("log_auditoria")
+        if fk.get("referred_table") == "usuario" and fk.get("constrained_columns") == ["usuario_id"]
+    ]
+    fk_ok = bool(fks) and all(
+        (fk.get("options") or {}).get("ondelete", "").upper() == "SET NULL" for fk in fks
+    )
+    precisa_backfill = "usuario_nome" not in colunas
+
+    if precisa_backfill:
+        db.session.execute(text("ALTER TABLE log_auditoria ADD COLUMN usuario_nome VARCHAR(100)"))
+    if not colunas["usuario_id"]["nullable"]:
+        db.session.execute(text("ALTER TABLE log_auditoria ALTER COLUMN usuario_id DROP NOT NULL"))
+    if not fk_ok:
+        for fk in fks:
+            db.session.execute(text(f'ALTER TABLE log_auditoria DROP CONSTRAINT "{fk["name"]}"'))
+        db.session.execute(text(
+            "ALTER TABLE log_auditoria ADD CONSTRAINT log_auditoria_usuario_id_fkey "
+            "FOREIGN KEY (usuario_id) REFERENCES usuario(id) ON DELETE SET NULL"
+        ))
+
+    if precisa_backfill:
+        db.session.execute(text(
+            "UPDATE log_auditoria SET usuario_nome = "
+            "(SELECT nome FROM usuario WHERE usuario.id = log_auditoria.usuario_id) "
+            "WHERE usuario_nome IS NULL AND usuario_id IS NOT NULL"
+        ))
+
 
 # Migração leve executada apenas fora do perfil de teste. O bloco antigo que
 # criava/migrava o banco durante a importação foi removido deliberadamente.
@@ -1070,6 +1513,8 @@ def _apply_database_migrations():
     colunas_usuario = [c["name"] for c in inspector.get_columns("usuario")]
     migrations = (
         ("is_admin", "ALTER TABLE usuario ADD COLUMN is_admin BOOLEAN DEFAULT FALSE"),
+        ("is_rh", "ALTER TABLE usuario ADD COLUMN is_rh BOOLEAN NOT NULL DEFAULT FALSE"),
+        ("is_ti", "ALTER TABLE usuario ADD COLUMN is_ti BOOLEAN NOT NULL DEFAULT FALSE"),
         ("email_confirmado", "ALTER TABLE usuario ADD COLUMN email_confirmado BOOLEAN DEFAULT FALSE"),
         ("precisa_redefinir_senha", "ALTER TABLE usuario ADD COLUMN precisa_redefinir_senha BOOLEAN DEFAULT FALSE"),
         ("auth_version", "ALTER TABLE usuario ADD COLUMN auth_version INTEGER NOT NULL DEFAULT 0"),
@@ -1081,6 +1526,10 @@ def _apply_database_migrations():
     for column, statement in migrations:
         if column not in colunas_usuario:
             db.session.execute(text(statement))
+    if "is_rh" not in colunas_usuario and "is_ti" not in colunas_usuario:
+        # Papéis acabaram de ser criados: administradores antigos recebem RH + TI
+        # para ninguém perder acesso; a TI ajusta depois na tela de usuários.
+        db.session.execute(text("UPDATE usuario SET is_rh = TRUE, is_ti = TRUE WHERE is_admin = TRUE"))
     if "data_cadastro" not in colunas_usuario:
         data_type = "TIMESTAMP" if db.engine.name == "postgresql" else "DATETIME"
         db.session.execute(text(f"ALTER TABLE usuario ADD COLUMN data_cadastro {data_type}"))
@@ -1095,6 +1544,28 @@ def _apply_database_migrations():
     colunas_feriado = [c["name"] for c in inspector.get_columns("feriado")]
     if "fonte" not in colunas_feriado:
         db.session.execute(text("ALTER TABLE feriado ADD COLUMN fonte VARCHAR(20) DEFAULT 'manual'"))
+
+    _migrar_log_auditoria(inspector)
+
+    # Notificações gravadas: bancos criados por versões antigas não tinham
+    # título/tipo/link (o "Enviar Lembrete" falhava ao gravar).
+    if "notificacao" in inspector.get_table_names():
+        colunas_notif = [c["name"] for c in inspector.get_columns("notificacao")]
+        for coluna, ddl in (
+            ("titulo", "ALTER TABLE notificacao ADD COLUMN titulo VARCHAR(150) DEFAULT 'Aviso Geral'"),
+            ("tipo", "ALTER TABLE notificacao ADD COLUMN tipo VARCHAR(50) DEFAULT 'info'"),
+            ("link", "ALTER TABLE notificacao ADD COLUMN link VARCHAR(255)"),
+        ):
+            if coluna not in colunas_notif:
+                db.session.execute(text(ddl))
+
+    # Horários de entrada/saída (lembretes de ponto).
+    for tabela in ("parametro_jornada", "jornada_setor"):
+        if tabela in inspector.get_table_names():
+            colunas = [c["name"] for c in inspector.get_columns(tabela)]
+            for coluna in ("horario_entrada_min", "horario_saida_min"):
+                if coluna not in colunas:
+                    db.session.execute(text(f"ALTER TABLE {tabela} ADD COLUMN {coluna} INTEGER"))
 
     db.session.execute(text("UPDATE usuario SET auth_version = COALESCE(auth_version, 0)"))
     db.session.commit()
@@ -1149,13 +1620,14 @@ def bootstrap_admin(email, nome, senha):
         nome=nome,
         email=email,
         senha_hash=generate_password_hash(senha, method="scrypt"),
-        is_admin=True,
+        is_rh=True,
+        is_ti=True,
         email_confirmado=True,
         precisa_redefinir_senha=False,
     )
     db.session.add(user)
     db.session.commit()
-    click.echo(f"Administrador criado: {email}")
+    click.echo(f"Administrador (RH + TI) criado: {email}")
 
 
 # ==========================================
@@ -1215,94 +1687,233 @@ def _parse_hora(valor):
             continue
     return None
 
+# ==========================================
+#   APURAÇÃO DE PONTO (extras pagas, CLT)
+# ==========================================
+@dataclass
+class ApuracaoDia:
+    """Resultado de um dia para um colaborador (tempos em segundos)."""
+    data: date
+    tipo_dia: str                      # util | descanso | domingo | feriado | afastado
+    batidas: list = field(default_factory=list)   # [(tipo, "HH:MM:SS")] em ordem
+    trabalhado: int = 0
+    esperado: int = 0
+    extra_50: int = 0
+    extra_100: int = 0
+    atraso: int = 0                    # atraso/saída antecipada em dia trabalhado
+    falta: bool = False
+    falta_seg: int = 0
+    noturno: int = 0                   # tempo real entre 22h e 5h
+    incompleto: bool = False
+    em_aberto: bool = False
+    futuro: bool = False
+    tolerado: bool = False             # diferença absorvida pela tolerância
+    afastamento: str = None
+    alertas: list = field(default_factory=list)
 
-def calcular_saldo_dia(registros_do_dia, data_obj):
+    @property
+    def extras(self):
+        return self.extra_50 + self.extra_100
+
+    @property
+    def situacao(self):
+        if self.futuro:
+            return "-"
+        if self.afastamento:
+            return AFASTAMENTO_TIPOS.get(self.afastamento, self.afastamento).upper()
+        if self.em_aberto:
+            return "Em Aberto"
+        if self.falta:
+            return "FALTA"
+        if self.incompleto:
+            return "INCOMPLETO"
+        partes = []
+        if self.tipo_dia == "feriado":
+            partes.append("Feriado")
+        elif self.tipo_dia == "domingo":
+            partes.append("Domingo")
+        elif self.tipo_dia == "descanso" and self.batidas:
+            partes.append("Folga")
+        if self.tolerado:
+            partes.append("Tolerância")
+        partes.extend(self.alertas)
+        return " · ".join(partes) if partes else ("Ok" if self.batidas else "")
+
+
+def fmt_hhmm(segundos, sinal=False):
+    """Segundos -> 'HH:MM' (com '+'/'-' opcional)."""
+    seg = int(segundos or 0)
+    neg = seg < 0
+    h, m = divmod(abs(seg) // 60, 60)
+    txt = f"{h:02d}:{m:02d}"
+    if sinal:
+        txt = ("-" if neg else "+") + txt
+    return txt
+
+
+def _minutos_do_dia(hora):
+    t = _parse_hora(hora)
+    return None if t is None else t.hour * 60 + t.minute + t.second / 60
+
+
+def _sobreposicao_noturna(ini_min, fim_min):
+    """Minutos de [ini, fim) dentro de 00:00–05:00 e 22:00–24:00."""
+    total = 0
+    for a, b in ((0, 300), (1320, 1440)):
+        total += max(0, min(fim_min, b) - max(ini_min, a))
+    return total
+
+
+def apurar_dia(usuario, data_ref, batidas, hoje=None, saida_anterior=None):
+    """Apura um dia. ``batidas``: [(tipo, hora)] do dia (qualquer ordem).
+
+    ``saida_anterior``: datetime da última saída do dia anterior (interjornada).
     """
-    Calcula o tempo trabalhado no dia e o saldo em relação à carga horária diária.
-
-    O tempo é calculado pareando Entradas e Saídas em ordem cronológica:
-      trabalhado = Σ (Saída[i] - Entrada[i])
-    Se sobrar uma Entrada sem Saída correspondente e for o dia atual,
-    o tempo parcial é calculado até o momento atual.
-
-    Retorna um dict com:
-      - total_trabalhado_seg: segundos totais trabalhados
-      - total_trabalhado_fmt: string formatada (ex: "07:15h")
-      - diferenca_seg: diferença em segundos (negativo=faltante, positivo=extra)
-      - diferenca_fmt: string formatada (ex: "-45min" ou "+30min")
-      - is_excedente: True se trabalhou mais que a carga diária
-      - is_faltante: True se trabalhou menos que a carga diária
-      - tem_registro: True se houve ao menos 1 batida no dia
-    """
-    carga_seg = int(CARGA_HORARIA_DIARIA.total_seconds())
-
-    tempo_trabalhado = timedelta()
-    tem_registro = len(registros_do_dia) > 0
-
-    if not tem_registro:
-        h_falt, m_falt = divmod(carga_seg // 60, 60)
-        return {
-            "total_trabalhado_seg": 0,
-            "total_trabalhado_fmt": "--:--",
-            "diferenca_seg": -carga_seg,
-            "diferenca_fmt": f"-{h_falt:02d}:{m_falt:02d}h",
-            "is_excedente": False,
-            "is_faltante": True,
-            "tem_registro": False,
-        }
-
-    # Separa entradas e saídas em ordem cronológica de registro
-    entradas = []
-    saidas = []
-    for p in registros_do_dia:
-        tipo = getattr(p, "tipo", getattr(p, "tipo_ponto", ""))
-        hora = getattr(p, "hora", None)
-        if not tipo or not hora:
-            continue
-        if tipo == "Entrada":
-            entradas.append(hora)
-        elif tipo == "Saída":
-            saidas.append(hora)
-
-    # Pareia Entrada[i] -> Saída[i]
-    for i in range(min(len(entradas), len(saidas))):
-        t1 = _parse_hora(entradas[i])
-        t2 = _parse_hora(saidas[i])
-        if t1 and t2 and t2 > t1:
-            tempo_trabalhado += datetime.combine(date.today(), t2) - datetime.combine(date.today(), t1)
-
-    # Se sobrou uma Entrada sem Saída e é hoje, calcula parcial até o momento
-    hoje_obj = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
-    if len(entradas) > len(saidas) and data_obj == hoje_obj:
-        t1 = _parse_hora(entradas[-1])
-        if t1:
-            agora = datetime.now(ZoneInfo("America/Sao_Paulo"))
-            t_entrada_hoje = datetime.combine(data_obj, t1).replace(tzinfo=ZoneInfo("America/Sao_Paulo"))
-            if agora > t_entrada_hoje:
-                tempo_trabalhado += agora - t_entrada_hoje
-
-    total_seg = int(tempo_trabalhado.total_seconds())
-    horas, mins = divmod(total_seg // 60, 60)
-    total_fmt = f"{horas:02d}:{mins:02d}h"
-
-    diferenca_seg = total_seg - carga_seg
-    diff_abs = abs(diferenca_seg) // 60
-    diff_h, diff_m = divmod(diff_abs, 60)
-
-    if diferenca_seg >= 0:
-        diferenca_fmt = f"+{diff_h:02d}:{diff_m:02d}h"
+    hoje = hoje or datetime.now(ZoneInfo("America/Sao_Paulo")).date()
+    dep = usuario.departamento_id
+    j = jornada_vigente(data_ref, dep)
+    afast = afastamento_no_dia(usuario.id, data_ref)
+    util = eh_dia_util(data_ref, dep)
+    trabalha_no_dia = data_ref.weekday() in j.dias_trabalho
+    if afast:
+        tipo_dia = "afastado"
+    elif util:
+        tipo_dia = "util"
+    elif trabalha_no_dia:
+        tipo_dia = "feriado"          # dia de trabalho, mas feriado
+    elif data_ref.weekday() == 6:
+        tipo_dia = "domingo"
     else:
-        diferenca_fmt = f"-{diff_h:02d}:{diff_m:02d}h"
+        tipo_dia = "descanso"
 
-    return {
-        "total_trabalhado_seg": total_seg,
-        "total_trabalhado_fmt": total_fmt,
-        "diferenca_seg": diferenca_seg,
-        "diferenca_fmt": diferenca_fmt,
-        "is_excedente": diferenca_seg > 0,
-        "is_faltante": diferenca_seg < 0,
-        "tem_registro": True,
+    seq = sorted(((h or "", t) for t, h in batidas if t in PONTOS_PERMITIDOS))
+    ap = ApuracaoDia(data=data_ref, tipo_dia=tipo_dia, batidas=[(t, h) for h, t in seq], afastamento=afast)
+
+    # Pares Entrada -> Saída em ordem; soma trabalhado, noturno e intervalos.
+    pares, aberta = [], None
+    for h, t in seq:
+        m = _minutos_do_dia(h)
+        if m is None:
+            continue
+        if t == "Entrada":
+            aberta = m
+        elif t == "Saída" and aberta is not None:
+            if m > aberta:
+                pares.append((aberta, m))
+            aberta = None
+    ap.trabalhado = int(sum((b - a) * 60 for a, b in pares))
+    ap.noturno = int(sum(_sobreposicao_noturna(a, b) * 60 for a, b in pares))
+    ultima_aberta = bool(seq) and seq[-1][1] == "Entrada"
+
+    if getattr(usuario, "tipo_contrato", "CLT") == "PJ":
+        ap.futuro = data_ref > hoje
+        ap.em_aberto = data_ref == hoje and ultima_aberta
+        return ap
+    if data_ref > hoje:
+        ap.futuro = True
+        return ap
+    if data_ref == hoje and (not seq or ultima_aberta):
+        ap.em_aberto = True
+        return ap
+    if afast:
+        return ap
+    if not seq:
+        if tipo_dia == "util":
+            ap.falta = True
+            ap.esperado = ap.falta_seg = j.carga_diaria_seg
+        return ap
+    if ultima_aberta:
+        ap.incompleto = True
+        ap.alertas.append("Entrada sem saída")
+        return ap
+
+    if tipo_dia == "util":
+        ap.esperado = j.carga_diaria_seg
+        diff = ap.trabalhado - ap.esperado
+        dentro = abs(diff) <= j.tolerancia_diaria_min * 60
+        if dentro and j.horario_entrada_min is not None and j.horario_saida_min is not None and pares:
+            var_e = abs(pares[0][0] - j.horario_entrada_min)
+            var_s = abs(pares[-1][1] - j.horario_saida_min)
+            dentro = (var_e <= j.tolerancia_marcacao_min and var_s <= j.tolerancia_marcacao_min
+                      and var_e + var_s <= j.tolerancia_diaria_min)
+        if diff == 0:
+            pass
+        elif dentro:
+            ap.tolerado = True
+        elif diff > 0:
+            ap.extra_50 = diff
+        else:
+            ap.atraso = -diff
+    else:
+        # Folga/domingo/feriado trabalhado: tudo é extra.
+        if tipo_dia in ("domingo", "feriado"):
+            ap.extra_100 = ap.trabalhado
+        else:
+            ap.extra_50 = ap.trabalhado
+
+    # Alertas legais
+    if ap.extras > j.limite_extras_dia_min * 60 and j.limite_extras_dia_min > 0:
+        ap.alertas.append(f"Extras acima de {fmt_hhmm(j.limite_extras_dia_min * 60)}")
+    if ap.trabalhado > 6 * 3600 and j.intervalo_minimo_min > 0:
+        intervalos = [pares[i + 1][0] - pares[i][1] for i in range(len(pares) - 1)]
+        maior = max(intervalos) if intervalos else 0
+        if maior < j.intervalo_minimo_min:
+            ap.alertas.append("Sem intervalo" if not intervalos else f"Intervalo de {int(maior)} min")
+    if saida_anterior is not None and pares:
+        entrada_dt = datetime.combine(data_ref, datetime.min.time()) + timedelta(minutes=pares[0][0])
+        if entrada_dt - saida_anterior < timedelta(minutes=j.interjornada_min):
+            ap.alertas.append("Interjornada curta")
+    return ap
+
+
+def apurar_periodo(usuario, inicio, fim, hoje=None):
+    """Apura dia a dia e soma os totais do período."""
+    hoje = hoje or datetime.now(ZoneInfo("America/Sao_Paulo")).date()
+    batidas = defaultdict(list)
+    # Inclui o dia anterior ao início para a interjornada do primeiro dia.
+    for r in RegistroPonto.query.filter_by(usuario_id=usuario.id).all():
+        try:
+            d = datetime.strptime(r.data, "%d/%m/%Y").date()
+        except (TypeError, ValueError):
+            continue
+        if inicio - timedelta(days=1) <= d <= fim:
+            batidas[d].append((r.tipo, r.hora))
+
+    def ultima_saida(d):
+        saidas = sorted(h for t, h in batidas.get(d, []) if t == "Saída" and h)
+        if not saidas:
+            return None
+        m = _minutos_do_dia(saidas[-1])
+        return None if m is None else datetime.combine(d, datetime.min.time()) + timedelta(minutes=m)
+
+    dias = []
+    d = inicio
+    while d <= fim:
+        dias.append(apurar_dia(usuario, d, batidas.get(d, []), hoje=hoje, saida_anterior=ultima_saida(d - timedelta(days=1))))
+        d += timedelta(days=1)
+
+    j_atual = jornada_vigente(min(fim, hoje), usuario.departamento_id)
+    tot = {
+        "trabalhado": sum(x.trabalhado for x in dias),
+        "extra_50": sum(x.extra_50 for x in dias),
+        "extra_100": sum(x.extra_100 for x in dias),
+        "atraso": sum(x.atraso for x in dias),
+        "falta_seg": sum(x.falta_seg for x in dias),
+        "faltas_dias": sum(1 for x in dias if x.falta),
+        "afastados_dias": sum(1 for x in dias if x.afastamento and x.tipo_dia == "afastado" and eh_dia_util(x.data, usuario.departamento_id)),
+        "incompletos": sum(1 for x in dias if x.incompleto),
+        "noturno": sum(x.noturno for x in dias),
+        "dias_acima_limite": sum(1 for x in dias if any(a.startswith("Extras acima") for a in x.alertas)),
+        "alertas": sum(1 for x in dias if x.alertas and not x.incompleto),
+        "noturno_ativo": j_atual.noturno_ativo,
+        "noturno_pct": j_atual.noturno_pct,
+        "extra_util_pct": j_atual.extra_util_pct,
+        "extra_descanso_pct": j_atual.extra_descanso_pct,
     }
+    # Hora noturna reduzida (CLT art. 73 §1º): 52min30s valem 1 hora.
+    tot["noturno_ficto"] = int(tot["noturno"] * 60 / 52.5)
+    return dias, tot
+
 
 def obter_notificacoes_usuario(user_id):
     """Gera a lista de notificações/banners para o painel do usuário.
@@ -1324,6 +1935,10 @@ def obter_notificacoes_usuario(user_id):
     agora = time.time()
     if cached and (agora - cached["momento"]) < _NOTIF_CACHE_TTL:
         return cached["notifs"]
+
+    # Setor do usuário: define carga e dias de trabalho nas regras abaixo.
+    _usuario_notif = db.session.get(Usuario, user_id)
+    dep_id = _usuario_notif.departamento_id if _usuario_notif else None
 
     hoje = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
     notificacoes = []
@@ -1377,7 +1992,7 @@ def obter_notificacoes_usuario(user_id):
         faltas_count = 0
         curr = hoje - timedelta(days=1)
         while curr >= limite_busca:
-            if eh_dia_util(curr) and curr not in pontos_por_data:
+            if eh_dia_util(curr, dep_id) and curr not in pontos_por_data and not afastamento_no_dia(user_id, curr):
                 faltas_count += 1
             curr -= timedelta(days=1)
 
@@ -1394,7 +2009,7 @@ def obter_notificacoes_usuario(user_id):
         janela_inicio = corte_notificacoes
         dias_incompletos = 0
         for d_obj, regs_do_dia in pontos_por_data.items():
-            if janela_inicio <= d_obj < hoje and eh_dia_util(d_obj):
+            if janela_inicio <= d_obj < hoje and eh_dia_util(d_obj, dep_id) and not afastamento_no_dia(user_id, d_obj):
                 if dia_ponto_incompleto(regs_do_dia):
                     dias_incompletos += 1
 
@@ -1408,7 +2023,11 @@ def obter_notificacoes_usuario(user_id):
             })
 
         # ── 5. Ponto de hoje (usando registros já carregados, sem query) ──
-        if eh_dia_util(hoje):
+        jornada_hoje = jornada_vigente(hoje, dep_id)
+        agora_min = datetime.now(ZoneInfo("America/Sao_Paulo"))
+        agora_min = agora_min.hour * 60 + agora_min.minute
+        ja_no_horario = jornada_hoje.horario_entrada_min is None or agora_min >= jornada_hoje.horario_entrada_min
+        if eh_dia_util(hoje, dep_id) and ja_no_horario and not afastamento_no_dia(user_id, hoje):
             tipos_hoje = [p.tipo for p in pontos_por_data.get(hoje, [])]
             if "Entrada" not in tipos_hoje:
                 notificacoes.append({
@@ -1423,7 +2042,23 @@ def obter_notificacoes_usuario(user_id):
         print(f"Erro ao gerar notificações: {e}")
         return []
 
-    # ── 6. Salva no cache ──
+    # ── 6. Avisos gravados (lembrete da administração, "esqueceu a entrada"...) ──
+    # Ficam até a pessoa abrir/marcar como lido; mostrados antes dos calculados.
+    limite_avisos = datetime.now(ZoneInfo("America/Sao_Paulo")) - timedelta(days=30)
+    gravados = (Notificacao.query
+                .filter(Notificacao.usuario_id == user_id, Notificacao.lida.is_(False),
+                        Notificacao.data_criacao >= limite_avisos.replace(tzinfo=None))
+                .order_by(Notificacao.id.desc()).limit(10).all())
+    notificacoes = [{
+        "id": f"aviso_{n.id}",
+        "db_id": n.id,
+        "tipo": n.tipo if n.tipo in ("info", "warning", "danger", "success") else "info",
+        "titulo": n.titulo,
+        "mensagem": n.mensagem,
+        "link": url_for("abrir_notificacao", id=n.id),
+    } for n in gravados] + notificacoes
+
+    # ── 7. Salva no cache ──
     _NOTIF_CACHE[user_id] = {"momento": agora, "notifs": notificacoes}
 
     return notificacoes
@@ -1473,72 +2108,16 @@ def login():
 
     return render_template("login.html")
 
+_MSG_CADASTRO_FECHADO = "O cadastro é feito pelo administrador da empresa. Peça seu acesso a ele."
+
+
 @app.route("/cadastro", methods=["GET", "POST"])
 def cadastro():
+    """Autocadastro desativado: contas são criadas só pelo administrador."""
     if current_user.is_authenticated:
         return redirect(url_for("index"))
-
-    if request.method == "POST":
-        nome = request.form.get("nome", "").strip()
-        email = request.form.get("email", "").strip().lower()
-        senha = request.form.get("senha", "")
-
-        problem = _password_problem(senha)
-        if problem:
-            flash(problem, "danger")
-            return render_template("register.html", nome=nome, email=email)
-
-        # Validação de domínio
-        if not verificar_dominio_email(email):
-            flash("O domínio do e-mail é inválido ou não possui registros MX.", "danger")
-            return render_template("register.html", nome=nome, email=email)
-
-        if Usuario.query.filter(db.func.lower(Usuario.email) == email).first():
-            # A mesma resposta para e-mail novo e existente evita enumeração.
-            flash("Se os dados forem válidos, você poderá continuar o cadastro.", "info")
-            return redirect(url_for("login"))
-
-        # Verificar se a confirmação de e-mail está obrigatória (configurável no admin)
-        verificacao_obrigatoria = _get_config("email_confirmacao_obrigatoria", "false").lower() == "true"
-
-        if verificacao_obrigatoria:
-            token, _row = issue_security_token(
-                None,
-                SecurityToken.PURPOSE_CONFIRM,
-                app.config["CONFIRM_TOKEN_TTL_SECONDS"],
-                email=email,
-                nome=nome,
-                senha_hash=generate_password_hash(senha, method="scrypt"),
-            )
-            confirm_url = _email_link("confirm_email", token=token)
-            safe_name = html.escape(nome)
-            sent = _send_email(
-                email,
-                "Confirme seu e-mail",
-                f"<p>Olá {safe_name}, confirme seu e-mail.</p>{_email_link_html(confirm_url, 'Confirmar e-mail')}",
-            )
-            if sent:
-                flash("Se os dados forem válidos, enviaremos as instruções por e-mail.", "info")
-            else:
-                flash("Não foi possível enviar o e-mail agora. Tente novamente.", "danger")
-                return render_template("register.html", nome=nome, email=email)
-        else:
-            # Um usuário público nunca recebe privilégios de administrador por
-            # ser o primeiro registro; bootstrap é feito apenas pela CLI.
-            novo_usuario = Usuario(
-                nome=nome,
-                email=email,
-                senha_hash=generate_password_hash(senha, method="scrypt"),
-                is_admin=False,
-                email_confirmado=True,
-            )
-            db.session.add(novo_usuario)
-            db.session.commit()
-            flash("Se os dados forem válidos, você poderá continuar o cadastro.", "info")
-
-        return redirect(url_for("login"))
-
-    return render_template("register.html")
+    flash(_MSG_CADASTRO_FECHADO, "info")
+    return redirect(url_for("login"))
 
 @app.route("/logout", methods=["POST"])
 @login_required
@@ -1608,11 +2187,20 @@ _ADMIN_VIEW_ENDPOINTS = {
     "historico": "admin_historico",
     "solicitacoes": "admin_solicitacoes",
     "logs": "admin_logs",
+    "parametros": "admin_parametros",
+    "afastamentos": "admin_afastamentos",
+    "fechamento": "admin_fechamento",
 }
 
+# Abas do painel restritas a um papel (as demais são comuns ao RH e à TI).
+_PAPEL_POR_ABA = {"historico": "rh", "solicitacoes": "rh", "logs": "ti", "parametros": "ti", "afastamentos": "rh", "fechamento": "rh"}
 
-def _redirect_admin(view_name):
-    """Volta à aba que originou a ação, preservando seus filtros."""
+
+def _redirect_admin(view_name, ancora=None):
+    """Volta à aba que originou a ação, preservando seus filtros.
+
+    ``ancora`` rola a página até a seção editada (ex.: ``setores``).
+    """
     endpoint = _ADMIN_VIEW_ENDPOINTS.get(view_name, "admin_panel")
     query_pairs = list(request.args.items(multi=True))
 
@@ -1632,11 +2220,13 @@ def _redirect_admin(view_name):
     target = url_for(endpoint)
     if query_pairs:
         target = f"{target}?{urlencode(query_pairs)}"
+    if ancora:
+        target = f"{target}#{ancora}"
     return redirect(target)
 
 
 @app.route("/admin/lancar-ponto-manual", methods=["POST"])
-@admin_required
+@rh_required
 def admin_lancar_ponto_manual():
     usuario_id = request.form.get("usuario_id")
     data_raw = request.form.get("data")        # esperada no formato YYYY-MM-DD
@@ -1657,6 +2247,9 @@ def admin_lancar_ponto_manual():
     try:
         data_obj = datetime.strptime(data_raw, "%Y-%m-%d")
         data_formatada = data_obj.strftime("%d/%m/%Y")
+        if mes_fechado(data_obj.date()):
+            flash(msg_mes_fechado(data_obj.year, data_obj.month), "danger")
+            return _redirect_admin("painel")
     except ValueError:
         data_formatada = data_raw
 
@@ -1723,10 +2316,17 @@ def admin_lancar_ponto_manual():
 
 @app.route("/admin/excluir-ponto/<int:ponto_id>", methods=["POST"])
 @login_required
-@admin_required
+@rh_required
 def admin_excluir_ponto(ponto_id):
     """Exclui um registro de ponto (apenas admin/RH). Usado para remover duplicatas."""
     ponto = RegistroPonto.query.get_or_404(ponto_id)
+    try:
+        data_ponto = datetime.strptime(ponto.data, "%d/%m/%Y").date()
+    except (TypeError, ValueError):
+        data_ponto = None
+    if data_ponto and mes_fechado(data_ponto):
+        flash(msg_mes_fechado(data_ponto.year, data_ponto.month), "danger")
+        return _redirect_admin("historico")
     usuario_alvo = db.session.get(Usuario, ponto.usuario_id)
 
     # Salvar dados para o log de auditoria ANTES de excluir
@@ -1749,37 +2349,91 @@ def admin_excluir_ponto(ponto_id):
     flash(f"Ponto ({ponto.tipo}) de {nome_usuario} excluído com sucesso!", "success")
     return _redirect_admin("historico")
 
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _departamento_do_form(valor):
+    """Converte o select de departamento em id válido (ou None)."""
+    if not valor or valor == "none":
+        return None
+    try:
+        dep_id = int(valor)
+    except (TypeError, ValueError):
+        return None
+    return dep_id if db.session.get(Departamento, dep_id) else None
+
+
+def _validar_senha_admin(senha, confirmar):
+    """Valida a senha que o administrador digitou para um colaborador."""
+    if senha != confirmar:
+        return "A confirmação da senha não confere."
+    return _password_problem(senha)
+
+
+def _aplicar_senha(usuario, senha, exigir_troca):
+    """Grava nova senha, derruba sessões e invalida links pendentes."""
+    usuario.senha_hash = generate_password_hash(senha, method="scrypt")
+    usuario.precisa_redefinir_senha = bool(exigir_troca)
+    usuario.auth_version = int(usuario.auth_version or 0) + 1
+    if usuario.id is not None:
+        SecurityToken.query.filter(
+            SecurityToken.usuario_id == usuario.id,
+            SecurityToken.purpose.in_([SecurityToken.PURPOSE_RESET, SecurityToken.PURPOSE_INVITE]),
+            SecurityToken.usado_em.is_(None),
+        ).update({"usado_em": _local_now()}, synchronize_session=False)
+
+
 @app.route("/admin/cadastrar_usuario", methods=["POST"])
-@admin_required
+@login_required
+@rh_required
 def admin_cadastrar_usuario():
     nome = request.form.get("nome", "").strip()
     email = request.form.get("email", "").strip().lower()
-    
-    if not nome or not email:
-        flash("Nome e e-mail são obrigatórios.", "danger")
-        return _redirect_admin("usuarios")
-
-    if Usuario.query.filter_by(email=email).first():
-        flash(f"Usuário {email} já cadastrado.", "danger")
-        return _redirect_admin("usuarios")
-    
-    # Criar usuário temporário para gerar o token
-    senha_temporaria = secrets.token_urlsafe(32)
     tipo_contrato = request.form.get("tipo_contrato", "CLT").strip().upper()
     if tipo_contrato not in ("CLT", "PJ"):
         tipo_contrato = "CLT"
+    departamento_id = _departamento_do_form(request.form.get("departamento_id"))
+    enviar_convite = request.form.get("modo_acesso") == "convite"
+    exigir_troca = request.form.get("exigir_troca") == "on"
+
+    if not nome or not email:
+        flash("Nome e e-mail são obrigatórios.", "danger")
+        return _redirect_admin("usuarios")
+    if len(nome) > 100 or len(email) > 100 or not _EMAIL_RE.match(email):
+        flash("Informe um nome e um e-mail válidos (até 100 caracteres).", "danger")
+        return _redirect_admin("usuarios")
+    if Usuario.query.filter(db.func.lower(Usuario.email) == email).first():
+        flash(f"Já existe um usuário com o e-mail {email}.", "danger")
+        return _redirect_admin("usuarios")
+
+    if enviar_convite:
+        # Senha aleatória descartável: o colaborador define a própria pelo link.
+        senha = secrets.token_urlsafe(32)
+        exigir_troca = True
+    else:
+        senha = request.form.get("senha", "")
+        problem = _validar_senha_admin(senha, request.form.get("confirmar_senha", ""))
+        if problem:
+            flash(problem, "danger")
+            return _redirect_admin("usuarios")
+
     novo_usuario = Usuario(
         nome=nome,
         email=email,
-        senha_hash=generate_password_hash(senha_temporaria, method="scrypt"),
-        precisa_redefinir_senha=True,
         email_confirmado=True,
-        tipo_contrato=tipo_contrato
+        tipo_contrato=tipo_contrato,
+        departamento_id=departamento_id,
     )
+    _aplicar_senha(novo_usuario, senha, exigir_troca)
     db.session.add(novo_usuario)
     db.session.commit()
-    registrar_log(current_user.id, f"Cadastrou usuário {nome} ({email})")
-    
+    registrar_log(current_user.id, f"Cadastrou usuário {nome} ({email})", novo_usuario.id)
+
+    if not enviar_convite:
+        aviso = " Ele deverá trocar a senha no primeiro acesso." if exigir_troca else ""
+        flash(f"Colaborador {nome} cadastrado com a senha definida.{aviso}", "success")
+        return _redirect_admin("usuarios")
+
     token, _row = issue_security_token(
         novo_usuario.id,
         SecurityToken.PURPOSE_INVITE,
@@ -1793,11 +2447,43 @@ def admin_cadastrar_usuario():
         f"<p>Olá {safe_name}, seu cadastro foi realizado pelo administrador.</p>{_email_link_html(link_definir_senha, 'Definir senha')}",
     )
     if sent:
-        flash(f"Usuário {nome} cadastrado com sucesso! E-mail de convite enviado.", "success")
+        flash(f"Colaborador {nome} cadastrado! E-mail de convite enviado.", "success")
     else:
-        flash("Usuário cadastrado, mas não foi possível enviar o convite. Gere um novo convite.", "danger")
-
+        flash(
+            f"Colaborador {nome} cadastrado, mas o convite não pôde ser enviado. "
+            "Defina uma senha em Configurar > Alterar senha.",
+            "warning",
+        )
     return _redirect_admin("usuarios")
+
+
+@app.route("/admin/usuarios/<int:user_id>/senha", methods=["POST"])
+@login_required
+@rh_required
+def admin_alterar_senha_usuario(user_id):
+    user = Usuario.query.get_or_404(user_id)
+    if user.id == current_user.id:
+        flash("Para alterar a sua própria senha, use a opção do seu perfil.", "warning")
+        return _redirect_admin("usuarios")
+
+    senha = request.form.get("nova_senha", "")
+    problem = _validar_senha_admin(senha, request.form.get("confirmar_senha", ""))
+    if problem:
+        flash(problem, "danger")
+        return _redirect_admin("usuarios")
+
+    exigir_troca = request.form.get("exigir_troca") == "on"
+    _aplicar_senha(user, senha, exigir_troca)
+    db.session.commit()
+    registrar_log(
+        current_user.id,
+        f"Alterou a senha do usuário {user.nome}" + (" (troca obrigatória no próximo acesso)" if exigir_troca else ""),
+        user.id,
+    )
+    aviso = " Ele deverá trocar a senha no próximo acesso." if exigir_troca else ""
+    flash(f"Senha de {user.nome} alterada. As sessões abertas dele foram encerradas.{aviso}", "success")
+    return _redirect_admin("usuarios")
+
 
 @app.route("/definir_senha/<token>", methods=["GET", "POST"])
 def definir_senha_usuario(token):
@@ -1860,38 +2546,8 @@ def forgot_password():
 
 @app.route("/confirm_email/<token>", methods=["GET", "POST"])
 def confirm_email(token):
-    row = _get_valid_security_token(token, SecurityToken.PURPOSE_CONFIRM)
-    if not row or not row.email or not row.nome or not row.senha_hash:
-        flash("Token inválido ou expirado.", "danger")
-        return redirect(url_for("login"))
-
-    if Usuario.query.filter_by(email=row.email).first():
-        # Consome também um token de confirmação já usado para evitar replay.
-        consume_security_token(token, SecurityToken.PURPOSE_CONFIRM)
-        flash("Este e-mail já foi confirmado/cadastrado.", "warning")
-        return redirect(url_for("login"))
-
-    if request.method == "GET":
-        # A mensagem de um cliente de e-mail não consome o token; a confirmação
-        # exige uma ação POST protegida por CSRF.
-        return render_template("confirm_email.html", token=token)
-
-    # Consome atomicamente antes de criar a conta; nenhum usuário público é
-    # promovido a administrador.
-    consumed = consume_security_token(token, SecurityToken.PURPOSE_CONFIRM)
-    if not consumed:
-        flash("Token inválido ou expirado.", "danger")
-        return redirect(url_for("login"))
-    novo_usuario = Usuario(
-        nome=consumed.nome,
-        email=consumed.email,
-        senha_hash=consumed.senha_hash,
-        is_admin=False,
-        email_confirmado=True,
-    )
-    db.session.add(novo_usuario)
-    db.session.commit()
-    flash("E-mail confirmado com sucesso! Você já pode fazer login.", "success")
+    """Links de confirmação antigos do autocadastro não criam mais contas."""
+    flash(_MSG_CADASTRO_FECHADO, "info")
     return redirect(url_for("login"))
 
 
@@ -1960,7 +2616,7 @@ def index():
         ultimo_ponto = "Nenhum ponto registrado ainda"
 
     total_solicitacoes_pendentes = 0
-    if current_user.is_admin:
+    if current_user.is_rh:
         total_solicitacoes_pendentes = SolicitacaoCorrecao.query.filter_by(status="Pendente").count()
 
     # Horas dos pontos de hoje para o JS recalcular o saldo ao vivo (fuso SP)
@@ -1982,7 +2638,17 @@ def index():
         total_solicitacoes_pendentes=total_solicitacoes_pendentes,
         pontos_today=lista_pontos_hoje,
         proximo_tipo=proximo_tipo,
-        carga_diaria_min=480
+        jornada=jornada_vigente(departamento_id=current_user.departamento_id),
+        espelhos_pendentes=(EspelhoMensal.query.join(FechamentoMes)
+                            .filter(EspelhoMensal.usuario_id == current_user.id,
+                                    FechamentoMes.fechado.is_(True),
+                                    EspelhoMensal.ciencia_status == "pendente")
+                            .order_by(FechamentoMes.ano.desc(), FechamentoMes.mes.desc()).all()),
+        afastamento_hoje=Afastamento.query.filter(
+            Afastamento.usuario_id == current_user.id,
+            Afastamento.data_inicio <= datetime.now(ZoneInfo("America/Sao_Paulo")).date(),
+            Afastamento.data_fim >= datetime.now(ZoneInfo("America/Sao_Paulo")).date(),
+        ).first(),
     )
 
 @app.route("/registrar/<tipo>", methods=["POST"])
@@ -2143,6 +2809,10 @@ def meu_historico():
 
     datas_intervalo.sort(reverse=True)
 
+    # Apuração (usa todas as batidas, independente do filtro de tipo da tela).
+    dias_apurados, totais = apurar_periodo(current_user, data_inicio_obj, data_fim_obj)
+    apuracao_por_dia = {ap.data: ap for ap in dias_apurados}
+
     for d_obj in datas_intervalo:
         data_str = d_obj.strftime("%d/%m/%Y")
         registros_do_dia = dias_registrados.get(d_obj, [])
@@ -2151,23 +2821,46 @@ def meu_historico():
             key=lambda r: _parse_hora(getattr(r, "hora", None)) or datetime.min.time()
         )
 
-        # Se NÃO for dia útil e NÃO houver registros, pula o dia
-        if not eh_dia_util(d_obj) and not registros_do_dia:
+        ap = apuracao_por_dia[d_obj]
+        afast = ap.afastamento
+        util = eh_dia_util(d_obj, current_user.departamento_id)
+        # Se NÃO for dia útil e NÃO houver batidas, pula o dia
+        if not util and not ap.batidas:
             continue
 
-        saldo = calcular_saldo_dia(registros_do_dia, d_obj)
-        incompleto = dia_ponto_incompleto(registros_do_dia) or not registros_do_dia
+        if ap.extras:
+            diferenca = "+" + fmt_hhmm(ap.extras) + (" (100%)" if ap.extra_100 and not ap.extra_50 else "")
+        elif ap.atraso:
+            diferenca = "-" + fmt_hhmm(ap.atraso)
+        else:
+            diferenca = None
+        saldo = {
+            "tem_registro": bool(ap.batidas),
+            "total_trabalhado_fmt": f"{fmt_hhmm(ap.trabalhado)}h",
+            "is_excedente": bool(ap.extras),
+            "is_faltante": bool(ap.atraso),
+            "diferenca_fmt": diferenca,
+            "neutro": ("incompleto" if ap.incompleto else "na tolerância" if ap.tolerado
+                       else "em aberto" if ap.em_aberto else "0min"),
+        }
+        incompleto = (ap.incompleto or ap.falta) and not afast
 
         historico_analisado.append({
             "data": data_str,
             "registros": registros_do_dia,
             "incompleto": incompleto,
             "saldo": saldo,
+            "falta": ap.falta,
+            "alertas": [a for a in ap.alertas if a != "Entrada sem saída"],
+            "afastamento": AFASTAMENTO_TIPOS.get(afast) if afast else None,
         })
 
     return render_template(
         "meu_historico.html",
         historico=historico_analisado,
+        totais=totais,
+        fmt_hhmm=fmt_hhmm,
+        is_pj=current_user.tipo_contrato == "PJ",
         data_inicio=data_inicio_obj.isoformat(),
         data_fim=data_fim_obj.isoformat(),
         tipo_ponto=tipo_ponto,
@@ -2199,6 +2892,21 @@ def solicitar_correcao():
             flash("Data inválida. Não é permitido solicitar ajuste para datas futuras.", "danger")
             return redirect(url_for("solicitar_correcao"))
 
+        primeiro_dia, fechamento, limite = janela_correcao(hoje)
+        if hoje > limite:
+            flash(
+                f"O prazo para pedir correções deste mês terminou em {limite.strftime('%d/%m/%Y')} "
+                f"(o mês fecha em {fechamento.strftime('%d/%m/%Y')}). Fale com o RH.",
+                "danger",
+            )
+            return redirect(url_for("solicitar_correcao"))
+        if data_obj < primeiro_dia:
+            flash("Este período já foi fechado. Só é possível pedir correção de dias do mês atual; fale com o RH.", "danger")
+            return redirect(url_for("solicitar_correcao"))
+        if mes_fechado(data_obj):
+            flash("Este mês já foi fechado pelo RH. Fale com o RH se precisar de algum ajuste.", "danger")
+            return redirect(url_for("solicitar_correcao"))
+
         data_formatada = data_obj.strftime("%d/%m/%Y")
         
         if len(hora) == 5:
@@ -2226,10 +2934,15 @@ def solicitar_correcao():
         usuario_id=current_user.id
     ).order_by(SolicitacaoCorrecao.id.desc()).all()
 
+    primeiro_dia, fechamento, limite = janela_correcao(hoje)
     return render_template(
-        "solicitar_correcao.html", 
+        "solicitar_correcao.html",
         solicitacoes=minhas_solicitacoes,
-        data_hoje=hoje.strftime("%Y-%m-%d")
+        data_hoje=hoje.strftime("%Y-%m-%d"),
+        data_minima=primeiro_dia.strftime("%Y-%m-%d"),
+        correcao_limite=limite,
+        correcao_fechamento=fechamento,
+        correcao_aberta=hoje <= limite,
     )
 
 @app.route("/api/pontos-do-dia/<data_iso>")
@@ -2288,110 +3001,46 @@ def _gerar_relatorio_ponto_dados(usuario, data_inicio_str=None, data_fim_str=Non
     if data_inicio_obj > data_fim_obj:
         data_inicio_obj = data_fim_obj
 
-    registros = RegistroPonto.query.filter_by(usuario_id=usuario.id).order_by(RegistroPonto.id.asc()).all()
+    dias, tot = apurar_periodo(usuario, data_inicio_obj, data_fim_obj, hoje=hoje_real)
 
-    dias_registrados = defaultdict(list)
-    for r in registros:
-        try:
-            d_obj = datetime.strptime(r.data, "%d/%m/%Y").date()
-            if data_inicio_obj <= d_obj <= data_fim_obj:
-                if r.tipo in PONTOS_PERMITIDOS:
-                    dias_registrados[d_obj].append((r.tipo, r.hora))
-        except (ValueError, TypeError):
-            pass
-
-    for d in dias_registrados:
-        dias_registrados[d].sort(key=lambda x: x[1])
-
-    max_pares = 1
-    for d_obj in range(data_inicio_obj.toordinal(), data_fim_obj.toordinal() + 1):
-        regs_dia = dias_registrados.get(date.fromordinal(d_obj), [])
-        pares = (len(regs_dia) + 1) // 2
-        if pares > max_pares:
-            max_pares = pares
-
+    max_pares = max([1] + [(len(x.batidas) + 1) // 2 for x in dias])
     cabecalho = ["Dia"]
     for n in range(1, max_pares + 1):
         cabecalho.append(f"Entrada {n}")
         cabecalho.append(f"Saída {n}")
-    cabecalho.append("Total / Status")
+    cabecalho.append("Trabalhado")
+    if not is_pj:
+        cabecalho += [f"Extras {tot['extra_util_pct']}%", f"Extras {tot['extra_descanso_pct']}%", "Atraso/Falta"]
+    cabecalho.append("Situação")
     tabela_linhas = [cabecalho]
 
-    total_segundos_trabalhados = 0
-    total_segundos_extras = 0
-    total_segundos_faltantes = 0
-    total_faltas_dias = 0
-    FMT = "%H:%M:%S"
-    segundos_carga_diaria = int(CARGA_HORARIA_DIARIA.total_seconds())
+    vazio = lambda seg: fmt_hhmm(seg) if seg else ""
+    for x in dias:
+        # Dias de folga sem batida não aparecem na folha (como antes).
+        if not x.batidas and x.tipo_dia in ("descanso", "domingo", "feriado") and not x.futuro:
+            continue
+        if not x.batidas and x.futuro and x.tipo_dia != "util":
+            continue
+        linha = [x.data.strftime("%d/%m/%Y")]
+        for i, (tipo, hora) in enumerate(x.batidas):
+            esperado = "Entrada" if i % 2 == 0 else "Saída"
+            cel = (hora or "")[:5]
+            if tipo != esperado:
+                cel = f"E {cel}" if tipo == "Entrada" else f"S {cel}"
+            linha.append(cel)
+        while len(linha) < 1 + max_pares * 2:
+            linha.append("")
+        linha.append(f"{fmt_hhmm(x.trabalhado)}h" if x.batidas else "")
+        if not is_pj:
+            linha += [vazio(x.extra_50), vazio(x.extra_100), vazio(x.atraso + x.falta_seg)]
+        linha.append(x.situacao)
+        tabela_linhas.append(linha)
 
-    curr = data_inicio_obj
-    while curr <= data_fim_obj:
-        dia_str = curr.strftime("%d/%m/%Y")
-        regs = dias_registrados.get(curr, [])
-
-        if regs:
-            entradas = []
-            saidas = []
-            for tipo, hora in regs:
-                if tipo == "Entrada":
-                    entradas.append(hora)
-                elif tipo == "Saída":
-                    saidas.append(hora)
-
-            tempo_trabalhado = timedelta()
-            for i in range(min(len(entradas), len(saidas))):
-                try:
-                    t1, t2 = datetime.strptime(entradas[i], FMT), datetime.strptime(saidas[i], FMT)
-                    if t2 > t1:
-                        tempo_trabalhado += t2 - t1
-                except (ValueError, TypeError):
-                    pass
-
-            tot = int(tempo_trabalhado.total_seconds())
-            total_segundos_trabalhados += tot
-
-            dia_encerrado = bool(regs) and regs[-1][0] == "Saída"
-            if not is_pj:
-                if tot > segundos_carga_diaria:
-                    total_segundos_extras += (tot - segundos_carga_diaria)
-                elif (curr < hoje_real or dia_encerrado) and eh_dia_util(curr) and tot < segundos_carga_diaria:
-                    total_segundos_faltantes += (segundos_carga_diaria - tot)
-
-            linha = [dia_str]
-            for i, (tipo, hora) in enumerate(regs):
-                esperado = "Entrada" if i % 2 == 0 else "Saída"
-                cel = hora[:5]
-                if tipo != esperado:
-                    cel = f"E {cel}" if tipo == "Entrada" else f"S {cel}"
-                linha.append(cel)
-            while len(linha) < len(cabecalho) - 1:
-                linha.append("")
-            hrs, mins = divmod(tot // 60, 60)
-            linha.append(f"{hrs:02d}:{mins:02d}h")
-            tabela_linhas.append(linha)
-
-        elif eh_dia_util(curr):
-            if not is_pj:
-                vazios = [""] * (len(cabecalho) - 2)
-                if curr < hoje_real:
-                    total_faltas_dias += 1
-                    total_segundos_faltantes += segundos_carga_diaria
-                    tabela_linhas.append([dia_str, *vazios, "FALTA"])
-                elif curr == hoje_real:
-                    tabela_linhas.append([dia_str, *vazios, "Em Aberto"])
-                else:
-                    tabela_linhas.append([dia_str, *vazios, "-"])
-
-        curr += timedelta(days=1)
-
-    balanco_segundos = total_segundos_extras - total_segundos_faltantes
-    hrs_t, mins_t = divmod(total_segundos_trabalhados // 60, 60)
-    hrs_e, mins_e = divmod(total_segundos_extras // 60, 60)
-    hrs_f, mins_f = divmod(total_segundos_faltantes // 60, 60)
-    hrs_b, mins_b = divmod(abs(balanco_segundos) // 60, 60)
-
-    texto_balanco = f"+{hrs_b:02d}:{mins_b:02d}h (Crédito)" if balanco_segundos >= 0 else f"-{hrs_b:02d}:{mins_b:02d}h (A Repor)"
-    cor_balanco = colors.HexColor("#2e7d32") if balanco_segundos >= 0 else colors.HexColor("#c62828")
+    total_extras = tot["extra_50"] + tot["extra_100"]
+    total_faltantes = tot["atraso"] + tot["falta_seg"]
+    hrs_t, mins_t = divmod(tot["trabalhado"] // 60, 60)
+    hrs_e, mins_e = divmod(total_extras // 60, 60)
+    hrs_f, mins_f = divmod(total_faltantes // 60, 60)
 
     return {
         "usuario": usuario,
@@ -2400,21 +3049,19 @@ def _gerar_relatorio_ponto_dados(usuario, data_inicio_str=None, data_fim_str=Non
         "data_fim_obj": data_fim_obj,
         "tabela_linhas": tabela_linhas,
         "max_pares": max_pares,
-        "total_segundos_trabalhados": total_segundos_trabalhados,
-        "total_segundos_extras": total_segundos_extras,
-        "total_segundos_faltantes": total_segundos_faltantes,
-        "total_faltas_dias": total_faltas_dias,
+        "dias": dias,
+        "totais": tot,
+        "total_segundos_trabalhados": tot["trabalhado"],
+        "total_segundos_extras": total_extras,
+        "total_segundos_faltantes": total_faltantes,
+        "total_faltas_dias": tot["faltas_dias"],
+        "total_dias_afastados": tot["afastados_dias"],
         "hrs_t": hrs_t,
         "mins_t": mins_t,
         "hrs_e": hrs_e,
         "mins_e": mins_e,
         "hrs_f": hrs_f,
         "mins_f": mins_f,
-        "hrs_b": hrs_b,
-        "mins_b": mins_b,
-        "balanco_segundos": balanco_segundos,
-        "texto_balanco": texto_balanco,
-        "cor_balanco": cor_balanco,
     }
 
 
@@ -2427,12 +3074,15 @@ def _gerar_arquivo_folha_ponto(dados, formato):
     max_pares = dados["max_pares"]
 
     if formato == "pdf":
+        from reportlab.lib.pagesizes import landscape
+        tot = dados["totais"]
         buffer = io.BytesIO()
-        pdf = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
+        pagina = landscape(letter)
+        pdf = SimpleDocTemplate(buffer, pagesize=pagina, rightMargin=24, leftMargin=24, topMargin=24, bottomMargin=24)
         elementos = []
         estilos = getSampleStyleSheet()
 
-        titulo_estilo = ParagraphStyle("T", parent=estilos["Heading1"], fontSize=18, alignment=1, spaceAfter=15)
+        titulo_estilo = ParagraphStyle("T", parent=estilos["Heading1"], fontSize=16, alignment=1, spaceAfter=10)
         elementos.append(Paragraph(f"<b>Folha de Ponto - {_pdf_text(usuario.nome)}</b>", titulo_estilo))
         periodo_str = f"{data_inicio_obj.strftime('%d/%m/%Y')} a {data_fim_obj.strftime('%d/%m/%Y')}"
         elementos.append(
@@ -2441,49 +3091,67 @@ def _gerar_arquivo_folha_ponto(dados, formato):
                 estilos["Normal"]
             )
         )
-        elementos.append(Spacer(1, 15))
+        elementos.append(Spacer(1, 10))
 
-        largura_util = pdf.rightMargin + pdf.leftMargin + (letter[0] - pdf.rightMargin - pdf.leftMargin)
+        largura_util = pagina[0] - pdf.leftMargin - pdf.rightMargin
+        fixas = [66, 56] + ([52, 52, 58] if not is_pj else []) + [130]
         col_batidas = max(1, max_pares * 2)
-        larg_batida = max(38.0, (largura_util - 80 - 90) / col_batidas)
-        colWidths = [80] + [larg_batida] * col_batidas + [90]
-        tabela = Table(tabela_linhas, colWidths=colWidths)
+        larg_batida = max(34.0, (largura_util - sum(fixas)) / col_batidas)
+        colWidths = [fixas[0]] + [larg_batida] * col_batidas + fixas[1:]
+        tabela = Table(tabela_linhas, colWidths=colWidths, repeatRows=1)
         estilo_tabela = [
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2c3e50")),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
             ("ALIGN", (0, 0), (-1, -1), "CENTER"),
             ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
             ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cccccc")),
         ]
         for i, linha in enumerate(tabela_linhas[1:], start=1):
-            if "FALTA" in linha:
-                estilo_tabela.append(("TEXTCOLOR", (0, i), (-1, i), colors.HexColor("#d32f2f")))
-                estilo_tabela.append(("FONTNAME", (0, i), (-1, i), "Helvetica-Bold"))
-                estilo_tabela.append(("BACKGROUND", (0, i), (-1, i), colors.HexColor("#ffebee")))
+            situacao = linha[-1]
+            if situacao in ("FALTA", "INCOMPLETO"):
+                estilo_tabela += [("TEXTCOLOR", (0, i), (-1, i), colors.HexColor("#b91c1c")),
+                                  ("FONTNAME", (0, i), (-1, i), "Helvetica-Bold"),
+                                  ("BACKGROUND", (0, i), (-1, i), colors.HexColor("#fdecec"))]
+            elif situacao.isupper() and situacao not in ("-",):
+                estilo_tabela.append(("BACKGROUND", (0, i), (-1, i), colors.HexColor("#eef4ff")))
+            elif "acima" in situacao or "Intervalo" in situacao or "Sem intervalo" in situacao or "Interjornada" in situacao:
+                estilo_tabela.append(("BACKGROUND", (0, i), (-1, i), colors.HexColor("#fff7e6")))
 
         tabela.setStyle(TableStyle(estilo_tabela))
         elementos.append(tabela)
-        elementos.append(Spacer(1, 20))
+        elementos.append(Spacer(1, 14))
 
-        dados_resumo = [
-            ["Horas Totais Trabalhadas:", f"{dados['hrs_t']:02d}:{dados['mins_t']:02d}h"],
-        ]
+        dados_resumo = [["Horas trabalhadas:", f"{fmt_hhmm(tot['trabalhado'])}h"]]
         if not is_pj:
-            dados_resumo.append(["(+) Total Horas Extras:", f"{dados['hrs_e']:02d}:{dados['mins_e']:02d}h"])
-            dados_resumo.append(["(-) Total Horas Faltantes:", f"{dados['hrs_f']:02d}:{dados['mins_f']:02d}h ({dados['total_faltas_dias']} dia(s) ausente)"])
-            dados_resumo.append(["BALANÇO FINAL (BANCO DE HORAS):", dados["texto_balanco"]])
+            dados_resumo += [
+                [f"Horas extras {tot['extra_util_pct']}% (dias úteis/folgas):", f"{fmt_hhmm(tot['extra_50'])}h"],
+                [f"Horas extras {tot['extra_descanso_pct']}% (domingos/feriados):", f"{fmt_hhmm(tot['extra_100'])}h"],
+                ["Atrasos / saídas antecipadas:", f"{fmt_hhmm(tot['atraso'])}h"],
+                ["Faltas:", f"{tot['faltas_dias']} dia(s) ({fmt_hhmm(tot['falta_seg'])}h)"],
+            ]
+            if tot["noturno_ativo"]:
+                dados_resumo.append([f"Adicional noturno {tot['noturno_pct']}% (hora reduzida):", f"{fmt_hhmm(tot['noturno_ficto'])}h"])
+            if tot["incompletos"]:
+                dados_resumo.append(["Dias incompletos (pendentes de correção):", f"{tot['incompletos']} dia(s)"])
+            if tot["dias_acima_limite"]:
+                dados_resumo.append(["Dias com extras acima do limite:", f"{tot['dias_acima_limite']} dia(s)"])
+        if dados.get("total_dias_afastados"):
+            dados_resumo.append(["Dias afastados (abonados):", f"{dados['total_dias_afastados']} dia(s)"])
 
-        tabela_resumo = Table(dados_resumo, colWidths=[310, 200])
-        resumo_estilos = [
+        tabela_resumo = Table(dados_resumo, colWidths=[300, 200])
+        tabela_resumo.setStyle(TableStyle([
             ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"),
             ("ALIGN", (0, 0), (0, -1), "RIGHT"),
             ("ALIGN", (1, 0), (1, -1), "LEFT"),
-        ]
-        if not is_pj:
-            resumo_estilos.append(("TEXTCOLOR", (1, 3), (1, 3), dados["cor_balanco"]))
-            resumo_estilos.append(("LINEABOVE", (0, 3), (-1, 3), 1, colors.HexColor("#000000")))
-        tabela_resumo.setStyle(TableStyle(resumo_estilos))
+        ]))
         elementos.append(tabela_resumo)
+        elementos.append(Spacer(1, 8))
+        elementos.append(Paragraph(
+            "<font size=7 color='#555555'>Tolerância conforme CLT art. 58 §1º; extras pagas não compensam atrasos ou faltas.</font>",
+            estilos["Normal"]))
+        if dados.get("rodape"):
+            elementos.append(Paragraph(f"<font size=7 color='#555555'>{_pdf_text(dados['rodape'])}</font>", estilos["Normal"]))
 
         pdf.build(elementos)
         buffer.seek(0)
@@ -2597,74 +3265,199 @@ def uploaded_profile_image(filename):
     return send_from_directory(app.config["UPLOAD_FOLDER"], filename, max_age=0)
 
 
+def _ler_carga_setor(form):
+    """Lê carga (HH:MM) e dias do formulário de setor; devolve (carga, dias, erros)."""
+    erros = []
+    carga = _hhmm_para_min(form.get("carga_diaria"))
+    if carga is None or not (60 <= carga <= 720):
+        erros.append("Carga diária do setor: informe um valor entre 01:00 e 12:00.")
+    dias = tuple(sorted({int(d) for d in form.getlist("dias_trabalho") if d.isdigit() and 0 <= int(d) <= 6}))
+    if not dias:
+        erros.append("Selecione pelo menos um dia de trabalho para o setor.")
+    entrada, saida, erro_horario = _ler_horarios(form)
+    if erro_horario:
+        erros.append(erro_horario)
+    return carga, dias, (entrada, saida), erros
+
+
+def _salvar_versao_setor(dep, vigente_desde, carga, dias, horarios=(None, None)):
+    versao = JornadaSetor.query.filter_by(departamento_id=dep.id, vigente_desde=vigente_desde).first()
+    if versao is None:
+        versao = JornadaSetor(departamento_id=dep.id, vigente_desde=vigente_desde)
+        db.session.add(versao)
+    versao.carga_diaria_min = carga
+    versao.dias_trabalho = ",".join(map(str, dias))
+    versao.horario_entrada_min, versao.horario_saida_min = horarios
+    versao.alterado_por_nome = current_user.nome
+    versao.alterado_em = datetime.now(ZoneInfo("America/Sao_Paulo"))
+
+
+def _nome_setor_valido(nome, ignorar_id=None):
+    if not nome:
+        return "Informe o nome do setor."
+    if len(nome) > 100:
+        return "O nome do setor deve ter até 100 caracteres."
+    q = Departamento.query.filter(db.func.lower(Departamento.nome) == nome.lower())
+    if ignorar_id:
+        q = q.filter(Departamento.id != ignorar_id)
+    if q.first():
+        return f"Já existe um setor chamado '{nome}'."
+    return None
+
+
 @app.route("/admin/departamentos", methods=["GET", "POST"])
 @login_required
-@admin_required
+@ti_required
 def gerenciar_departamentos():
-    if request.method == "POST":
-        nome = request.form.get("nome", "").strip()
-        descricao = request.form.get("descricao", "").strip()
-        if not nome:
-            flash("Nome do departamento é obrigatório.", "warning")
-        elif Departamento.query.filter_by(nome=nome).first():
-            flash(f"Departamento '{nome}' já existe.", "warning")
-        else:
-            dep = Departamento(nome=nome, descricao=descricao)
-            db.session.add(dep)
-            db.session.commit()
-            registrar_log(current_user.id, f"Criou o departamento '{nome}'")
-            flash(f"Departamento '{nome}' cadastrado com sucesso!", "success")
-        return _redirect_admin("usuarios")
+    """Cria um setor, opcionalmente com carga horária própria."""
+    if request.method == "GET":
+        return _redirect_admin("parametros", "setores")
 
-    deps = Departamento.query.order_by(Departamento.nome.asc()).all()
-    return render_template("admin_fragment_departamentos.html", departamentos=deps)
+    nome = request.form.get("nome", "").strip()
+    problema = _nome_setor_valido(nome)
+    carga_propria = request.form.get("carga_propria") == "on"
+    carga = dias = None
+    horarios = (None, None)
+    erros = [problema] if problema else []
+    if carga_propria:
+        carga, dias, horarios, erros_carga = _ler_carga_setor(request.form)
+        erros += erros_carga
+    if erros:
+        for erro in erros:
+            flash(erro, "danger")
+        return _redirect_admin("parametros", "setores")
+
+    dep = Departamento(nome=nome, descricao=request.form.get("descricao", "").strip() or None)
+    db.session.add(dep)
+    db.session.flush()
+    hoje = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
+    if carga_propria:
+        _salvar_versao_setor(dep, hoje, carga, dias, horarios)
+    db.session.commit()
+    _limpar_cache_jornada()
+    detalhe = (
+        f" com carga de {_descrever_jornada_campo('carga_diaria_min', carga)} ({_descrever_jornada_campo('dias_trabalho', dias)})"
+        if carga_propria else " usando a jornada padrão"
+    )
+    registrar_log(current_user.id, f"Criou o setor '{nome}'{detalhe}", dep.id)
+    flash(f"Setor '{nome}' cadastrado{detalhe}.", "success")
+    return _redirect_admin("parametros", "setores")
+
+
+@app.route("/admin/departamentos/<int:id>/editar", methods=["POST"])
+@login_required
+@ti_required
+def editar_departamento(id):
+    """Renomeia o setor e/ou altera a carga horária a partir de uma data."""
+    dep = Departamento.query.get_or_404(id)
+    nome = request.form.get("nome", "").strip()
+    erros = []
+    problema = _nome_setor_valido(nome, ignorar_id=dep.id)
+    if problema:
+        erros.append(problema)
+    carga_propria = request.form.get("carga_propria") == "on"
+    carga = dias = None
+    horarios = (None, None)
+    if carga_propria:
+        carga, dias, horarios, erros_carga = _ler_carga_setor(request.form)
+        erros += erros_carga
+    try:
+        vigente_desde = datetime.strptime(request.form.get("vigente_desde", ""), "%Y-%m-%d").date()
+    except ValueError:
+        vigente_desde = None
+        erros.append("Informe a partir de quando a nova carga vale.")
+    if vigente_desde and carga_propria and fechado_no_intervalo(vigente_desde, date.max):
+        erros.append("A vigência não pode começar dentro de um mês fechado: " + msg_mes_fechado(*fechado_no_intervalo(vigente_desde, date.max)))
+    if erros:
+        for erro in erros:
+            flash(erro, "danger")
+        return _redirect_admin("parametros", "setores")
+
+    mudancas = []
+    if nome != dep.nome:
+        mudancas.append(f"nome: {dep.nome} -> {nome}")
+        dep.nome = nome
+
+    atual = jornada_vigente(vigente_desde, dep.id)
+    tinha_propria = atual.setor is not None
+    if carga_propria:
+        versao_atual = next((v for v in dep.jornadas if v.vigente_desde <= vigente_desde), None)
+        horarios_atuais = (versao_atual.horario_entrada_min, versao_atual.horario_saida_min) if versao_atual else (None, None)
+        if not tinha_propria or (atual.carga_diaria_min, atual.dias_trabalho, horarios_atuais) != (carga, dias, tuple(horarios)):
+            _salvar_versao_setor(dep, vigente_desde, carga, dias, horarios)
+            antes = (
+                f"{_descrever_jornada_campo('carga_diaria_min', atual.carga_diaria_min)} "
+                f"({_descrever_jornada_campo('dias_trabalho', atual.dias_trabalho)})"
+                if tinha_propria else "jornada padrão"
+            )
+            depois = f"{_descrever_jornada_campo('carga_diaria_min', carga)} ({_descrever_jornada_campo('dias_trabalho', dias)})"
+            if horarios[0] is not None:
+                depois += f", {_descrever_jornada_campo('horario_entrada_min', horarios[0])}–{_descrever_jornada_campo('horario_saida_min', horarios[1])}"
+            mudancas.append(f"carga a partir de {vigente_desde.strftime('%d/%m/%Y')}: {antes} -> {depois}")
+    elif tinha_propria:
+        # Voltar para a jornada padrão a partir da data: remove versões dali em diante.
+        removidas = JornadaSetor.query.filter(
+            JornadaSetor.departamento_id == dep.id, JornadaSetor.vigente_desde >= vigente_desde
+        ).delete(synchronize_session=False)
+        restante = JornadaSetor.query.filter(
+            JornadaSetor.departamento_id == dep.id, JornadaSetor.vigente_desde < vigente_desde
+        ).count()
+        if restante:
+            # Há carga própria antes da data: a volta ao padrão precisa ser
+            # desde a primeira versão, senão a anterior continuaria valendo.
+            db.session.rollback()
+            flash("Para voltar à jornada padrão, use a data da primeira carga do setor (ou uma anterior).", "danger")
+            return _redirect_admin("parametros", "setores")
+        if removidas:
+            mudancas.append("passou a usar a jornada padrão")
+
+    if not mudancas:
+        flash("Nenhuma alteração no setor.", "info")
+        return _redirect_admin("parametros", "setores")
+    db.session.commit()
+    _limpar_cache_jornada()
+    _invalidar_notif_cache()
+    registrar_log(current_user.id, f"Alterou o setor '{dep.nome}': " + "; ".join(mudancas), dep.id)
+    if vigente_desde < datetime.now(ZoneInfo("America/Sao_Paulo")).date() and carga_propria:
+        flash(f"Setor '{dep.nome}' atualizado com vigência retroativa: os cálculos desde {vigente_desde.strftime('%d/%m/%Y')} foram refeitos.", "warning")
+    else:
+        flash(f"Setor '{dep.nome}' atualizado.", "success")
+    return _redirect_admin("parametros", "setores")
+
 
 @app.route("/admin/departamentos/excluir/<int:id>", methods=["POST"])
 @login_required
-@admin_required
+@ti_required
 def excluir_departamento(id):
     dep = Departamento.query.get_or_404(id)
+    membros = Usuario.query.filter_by(departamento_id=dep.id).count()
+    if membros:
+        flash(f"O setor '{dep.nome}' tem {membros} colaborador(es). Mova-os para outro setor antes de excluir.", "danger")
+        return _redirect_admin("parametros", "setores")
     nome_dep = dep.nome
-    # Desvincular usuários do departamento excluído
-    Usuario.query.filter_by(departamento_id=id).update({"departamento_id": None})
+    JornadaSetor.query.filter_by(departamento_id=dep.id).delete(synchronize_session=False)
     db.session.delete(dep)
     db.session.commit()
-    registrar_log(current_user.id, f"Excluiu departamento '{nome_dep}'")
-    flash(f"Departamento '{nome_dep}' excluído com sucesso!", "success")
-    return _redirect_admin("usuarios")
+    _limpar_cache_jornada()
+    registrar_log(current_user.id, f"Excluiu o setor '{nome_dep}'", id)
+    flash(f"Setor '{nome_dep}' excluído.", "success")
+    return _redirect_admin("parametros", "setores")
 
 @app.route("/admin/usuarios/<int:user_id>/atualizar", methods=["POST"])
 @login_required
-@admin_required
+@rh_required
 def atualizar_usuario_admin(user_id):
     user = Usuario.query.get_or_404(user_id)
-    departamento_id = request.form.get("departamento_id")
-    
-    if departamento_id == "" or departamento_id == "none":
-        user.departamento_id = None
-    elif departamento_id:
-        user.departamento_id = int(departamento_id)
+    user.departamento_id = _departamento_do_form(request.form.get("departamento_id"))
 
     # Atualizar Tipo de Contrato (CLT / PJ)
     tipo_contrato = request.form.get("tipo_contrato", "").strip().upper()
     if tipo_contrato in ("CLT", "PJ"):
         user.tipo_contrato = tipo_contrato
     
-    # Atualizar Permissões Granulares (RBAC)
-    import json
-    permissoes = {
-        "pode_ver_dashboard": request.form.get("pode_ver_dashboard") == "on",
-        "pode_ver_historico": request.form.get("pode_ver_historico") == "on",
-        "pode_lancar_ponto_manual": request.form.get("pode_lancar_ponto_manual") == "on",
-        "pode_aprovar_solicitacoes": request.form.get("pode_aprovar_solicitacoes") == "on",
-        "pode_exportar_relatorios": request.form.get("pode_exportar_relatorios") == "on",
-        "pode_gerenciar_feriados": request.form.get("pode_gerenciar_feriados") == "on",
-    }
-    user.permissoes = json.dumps(permissoes)
-    user.auth_version = int(user.auth_version or 0) + 1
     db.session.commit()
-    registrar_log(current_user.id, f"Atualizou departamento e permissões do usuário {user.nome}", user_id)
-    flash(f"Dados e permissões do colaborador {user.nome} salvos com sucesso!", "success")
+    registrar_log(current_user.id, f"Atualizou departamento/contrato do usuário {user.nome}", user_id)
+    flash(f"Dados do colaborador {user.nome} salvos com sucesso!", "success")
     return _redirect_admin("usuarios")
 
 # ==========================================
@@ -2751,168 +3544,112 @@ def render_admin_shell(initial_view="painel", **context):
         context["regiao_fonte"] = regiao_fonte
     if "ufs_brasil" not in context:
         context["ufs_brasil"] = UFS_BRASIL
+    if initial_view != "painel" and "conteudo_inicial" not in context:
+        # Monta a aba pedida já no servidor: sem isso a página vinha com o
+        # Painel e o JS trocava pelo fragmento depois (pisca após salvar).
+        fragmento = admin_fragment(initial_view)
+        if isinstance(fragmento, str):
+            context["conteudo_inicial"] = Markup(fragmento)
     return render_template("admin.html", initial_view=initial_view, **context)
 
-@app.route("/admin/toggle-verificacao-email", methods=["POST"])
-@login_required
-@admin_required
-def toggle_verificacao_email():
-    """Alterna a verificação de e-mail obrigatória no cadastro público."""
-    ativa = _get_config("email_confirmacao_obrigatoria", "false").lower() == "true"
-    _set_config("email_confirmacao_obrigatoria", "false" if ativa else "true")
-    db.session.commit()
-    registrar_log(current_user.id, f"{'Reativou' if not ativa else 'Desativou'} a verificação de e-mail no cadastro")
-    status = "ativada" if not ativa else "desativada"
-    flash(f"Verificação de e-mail no cadastro {status}.", "success")
-    return _redirect_admin("usuarios")
+MESES_PT = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho",
+            "agosto", "setembro", "outubro", "novembro", "dezembro"]
+
+
+def _indicadores_painel(hoje=None):
+    """Indicadores do painel: conformidade do mês (até ontem) e fluxo de 7 dias.
+
+    Por colaborador e dia: "conforme" = batidas fechadas; "incompleto" = sobrou
+    Entrada sem Saída; "falta" = dia de trabalho (CLT) sem batida, sem
+    afastamento e a partir do cadastro da pessoa. Hoje fica de fora (em aberto).
+    """
+    hoje = hoje or datetime.now(ZoneInfo("America/Sao_Paulo")).date()
+    ontem = hoje - timedelta(days=1)
+    inicio_mes = hoje.replace(day=1)
+
+    batidas = defaultdict(lambda: defaultdict(list))
+    for r in RegistroPonto.query.filter(RegistroPonto.data.like(f"%/{hoje.strftime('%m/%Y')}")).all():
+        try:
+            d = datetime.strptime(r.data, "%d/%m/%Y").date()
+        except (TypeError, ValueError):
+            continue
+        if inicio_mes <= d <= ontem and r.tipo in PONTOS_PERMITIDOS:
+            batidas[r.usuario_id][d].append((r.hora or "", r.tipo))
+
+    conformes = incompletos = faltas = 0
+    for u in Usuario.query.all():
+        dias = batidas.get(u.id, {})
+        for regs in dias.values():
+            ultima = sorted(regs)[-1][1]
+            if ultima == "Entrada":
+                incompletos += 1
+            else:
+                conformes += 1
+        if u.tipo_contrato == "PJ":
+            continue
+        d = max(inicio_mes, u.data_cadastro.date() if u.data_cadastro else inicio_mes)
+        while d <= ontem:
+            if d not in dias and eh_dia_util(d, u.departamento_id) and not afastamento_no_dia(u.id, d):
+                faltas += 1
+            d += timedelta(days=1)
+
+    dias7 = [hoje - timedelta(days=i) for i in range(6, -1, -1)]
+    chaves = [d.strftime("%d/%m/%Y") for d in dias7]
+    por_dia = dict(
+        db.session.query(RegistroPonto.data, db.func.count(db.distinct(RegistroPonto.usuario_id)))
+        .filter(RegistroPonto.data.in_(chaves))
+        .group_by(RegistroPonto.data)
+        .all()
+    )
+    return {
+        "conformes": conformes,
+        "incompletos": incompletos,
+        "faltas": faltas,
+        "mes_referencia": MESES_PT[hoje.month - 1],
+        "labels_semana": [f"{DIAS_SEMANA[d.weekday()][:3]} {d.strftime('%d/%m')}" for d in dias7],
+        "dados_semana": [por_dia.get(c, 0) for c in chaves],
+    }
+
 
 @app.route("/admin")
 @login_required
-@admin_required
+@gestao_required
 def admin_panel():
     usuarios = Usuario.query.all()
     total_solicitacoes_pendentes = SolicitacaoCorrecao.query.filter_by(status="Pendente").count()
-    
-    # Calcular indicadores para o gráfico inicial
-    registros = RegistroPonto.query.all()
-    dias_por_user = defaultdict(lambda: defaultdict(list))
-    for r in registros:
-        dias_por_user[r.usuario_id][r.data].append(r.tipo)
-    
-    conformes = 0
-    incompletos = 0
-    for user_id, dias in dias_por_user.items():
-        for data, tipos in dias.items():
-            if len(set(tipos)) == 4:
-                conformes += 1
-            else:
-                incompletos += 1
-
-    # Calcular fluxo semanal (últimos 5 dias)
     hoje = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
     # Garante feriados automáticos (nacionais + regionais) presentes no banco
     _sincronizar_feriados_lib()
-    dias_semana = [(hoje - timedelta(days=i)) for i in range(4, -1, -1)]
-    labels_semana = [d.strftime("%d/%m") for d in dias_semana]
-    dados_semana = []
-    for d in dias_semana:
-        count = RegistroPonto.query.filter_by(data=d.strftime("%d/%m/%Y")).count()
-        dados_semana.append(count)
+    indicadores = _indicadores_painel(hoje)
 
     return render_admin_shell(
         initial_view="painel",
         usuarios=usuarios,
         total_solicitacoes_pendentes=total_solicitacoes_pendentes,
         logs_recentes=build_admin_logs_recentes(),
-        conformes=conformes,
-        incompletos=incompletos,
-        labels_semana=labels_semana,
-        dados_semana=dados_semana,
-        feriados=_feriados_do_mes(hoje)
+        feriados=_feriados_do_mes(hoje),
+        **indicadores,
     )
 
 @app.route("/admin/fragment/<string:view_name>")
 @login_required
-@admin_required
+@gestao_required
 def admin_fragment(view_name):
+    papel = _PAPEL_POR_ABA.get(view_name)
+    if papel == "rh" and not current_user.is_rh or papel == "ti" and not current_user.is_ti:
+        abort(403)
     if view_name == "painel":
         usuarios = Usuario.query.all()
         total_solicitacoes_pendentes = SolicitacaoCorrecao.query.filter_by(status="Pendente").count()
         
-        # Calcular indicadores
-        registros = RegistroPonto.query.all()
-        dias_por_user = defaultdict(lambda: defaultdict(list))
-        for r in registros:
-            dias_por_user[r.usuario_id][r.data].append(r.tipo)
-        
-        conformes = 0
-        incompletos = 0
-        for user_id, dias in dias_por_user.items():
-            for data, tipos in dias.items():
-                if len(set(tipos)) == 4:
-                    conformes += 1
-                else:
-                    incompletos += 1
-        
-        # Calcular fluxo semanal (últimos 5 dias)
         hoje = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
-        dias_semana = [(hoje - timedelta(days=i)) for i in range(4, -1, -1)]
-        labels_semana = [d.strftime("%d/%m") for d in dias_semana]
-        dados_semana = []
-        for d in dias_semana:
-            count = RegistroPonto.query.filter_by(data=d.strftime("%d/%m/%Y")).count()
-            dados_semana.append(count)
-        
+        indicadores = _indicadores_painel(hoje)
+
         # Garante feriados automáticos (nacionais + regionais) presentes no banco
         _sincronizar_feriados_lib()
 
         # Feriados do mês atual
         feriados = _feriados_do_mes(hoje)
-        
-        # Calcular Banco de Horas por usuário
-        usuarios_banco_horas = []
-        for u in usuarios:
-            registros_user = RegistroPonto.query.filter_by(usuario_id=u.id).all()
-            
-            dias_registrados = defaultdict(list)
-            for r in registros_user:
-                try:
-                    d_obj = datetime.strptime(r.data, "%d/%m/%Y").date()
-                    if r.tipo in PONTOS_PERMITIDOS:
-                        dias_registrados[d_obj].append((r.tipo, r.hora))
-                except ValueError:
-                    pass
-            
-            total_segundos_trabalhados = 0
-            total_segundos_extras = 0
-            total_segundos_faltantes = 0
-            total_faltas_dias = 0
-            FMT = "%H:%M:%S"
-            segundos_carga_diaria = int(CARGA_HORARIA_DIARIA.total_seconds())
-            
-            # Calcular a partir do primeiro registro até hoje
-            if dias_registrados:
-                primeira_data = min(dias_registrados.keys())
-            else:
-                primeira_data = hoje
-            
-            curr = primeira_data
-            while curr <= hoje:
-                regs = dias_registrados.get(curr, [])
-                if regs:
-                    entradas = [h for t, h in regs if t == "Entrada"]
-                    saidas = [h for t, h in regs if t == "Saída"]
-                    tempo_trabalhado = timedelta()
-                    for i in range(min(len(entradas), len(saidas))):
-                        t1, t2 = datetime.strptime(entradas[i], FMT), datetime.strptime(saidas[i], FMT)
-                        if t2 > t1:
-                            tempo_trabalhado += t2 - t1
-                    tot = int(tempo_trabalhado.total_seconds())
-                    total_segundos_trabalhados += tot
-                    dia_encerrado = bool(regs) and regs[-1][0] == "Saída"
-                    if curr < hoje or dia_encerrado:
-                        if tot > segundos_carga_diaria:
-                            total_segundos_extras += (tot - segundos_carga_diaria)
-                        elif eh_dia_util(curr) and tot < segundos_carga_diaria:
-                            total_segundos_faltantes += (segundos_carga_diaria - tot)
-                elif eh_dia_util(curr) and curr < hoje:
-                    total_faltas_dias += 1
-                    total_segundos_faltantes += segundos_carga_diaria
-                curr += timedelta(days=1)
-            
-            balanco_segundos = total_segundos_extras - total_segundos_faltantes
-            hrs_b, mins_b = divmod(abs(balanco_segundos) // 60, 60)
-            saldo_str = f"{'+' if balanco_segundos >= 0 else '-'}{hrs_b:02d}:{mins_b:02d}h"
-            
-            usuarios_banco_horas.append({
-                "id": u.id,
-                "nome": u.nome,
-                "saldo_segundos": balanco_segundos,
-                "saldo_str": saldo_str,
-                "total_extras": total_segundos_extras,
-                "total_faltantes": total_segundos_faltantes,
-                "total_faltas_dias": total_faltas_dias
-            })
         
         # Alertas CLT
         alertas_clt = []
@@ -2944,11 +3681,6 @@ def admin_fragment(view_name):
             usuarios=usuarios,
             total_solicitacoes_pendentes=total_solicitacoes_pendentes,
             logs_recentes=build_admin_logs_recentes(),
-            conformes=conformes,
-            incompletos=incompletos,
-            labels_semana=labels_semana,
-            dados_semana=dados_semana,
-            usuarios_banco_horas=usuarios_banco_horas,
             alertas_clt=alertas_clt,
             feriados=feriados,
             data_hoje=hoje,
@@ -2956,14 +3688,14 @@ def admin_fragment(view_name):
             regiao_cidade=regiao_cidade,
             regiao_fonte=regiao_fonte,
             ufs_brasil=UFS_BRASIL,
+            **indicadores,
         )
 
     if view_name == "usuarios":
-        usuarios = Usuario.query.all()
+        usuarios = Usuario.query.order_by(Usuario.nome.asc()).all()
         departamentos = Departamento.query.order_by(Departamento.nome.asc()).all()
         total_solicitacoes_pendentes = SolicitacaoCorrecao.query.filter_by(status="Pendente").count()
-        email_verificacao_ativa = _get_config("email_confirmacao_obrigatoria", "false").lower() == "true"
-        return render_template("admin_fragment_usuarios.html", usuarios=usuarios, departamentos=departamentos, total_solicitacoes_pendentes=total_solicitacoes_pendentes, email_verificacao_ativa=email_verificacao_ativa)
+        return render_template("admin_fragment_usuarios.html", usuarios=usuarios, departamentos=departamentos, total_solicitacoes_pendentes=total_solicitacoes_pendentes)
 
     if view_name == "historico":
         usuario_id = request.args.get("usuario_id", type=int)
@@ -3037,6 +3769,15 @@ def admin_fragment(view_name):
             total_solicitacoes_pendentes=total_solicitacoes_pendentes,
         )
 
+    if view_name == "parametros":
+        return render_template("admin_fragment_parametros.html", **_contexto_parametros())
+
+    if view_name == "afastamentos":
+        return render_template("admin_fragment_afastamentos.html", **_contexto_afastamentos())
+
+    if view_name == "fechamento":
+        return render_template("admin_fragment_fechamento.html", **_contexto_fechamento(request.args.get("mes")))
+
     if view_name == "logs":
         logs = LogAuditoria.query.order_by(LogAuditoria.id.desc()).limit(100).all()
         return render_template("admin_fragment_logs.html", logs=logs)
@@ -3045,7 +3786,7 @@ def admin_fragment(view_name):
 
 @app.route("/admin/historico")
 @login_required
-@admin_required
+@rh_required
 def admin_historico():
     usuario_id = request.args.get("usuario_id", type=int)
     busca_nome = request.args.get("busca_nome", "").strip()
@@ -3110,7 +3851,7 @@ def admin_historico():
 
 @app.route("/admin/solicitacoes")
 @login_required
-@admin_required
+@rh_required
 def admin_solicitacoes():
     solicitacoes = SolicitacaoCorrecao.query.order_by(SolicitacaoCorrecao.id.desc()).all()
     total_solicitacoes_pendentes = SolicitacaoCorrecao.query.filter(
@@ -3126,11 +3867,18 @@ def admin_solicitacoes():
 
 @app.route("/admin/solicitacoes/<int:id>/<acao>", methods=["POST"])
 @login_required
-@admin_required
+@rh_required
 def responder_solicitacao(id, acao):
     solicitacao = SolicitacaoCorrecao.query.get_or_404(id)
 
     if acao == "aprovar":
+        try:
+            data_sol = datetime.strptime(solicitacao.data_ponto, "%d/%m/%Y").date()
+        except (TypeError, ValueError):
+            data_sol = None
+        if data_sol and mes_fechado(data_sol):
+            flash(msg_mes_fechado(data_sol.year, data_sol.month) + " (a correção pode ser recusada).", "danger")
+            return _redirect_admin("solicitacoes")
         solicitacao.status = "Aprovada"
 
         if solicitacao.hora_original:
@@ -3184,13 +3932,10 @@ def responder_solicitacao(id, acao):
 
 @app.route("/admin/usuarios")
 @login_required
-@admin_required
+@gestao_required
 def admin_usuarios():
-    if not current_user.is_admin:
-        flash("Acesso negado.", "danger")
-        return redirect(url_for("index"))
 
-    usuarios = Usuario.query.all()
+    usuarios = Usuario.query.order_by(Usuario.nome.asc()).all()
     departamentos = Departamento.query.order_by(Departamento.nome.asc()).all()
     total_solicitacoes_pendentes = 0
     try:
@@ -3205,29 +3950,55 @@ def admin_usuarios():
         total_solicitacoes_pendentes=total_solicitacoes_pendentes,
     )
 
-@app.route("/admin/toggle-admin/<int:user_id>", methods=["POST"])
+@app.route("/admin/usuarios/<int:user_id>/papeis", methods=["POST"])
 @login_required
-@admin_required
-def toggle_admin(user_id):
+@ti_required
+def atualizar_papeis_usuario(user_id):
     user = Usuario.query.get_or_404(user_id)
+    novo_rh = request.form.get("is_rh") == "on"
+    novo_ti = request.form.get("is_ti") == "on"
+
+    if user.is_ti and not novo_ti and Usuario.query.filter(Usuario.is_ti.is_(True), Usuario.id != user.id).count() == 0:
+        flash("É preciso manter pelo menos uma pessoa com o papel TI.", "danger")
+        return _redirect_admin("usuarios")
+
+    if (novo_rh, novo_ti) == (bool(user.is_rh), bool(user.is_ti)):
+        flash(f"Nenhuma alteração nos papéis de {user.nome}.", "info")
+        return _redirect_admin("usuarios")
+
+    antes = user.papeis_texto
+    user.is_rh, user.is_ti = novo_rh, novo_ti
+    # Encerra as sessões para o novo conjunto de acessos valer imediatamente.
+    user.auth_version = int(user.auth_version or 0) + 1
+    db.session.commit()
+    registrar_log(current_user.id, f"Alterou papéis de {user.nome}: {antes} -> {user.papeis_texto}", user_id)
     if user.id == current_user.id:
-        flash("Você não pode alterar suas próprias permissões de administrador.", "warning")
-    else:
-        user.is_admin = not user.is_admin
-        user.auth_version = int(user.auth_version or 0) + 1
-        db.session.commit()
-        registrar_log(current_user.id, f"Alterou permissão de admin para {user.nome} -> {user.is_admin}", user_id)
-        flash(f"Permissões do usuário {user.nome} atualizadas com sucesso!", "success")
+        flash("Seus papéis foram alterados. Entre novamente.", "info")
+        logout_user()
+        session.clear()
+        return redirect(url_for("login"))
+    flash(f"Papéis de {user.nome} atualizados para {user.papeis_texto}.", "success")
     return _redirect_admin("usuarios")
 
 def registrar_log(usuario_id, acao, entidade_id=None):
-    log = LogAuditoria(usuario_id=usuario_id, acao=acao, entidade_id=entidade_id)
+    autor = None
+    if usuario_id:
+        if has_request_context() and current_user.is_authenticated and current_user.id == usuario_id:
+            autor = current_user  # evita um SELECT extra no caso comum
+        else:
+            autor = db.session.get(Usuario, usuario_id)
+    log = LogAuditoria(
+        usuario_id=usuario_id,
+        usuario_nome=autor.nome if autor else None,
+        acao=acao,
+        entidade_id=entidade_id,
+    )
     db.session.add(log)
     db.session.commit()
 
 @app.route("/admin/excluir-usuario/<int:user_id>", methods=["POST"])
 @login_required
-@admin_required
+@rh_required
 def excluir_usuario(user_id):
     user = Usuario.query.get_or_404(user_id)
     
@@ -3237,24 +4008,419 @@ def excluir_usuario(user_id):
         # Não excluímos logs de auditoria para manter conformidade (Portaria 671)
         # Excluímos apenas registros de ponto e solicitações associadas
         user_nome = user.nome
-        RegistroPonto.query.filter_by(usuario_id=user.id).delete()
-        SolicitacaoCorrecao.query.filter_by(usuario_id=user.id).delete()
-        Notificacao.query.filter_by(usuario_id=user.id).delete()
-        SecurityToken.query.filter_by(usuario_id=user.id).delete()
-        
-        db.session.delete(user)
-        db.session.commit()
+        try:
+            # Preserva os logs de auditoria do usuário: guarda o nome e solta
+            # o vínculo explicitamente (a FK também faz SET NULL; isto não
+            # depende de a migração do init-db já ter rodado).
+            LogAuditoria.query.filter(
+                LogAuditoria.usuario_id == user.id,
+                LogAuditoria.usuario_nome.is_(None),
+            ).update({"usuario_nome": user_nome}, synchronize_session=False)
+            LogAuditoria.query.filter_by(usuario_id=user.id).update(
+                {"usuario_id": None}, synchronize_session=False
+            )
+            RegistroPonto.query.filter_by(usuario_id=user.id).delete()
+            SolicitacaoCorrecao.query.filter_by(usuario_id=user.id).delete()
+            Notificacao.query.filter_by(usuario_id=user.id).delete()
+            SecurityToken.query.filter_by(usuario_id=user.id).delete()
+            PushInscricao.query.filter_by(usuario_id=user.id).delete()
+            LembreteEnviado.query.filter_by(usuario_id=user.id).delete()
+            Afastamento.query.filter_by(usuario_id=user.id).delete()
+            EspelhoMensal.query.filter_by(usuario_id=user.id).delete()
+            db.session.expire(user)
+
+            db.session.delete(user)
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            app.logger.exception("Falha ao excluir usuário %s", user_id)
+            flash("Erro ao excluir usuário. Tente novamente.", "danger")
+            return _redirect_admin("usuarios")
+
         _invalidar_notif_cache(user_id)
-        
         registrar_log(current_user.id, f"Excluiu usuário {user_nome}", user_id)
 
         flash(f"Usuário {user_nome} excluído com sucesso!", "success")
 
     return _redirect_admin("usuarios")
 
+# ==========================================
+#     PARÂMETROS DE JORNADA (área da TI)
+# ==========================================
+def _hhmm_para_min(valor):
+    try:
+        h, m = (valor or "").strip().split(":")[:2]
+        h, m = int(h), int(m)
+        if 0 <= h <= 24 and 0 <= m < 60:
+            return h * 60 + m
+    except (ValueError, AttributeError):
+        pass
+    return None
+
+
+def _min_para_hhmm(minutos):
+    h, m = divmod(int(minutos), 60)
+    return f"{h:02d}:{m:02d}"
+
+
+def _descrever_jornada_campo(campo, valor):
+    if campo in ("carga_diaria_min", "interjornada_min"):
+        h, m = divmod(int(valor), 60)
+        return f"{h}h{m:02d}" if m else f"{h}h"
+    if campo == "dias_trabalho":
+        return ", ".join(DIAS_SEMANA[d][:3] for d in sorted(valor)) or "nenhum"
+    if campo == "noturno_ativo":
+        return "ligado" if valor else "desligado"
+    if campo in ("horario_entrada_min", "horario_saida_min"):
+        return "sem horário" if valor is None else f"{int(valor) // 60:02d}:{int(valor) % 60:02d}"
+    if campo.endswith("_pct"):
+        return f"{valor}%"
+    return f"{valor} min"
+
+
+_JORNADA_ROTULOS = dict((c, r) for c, r, _mn, _mx in JORNADA_LIMITES)
+_JORNADA_ROTULOS.update({
+    "dias_trabalho": "Dias de trabalho",
+    "noturno_ativo": "Adicional noturno (cálculo)",
+    "horario_entrada_min": "Horário de entrada",
+    "horario_saida_min": "Horário de saída",
+})
+
+
+def _contexto_parametros(form=None, erros=None):
+    hoje = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
+    atual = jornada_vigente(hoje)
+    proximas = [v for v in _versoes_jornada() if v.vigente_desde > hoje]
+    return {
+        "jornada": atual,
+        "jornada_proximas": sorted(proximas, key=lambda v: v.vigente_desde),
+        "historico_jornada": ParametroJornada.query.order_by(ParametroJornada.vigente_desde.desc()).all(),
+        "dias_semana": DIAS_SEMANA,
+        "limites": {c: (mn, mx) for c, _r, mn, mx in JORNADA_LIMITES},
+        "hoje_iso": hoje.isoformat(),
+        "min_para_hhmm": _min_para_hhmm,
+        "setores": _resumo_setores(hoje),
+        "correcao_dias": correcao_dias_antes_fechamento(),
+        "lembretes": config_lembretes(),
+        "lembretes_cfg_bruto": {
+            "a1": _get_config("lembrete_antecedencia_1", "10"),
+            "a2": _get_config("lembrete_antecedencia_2", "5"),
+        },
+        "push_ativo": VAPID is not None,
+        "correcao_janela": janela_correcao(hoje),
+    }
+
+
+def _resumo_setores(hoje):
+    contagem = dict(
+        db.session.query(Usuario.departamento_id, db.func.count(Usuario.id))
+        .filter(Usuario.departamento_id.isnot(None))
+        .group_by(Usuario.departamento_id)
+        .all()
+    )
+    resumo = []
+    for dep in Departamento.query.order_by(Departamento.nome.asc()).all():
+        j = jornada_vigente(hoje, dep.id)
+        proximas = [v for v in dep.jornadas if v.vigente_desde > hoje]
+        resumo.append({
+            "dep": dep,
+            "jornada": j,
+            "propria": j.setor is not None,
+            "membros": contagem.get(dep.id, 0),
+            "proxima": min(proximas, key=lambda v: v.vigente_desde) if proximas else None,
+        })
+    return resumo
+
+
+CORRECAO_DIAS_ANTES_PADRAO = 1
+
+
+def correcao_dias_antes_fechamento():
+    try:
+        return max(0, min(15, int(_get_config("correcao_dias_antes_fechamento", CORRECAO_DIAS_ANTES_PADRAO))))
+    except (TypeError, ValueError):
+        return CORRECAO_DIAS_ANTES_PADRAO
+
+
+def janela_correcao(hoje=None):
+    """Período em que o colaborador pode pedir correção de ponto.
+
+    O mês fecha no último dia; os pedidos valem para datas do mês corrente
+    e podem ser feitos até N dias antes do fechamento (parâmetro da TI).
+    Devolve (primeiro_dia, fechamento, ultimo_dia_para_pedir).
+    """
+    hoje = hoje or datetime.now(ZoneInfo("America/Sao_Paulo")).date()
+    primeiro = hoje.replace(day=1)
+    fechamento = (primeiro + timedelta(days=32)).replace(day=1) - timedelta(days=1)
+    limite = fechamento - timedelta(days=correcao_dias_antes_fechamento())
+    return primeiro, fechamento, limite
+
+
+def _ler_horarios(form):
+    """Horário de entrada/saída (HH:MM), opcional: ambos ou nenhum."""
+    bruto_e = (form.get("horario_entrada") or "").strip()
+    bruto_s = (form.get("horario_saida") or "").strip()
+    if not bruto_e and not bruto_s:
+        return None, None, None
+    entrada, saida = _hhmm_para_min(bruto_e), _hhmm_para_min(bruto_s)
+    if entrada is None or saida is None:
+        return None, None, "Informe os dois horários (entrada e saída) ou deixe ambos em branco."
+    if saida <= entrada:
+        return None, None, "O horário de saída precisa ser depois do horário de entrada."
+    return entrada, saida, None
+
+
+def _ler_jornada_do_form(form):
+    """Valida o formulário; devolve (vigente_desde, valores, erros)."""
+    erros = []
+    try:
+        vigente_desde = datetime.strptime(form.get("vigente_desde", ""), "%Y-%m-%d").date()
+    except ValueError:
+        vigente_desde = None
+        erros.append("Informe a data a partir da qual as regras valem.")
+
+    valores = {
+        "carga_diaria_min": _hhmm_para_min(form.get("carga_diaria")),
+        "interjornada_min": _hhmm_para_min(form.get("interjornada")),
+    }
+    for campo in ("tolerancia_marcacao_min", "tolerancia_diaria_min", "intervalo_minimo_min",
+                  "limite_extras_dia_min", "extra_util_pct", "extra_descanso_pct", "noturno_pct"):
+        try:
+            valores[campo] = int(form.get(campo, ""))
+        except ValueError:
+            valores[campo] = None
+
+    for campo, rotulo, minimo, maximo in JORNADA_LIMITES:
+        valor = valores.get(campo)
+        if valor is None or not (minimo <= valor <= maximo):
+            if campo in ("carga_diaria_min", "interjornada_min"):
+                faixa = f"entre {_min_para_hhmm(minimo)} e {_min_para_hhmm(maximo)}"
+            elif campo.endswith("_pct"):
+                faixa = f"entre {minimo}% e {maximo}%"
+            else:
+                faixa = f"entre {minimo} e {maximo} minutos"
+            erros.append(f"{rotulo}: informe um valor {faixa}.")
+
+    if valores.get("tolerancia_diaria_min") is not None and valores.get("tolerancia_marcacao_min") is not None \
+            and valores["tolerancia_diaria_min"] < valores["tolerancia_marcacao_min"]:
+        erros.append("A tolerância diária não pode ser menor que a tolerância por marcação.")
+
+    dias = sorted({int(d) for d in form.getlist("dias_trabalho") if d.isdigit() and 0 <= int(d) <= 6})
+    if not dias:
+        erros.append("Selecione pelo menos um dia de trabalho.")
+    valores["dias_trabalho"] = tuple(dias)
+    valores["noturno_ativo"] = form.get("noturno_ativo") == "on"
+    entrada, saida, erro_horario = _ler_horarios(form)
+    if erro_horario:
+        erros.append(erro_horario)
+    valores["horario_entrada_min"], valores["horario_saida_min"] = entrada, saida
+    return vigente_desde, valores, erros
+
+
+@app.route("/admin/parametros/correcao", methods=["POST"])
+@login_required
+@ti_required
+def admin_parametros_correcao():
+    try:
+        dias = int(request.form.get("correcao_dias_antes_fechamento", ""))
+    except ValueError:
+        dias = -1
+    if not 0 <= dias <= 15:
+        flash("Prazo de correção: informe de 0 a 15 dias antes do fechamento.", "danger")
+        return _redirect_admin("parametros", "correcoes")
+    anterior = correcao_dias_antes_fechamento()
+    if dias == anterior:
+        flash("Nenhuma regra foi alterada.", "info")
+        return _redirect_admin("parametros", "correcoes")
+    _set_config("correcao_dias_antes_fechamento", str(dias))
+    db.session.commit()
+    registrar_log(current_user.id, f"Alterou o prazo de correção: até {anterior} -> até {dias} dia(s) antes do fechamento do mês")
+    flash(f"Prazo salvo: correções até {dias} dia(s) antes do fechamento do mês.", "success")
+    return _redirect_admin("parametros", "correcoes")
+
+
+@app.route("/admin/parametros", methods=["GET", "POST"])
+@login_required
+@ti_required
+def admin_parametros():
+    if request.method == "GET":
+        return render_admin_shell(initial_view="parametros")
+
+    vigente_desde, valores, erros = _ler_jornada_do_form(request.form)
+    if not erros and vigente_desde and fechado_no_intervalo(vigente_desde, date.max):
+        erros.append("A vigência não pode começar dentro de um mês fechado: " + msg_mes_fechado(*fechado_no_intervalo(vigente_desde, date.max)))
+    if erros:
+        for erro in erros:
+            flash(erro, "danger")
+        return _redirect_admin("parametros")
+
+    anterior = jornada_vigente(vigente_desde)
+    mudancas = [
+        f"{_JORNADA_ROTULOS[c]}: {_descrever_jornada_campo(c, getattr(anterior, c))} -> {_descrever_jornada_campo(c, v)}"
+        for c, v in valores.items()
+        if getattr(anterior, c) != v
+    ]
+    if not mudancas:
+        flash("Nenhuma regra foi alterada.", "info")
+        return _redirect_admin("parametros")
+
+    versao = ParametroJornada.query.filter_by(vigente_desde=vigente_desde).first()
+    if versao is None:
+        versao = ParametroJornada(vigente_desde=vigente_desde)
+        db.session.add(versao)
+    for campo, valor in valores.items():
+        setattr(versao, campo, ",".join(map(str, valor)) if campo == "dias_trabalho" else valor)
+    versao.alterado_por_nome = current_user.nome
+    versao.alterado_em = datetime.now(ZoneInfo("America/Sao_Paulo"))
+    db.session.commit()
+    _limpar_cache_jornada()
+    _invalidar_notif_cache()
+
+    data_txt = vigente_desde.strftime("%d/%m/%Y")
+    registrar_log(current_user.id, f"Alterou parâmetros de jornada (a partir de {data_txt}): " + "; ".join(mudancas), versao.id)
+    hoje = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
+    if vigente_desde < hoje:
+        flash(f"Regras salvas com vigência retroativa a {data_txt}: os cálculos desde essa data passam a usar as novas regras.", "warning")
+    else:
+        flash(f"Regras salvas. Valem a partir de {data_txt}.", "success")
+    return _redirect_admin("parametros")
+
+
+# ==========================================
+#        AFASTAMENTOS (área do RH)
+# ==========================================
+def _contexto_afastamentos():
+    hoje = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
+    todos = (Afastamento.query.options(db.joinedload(Afastamento.usuario))
+             .order_by(Afastamento.data_inicio.desc()).limit(300).all())
+    return {
+        "em_curso": [a for a in todos if a.data_inicio <= hoje <= a.data_fim],
+        "proximos": sorted([a for a in todos if a.data_inicio > hoje], key=lambda a: a.data_inicio),
+        "anteriores": [a for a in todos if a.data_fim < hoje],
+        "colaboradores": Usuario.query.order_by(Usuario.nome.asc()).all(),
+        "tipos": AFASTAMENTO_TIPOS,
+        "hoje_iso": hoje.isoformat(),
+    }
+
+
+def _ler_anexo_afastamento(arquivo):
+    """Valida o anexo pelo conteúdo (não pela extensão). Devolve (nome, tipo, bytes, erro)."""
+    if not arquivo or not arquivo.filename:
+        return None, None, None, None
+    dados = arquivo.read(AFASTAMENTO_ANEXO_MAX + 1)
+    if len(dados) > AFASTAMENTO_ANEXO_MAX:
+        return None, None, None, "O anexo deve ter no máximo 2 MB."
+    tipo = next((mime for assinatura, mime in AFASTAMENTO_ANEXO_TIPOS.items() if dados.startswith(assinatura)), None)
+    if tipo is None:
+        return None, None, None, "Anexo inválido: envie PDF, JPG ou PNG."
+    nome = secure_filename(arquivo.filename)[:200] or "anexo"
+    return nome, tipo, dados, None
+
+
+@app.route("/admin/afastamentos", methods=["GET", "POST"])
+@login_required
+@rh_required
+def admin_afastamentos():
+    if request.method == "GET":
+        return render_admin_shell(initial_view="afastamentos")
+
+    erros = []
+    usuario = None
+    try:
+        usuario = db.session.get(Usuario, int(request.form.get("usuario_id", "")))
+    except ValueError:
+        pass
+    if usuario is None:
+        erros.append("Selecione o colaborador.")
+    tipo = request.form.get("tipo", "")
+    if tipo not in AFASTAMENTO_TIPOS:
+        erros.append("Selecione o tipo de afastamento.")
+    try:
+        inicio = datetime.strptime(request.form.get("data_inicio", ""), "%Y-%m-%d").date()
+        fim = datetime.strptime(request.form.get("data_fim", ""), "%Y-%m-%d").date()
+    except ValueError:
+        inicio = fim = None
+        erros.append("Informe as datas de início e fim.")
+    if inicio and fim:
+        if fim < inicio:
+            erros.append("A data final não pode ser antes da inicial.")
+        elif (fim - inicio).days > 365:
+            erros.append("Um afastamento pode ter no máximo 1 ano; lance períodos separados se precisar.")
+    observacao = (request.form.get("observacao") or "").strip()[:500] or None
+    anexo_nome, anexo_tipo, anexo_dados, erro_anexo = _ler_anexo_afastamento(request.files.get("anexo"))
+    if erro_anexo:
+        erros.append(erro_anexo)
+    if not erros and inicio and fim and fechado_no_intervalo(inicio, fim):
+        erros.append(msg_mes_fechado(*fechado_no_intervalo(inicio, fim)))
+    if not erros and usuario and inicio and fim:
+        conflito = Afastamento.query.filter(
+            Afastamento.usuario_id == usuario.id,
+            Afastamento.data_inicio <= fim,
+            Afastamento.data_fim >= inicio,
+        ).first()
+        if conflito:
+            erros.append(
+                f"{usuario.nome} já tem {conflito.rotulo.lower()} de {conflito.data_inicio.strftime('%d/%m/%Y')} "
+                f"a {conflito.data_fim.strftime('%d/%m/%Y')}, que se sobrepõe a este período."
+            )
+    if erros:
+        for erro in erros:
+            flash(erro, "danger")
+        return _redirect_admin("afastamentos")
+
+    afast = Afastamento(
+        usuario_id=usuario.id, tipo=tipo, data_inicio=inicio, data_fim=fim, observacao=observacao,
+        anexo_nome=anexo_nome, anexo_tipo=anexo_tipo, anexo_dados=anexo_dados,
+        criado_por_nome=current_user.nome,
+    )
+    db.session.add(afast)
+    db.session.commit()
+    _limpar_cache_afastamentos()
+    _invalidar_notif_cache(usuario.id)
+    periodo = f"{inicio.strftime('%d/%m/%Y')} a {fim.strftime('%d/%m/%Y')}"
+    registrar_log(current_user.id, f"Lançou afastamento ({afast.rotulo}) de {usuario.nome}: {periodo}" + (" com anexo" if anexo_dados else ""), afast.id)
+    flash(f"{afast.rotulo} de {usuario.nome} lançado(a): {periodo}.", "success")
+    return _redirect_admin("afastamentos")
+
+
+@app.route("/admin/afastamentos/<int:id>/excluir", methods=["POST"])
+@login_required
+@rh_required
+def excluir_afastamento(id):
+    afast = Afastamento.query.get_or_404(id)
+    trava = fechado_no_intervalo(afast.data_inicio, afast.data_fim)
+    if trava:
+        flash(msg_mes_fechado(*trava), "danger")
+        return _redirect_admin("afastamentos")
+    descricao = (f"{afast.rotulo} de {afast.usuario.nome}: {afast.data_inicio.strftime('%d/%m/%Y')} "
+                 f"a {afast.data_fim.strftime('%d/%m/%Y')}")
+    uid = afast.usuario_id
+    db.session.delete(afast)
+    db.session.commit()
+    _limpar_cache_afastamentos()
+    _invalidar_notif_cache(uid)
+    registrar_log(current_user.id, f"Cancelou afastamento ({descricao})", id)
+    flash(f"Afastamento cancelado ({descricao}).", "success")
+    return _redirect_admin("afastamentos")
+
+
+@app.route("/admin/afastamentos/<int:id>/anexo")
+@login_required
+@rh_required
+def anexo_afastamento(id):
+    afast = Afastamento.query.get_or_404(id)
+    if not afast.anexo_dados:
+        abort(404)
+    registrar_log(current_user.id, f"Abriu o anexo do afastamento ({afast.rotulo}) de {afast.usuario.nome}", id)
+    resp = send_file(io.BytesIO(afast.anexo_dados), mimetype=afast.anexo_tipo,
+                     as_attachment=True, download_name=afast.anexo_nome or "anexo")
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
 @app.route("/admin/logs")
 @login_required
-@admin_required
+@ti_required
 def admin_logs():
     logs = LogAuditoria.query.order_by(LogAuditoria.id.desc()).limit(100).all()
     usuarios = Usuario.query.all()
@@ -3268,7 +4434,7 @@ def admin_logs():
 
 @app.route('/admin/exportar-afd')
 @login_required
-@admin_required
+@rh_required
 def admin_exportar_afd():
     # Geração de arquivo simplificada conforme layout AFD (Portaria 671)
     registros = RegistroPonto.query.order_by(RegistroPonto.id.asc()).all()
@@ -3309,7 +4475,7 @@ def admin_exportar_afd():
 
 @app.route("/admin/exportar-ponto/<int:user_id>")
 @login_required
-@admin_required
+@rh_required
 def admin_exportar_ponto(user_id):
     usuario = Usuario.query.get_or_404(user_id)
     formato = request.args.get('format', 'pdf')
@@ -3323,7 +4489,7 @@ def admin_exportar_ponto(user_id):
 
 @app.route("/admin/feriados/adicionar", methods=["POST"])
 @login_required
-@admin_required
+@ti_required
 def adicionar_feriado():
     data_str = request.form.get("data")
     descricao = request.form.get("descricao")
@@ -3342,7 +4508,7 @@ def adicionar_feriado():
 
 @app.route("/admin/feriados/excluir/<int:id>", methods=["POST"])
 @login_required
-@admin_required
+@ti_required
 def excluir_feriado(id):
     feriado = Feriado.query.get_or_404(id)
     data_feriado = feriado.data
@@ -3356,7 +4522,7 @@ def excluir_feriado(id):
 
 @app.route("/admin/feriados/sincronizar", methods=["POST"])
 @login_required
-@admin_required
+@ti_required
 def sincronizar_feriados():
     """Dispara manualmente a sincronização dos feriados da biblioteca
     (nacionais + os da UF da região configurada)."""
@@ -3372,7 +4538,7 @@ def sincronizar_feriados():
 
 @app.route("/api/localizacao", methods=["POST"])
 @login_required
-@admin_required
+@ti_required
 def api_localizacao():
     """Recebe as coordenadas do navegador do admin, resolve a UF/cidade via
     reverse geocode (BigDataCloud) e passa a usar essa região nos feriados
@@ -3410,7 +4576,7 @@ def api_localizacao():
 
 @app.route("/admin/feriados/regiao", methods=["POST"])
 @login_required
-@admin_required
+@ti_required
 def definir_regiao_feriados():
     """Define manualmente a região (UF ou 'BR') usada nos feriados do sistema."""
     uf = (request.form.get("uf") or "").strip().upper()
@@ -3451,7 +4617,7 @@ def definir_regiao_feriados():
 
 @app.route("/admin/enviar-lembrete-geral", methods=["POST"])
 @login_required
-@admin_required
+@rh_required
 def enviar_lembrete_geral():
     mensagem = request.form.get("mensagem", "").strip()
 
@@ -3459,23 +4625,668 @@ def enviar_lembrete_geral():
         # Busca todos os usuários do sistema
         usuarios = Usuario.query.all()
 
+        mensagem = mensagem[:1000]
         for user in usuarios:
             nova_notificacao = Notificacao(
                 usuario_id=user.id,
                 titulo="Lembrete da Administração",
                 mensagem=mensagem,
-                tipo="info",  # Define o tipo (aparecerá no dropdown do sino)
-                link="#"      # Pode colocar uma URL específica se quiser
+                tipo="info",
+                link=url_for("index"),
             )
             db.session.add(nova_notificacao)
-        
+
         db.session.commit()
-        flash('Lembrete enviado com sucesso para todos os colaboradores!', 'success')
+        _invalidar_notif_cache()
+        com_aparelho = {uid for (uid,) in db.session.query(PushInscricao.usuario_id).distinct().all()}
+        _enviar_push_em_massa(sorted(com_aparelho), "Lembrete da Administração", mensagem)
+        registrar_log(current_user.id, f"Enviou lembrete geral para {len(usuarios)} colaborador(es): {mensagem[:120]}")
+        detalhe = f" {len(com_aparelho)} também recebe(m) no celular." if com_aparelho else ""
+        flash(f"Lembrete enviado para {len(usuarios)} colaborador(es); aparece no sino do app.{detalhe}", 'success')
     else:
         flash('A mensagem do lembrete não pode estar vazia.', 'warning')
 
     return _redirect_admin("painel")
 
+@app.route("/notificacoes/<int:id>/abrir")
+@login_required
+def abrir_notificacao(id):
+    """Marca o aviso como lido e segue para o destino dele."""
+    n = Notificacao.query.filter_by(id=id, usuario_id=current_user.id).first_or_404()
+    if not n.lida:
+        n.lida = True
+        db.session.commit()
+        _invalidar_notif_cache(current_user.id)
+    return redirect(_internal_path(n.link or "", url_for("index")))
+
+
+@app.route("/notificacoes/marcar-lidas", methods=["POST"])
+@login_required
+def marcar_notificacoes_lidas():
+    Notificacao.query.filter_by(usuario_id=current_user.id, lida=False).update({"lida": True})
+    db.session.commit()
+    _invalidar_notif_cache(current_user.id)
+    return redirect(_internal_referrer_path(url_for("index")))
+
+
+def _enviar_push_em_massa(usuario_ids, titulo, corpo):
+    """Envia push para vários usuários sem segurar a requisição."""
+    if not usuario_ids or VAPID is None:
+        return
+
+    def tarefa():
+        with app.app_context():
+            for uid in usuario_ids:
+                try:
+                    enviar_push(uid, titulo, corpo, url="/", tag="aviso-geral")
+                except Exception:
+                    app.logger.exception("Falha no push em massa para %s", uid)
+
+    if app.config.get("TESTING"):
+        tarefa()
+    else:
+        threading.Thread(target=tarefa, name="push-em-massa", daemon=True).start()
+
+
+# ==========================================
+#   FECHAMENTO DO MÊS E ESPELHO DE PONTO
+# ==========================================
+def _periodo_mes(ano, mes):
+    return date(ano, mes, 1), date(ano, mes, calendar.monthrange(ano, mes)[1])
+
+
+def _ler_mes(valor):
+    """'2026-10' -> (2026, 10) ou None."""
+    try:
+        ano, mes = (int(x) for x in (valor or "").split("-")[:2])
+        if 2000 <= ano <= 2100 and 1 <= mes <= 12:
+            return ano, mes
+    except ValueError:
+        pass
+    return None
+
+
+def _snapshot_espelho(usuario, ano, mes):
+    """Gera o conteúdo (JSON) e o hash do espelho do mês para um colaborador."""
+    import json as _json
+    inicio, fim = _periodo_mes(ano, mes)
+    dados = _gerar_relatorio_ponto_dados(usuario, inicio.isoformat(), fim.isoformat())
+    conteudo = {
+        "usuario": usuario.nome,
+        "email": usuario.email,
+        "setor": usuario.departamento_rel.nome if usuario.departamento_rel else None,
+        "contrato": usuario.tipo_contrato or "CLT",
+        "inicio": inicio.isoformat(),
+        "fim": fim.isoformat(),
+        "is_pj": dados["is_pj"],
+        "max_pares": dados["max_pares"],
+        "tabela_linhas": dados["tabela_linhas"],
+        "totais": dados["totais"],
+        "total_dias_afastados": dados["total_dias_afastados"],
+    }
+    texto = _json.dumps(conteudo, ensure_ascii=False, sort_keys=True)
+    return texto, hashlib.sha256(texto.encode("utf-8")).hexdigest()
+
+
+def _contexto_fechamento(mes_param=None):
+    hoje = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
+    fechamentos = {(f.ano, f.mes): f for f in FechamentoMes.query.all()}
+    # Meses listados: últimos 12 meses já terminados + qualquer mês com fechamento.
+    meses = set(fechamentos)
+    ref = hoje.replace(day=1)
+    for _ in range(12):
+        ref = (ref - timedelta(days=1)).replace(day=1)
+        meses.add((ref.year, ref.month))
+    lista = []
+    for ano, mes in sorted(meses, reverse=True):
+        f = fechamentos.get((ano, mes))
+        espelhos = f.espelhos if f else []
+        lista.append({
+            "ano": ano, "mes": mes, "chave": f"{ano}-{mes:02d}",
+            "rotulo": f"{MESES_PT[mes - 1].capitalize()}/{ano}",
+            "fech": f,
+            "fechado": bool(f and f.fechado),
+            "cientes": sum(1 for e in espelhos if e.ciencia_status == "ciente"),
+            "contestados": sum(1 for e in espelhos if e.ciencia_status == "contestado"),
+            "total": len(espelhos),
+        })
+    ctx = {"meses": lista, "detalhe": None, "fmt_hhmm": fmt_hhmm}
+
+    sel = _ler_mes(mes_param)
+    if sel:
+        ano, mes = sel
+        inicio, fim = _periodo_mes(ano, mes)
+        f = fechamentos.get((ano, mes))
+        linhas = []
+        if f and f.fechado:
+            for e in sorted(f.espelhos, key=lambda e: (e.usuario_nome or "").lower()):
+                c = e.conteudo
+                linhas.append({"nome": e.usuario_nome, "setor": c.get("setor"), "contrato": c.get("contrato"),
+                               "tot": c["totais"], "afastados": c.get("total_dias_afastados", 0), "espelho": e})
+        else:
+            for u in Usuario.query.order_by(Usuario.nome.asc()).all():
+                if u.data_cadastro and u.data_cadastro.date() > fim:
+                    continue
+                dados = _gerar_relatorio_ponto_dados(u, inicio.isoformat(), fim.isoformat())
+                linhas.append({"nome": u.nome, "setor": u.departamento_rel.nome if u.departamento_rel else None,
+                               "contrato": u.tipo_contrato or "CLT", "tot": dados["totais"],
+                               "afastados": dados["total_dias_afastados"], "espelho": None})
+        pendentes_sol = sum(
+            1 for s_ in SolicitacaoCorrecao.query.filter_by(status="Pendente").all()
+            if (s_.data_ponto or "").endswith(f"/{mes:02d}/{ano}")
+        )
+        ctx["detalhe"] = {
+            "ano": ano, "mes": mes, "chave": f"{ano}-{mes:02d}",
+            "rotulo": f"{MESES_PT[mes - 1]}/{ano}",
+            "fech": f, "fechado": bool(f and f.fechado),
+            "pode_fechar": fim < hoje,
+            "linhas": linhas,
+            "incompletos": sum(l["tot"]["incompletos"] for l in linhas),
+            "solicitacoes_pendentes": pendentes_sol,
+        }
+    return ctx
+
+
+@app.route("/admin/fechamento")
+@login_required
+@rh_required
+def admin_fechamento():
+    return render_admin_shell(initial_view="fechamento")
+
+
+@app.route("/admin/fechamento/<int:ano>/<int:mes>/fechar", methods=["POST"])
+@login_required
+@rh_required
+def fechar_mes(ano, mes):
+    if not 1 <= mes <= 12:
+        abort(404)
+    inicio, fim = _periodo_mes(ano, mes)
+    hoje = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
+    if fim >= hoje:
+        flash("Só é possível fechar um mês depois que ele terminar.", "danger")
+        return redirect(url_for("admin_fechamento", mes=f"{ano}-{mes:02d}"))
+    f = FechamentoMes.query.filter_by(ano=ano, mes=mes).first()
+    if f and f.fechado:
+        flash("Este mês já está fechado.", "info")
+        return redirect(url_for("admin_fechamento", mes=f"{ano}-{mes:02d}"))
+    if f is None:
+        f = FechamentoMes(ano=ano, mes=mes)
+        db.session.add(f)
+        db.session.flush()
+    existentes = {e.usuario_id: e for e in f.espelhos}
+    novos_avisos = []
+    for u in Usuario.query.all():
+        if u.data_cadastro and u.data_cadastro.date() > fim:
+            continue
+        texto, h = _snapshot_espelho(u, ano, mes)
+        e = existentes.get(u.id)
+        if e is None:
+            e = EspelhoMensal(fechamento_id=f.id, usuario_id=u.id)
+            db.session.add(e)
+        mudou = e.hash != h
+        e.usuario_nome, e.dados, e.hash = u.nome, texto, h
+        if mudou and e.ciencia_status != "pendente":
+            # Conteúdo mudou depois de reaberto: precisa de nova ciência.
+            e.ciencia_status, e.comentario = "pendente", None
+        if e.ciencia_status == "pendente":
+            novos_avisos.append(u.id)
+    f.fechado = True
+    f.fechado_em = datetime.now(ZoneInfo("America/Sao_Paulo"))
+    f.fechado_por_nome = current_user.nome
+    rotulo = f"{MESES_PT[mes - 1]}/{ano}"
+    for uid in novos_avisos:
+        db.session.add(Notificacao(usuario_id=uid, titulo=f"Espelho de ponto de {rotulo}",
+                                   mensagem="O mês foi fechado. Confira seu espelho e confirme a ciência.",
+                                   tipo="info", link=url_for("ver_espelho", ano=ano, mes=mes)))
+    db.session.commit()
+    _limpar_cache_fechamento()
+    _invalidar_notif_cache()
+    com_aparelho = {uid for (uid,) in db.session.query(PushInscricao.usuario_id).filter(PushInscricao.usuario_id.in_(novos_avisos)).distinct().all()} if novos_avisos else set()
+    _enviar_push_em_massa(sorted(com_aparelho), f"Espelho de ponto de {rotulo}", "O mês foi fechado. Confira seu espelho e confirme a ciência.")
+    registrar_log(current_user.id, f"Fechou o mês {rotulo} ({len(f.espelhos)} espelho(s))", f.id)
+    flash(f"Mês {rotulo} fechado. {len(novos_avisos)} colaborador(es) foram avisados para dar ciência.", "success")
+    return redirect(url_for("admin_fechamento", mes=f"{ano}-{mes:02d}"))
+
+
+@app.route("/admin/fechamento/<int:ano>/<int:mes>/reabrir", methods=["POST"])
+@login_required
+@rh_required
+def reabrir_mes(ano, mes):
+    f = FechamentoMes.query.filter_by(ano=ano, mes=mes, fechado=True).first_or_404()
+    motivo = (request.form.get("motivo") or "").strip()
+    if len(motivo) < 5:
+        flash("Informe o motivo da reabertura (fica registrado no log).", "danger")
+        return redirect(url_for("admin_fechamento", mes=f"{ano}-{mes:02d}"))
+    f.fechado = False
+    f.reaberto_em = datetime.now(ZoneInfo("America/Sao_Paulo"))
+    f.reaberto_por_nome = current_user.nome
+    f.motivo_reabertura = motivo[:500]
+    db.session.commit()
+    _limpar_cache_fechamento()
+    registrar_log(current_user.id, f"Reabriu o mês {f.rotulo}. Motivo: {motivo[:300]}", f.id)
+    flash(f"Mês {f.rotulo} reaberto para ajustes. Feche novamente ao terminar.", "warning")
+    return redirect(url_for("admin_fechamento", mes=f"{ano}-{mes:02d}"))
+
+
+@app.route("/admin/fechamento/<int:ano>/<int:mes>/exportar")
+@login_required
+@rh_required
+def exportar_fechamento(ano, mes):
+    """Consolidado do mês fechado para a contabilidade (Excel ou CSV)."""
+    import pandas as pd
+    f = FechamentoMes.query.filter_by(ano=ano, mes=mes, fechado=True).first_or_404()
+    formato = request.args.get("format", "excel")
+    dec = lambda seg: round((seg or 0) / 3600, 2)
+    linhas = []
+    for e in sorted(f.espelhos, key=lambda e: (e.usuario_nome or "").lower()):
+        c = e.conteudo
+        t = c["totais"]
+        linhas.append({
+            "Colaborador": c["usuario"], "E-mail": c["email"], "Setor": c.get("setor") or "",
+            "Contrato": c.get("contrato") or "CLT",
+            "Trabalhado (h)": dec(t["trabalhado"]), "Trabalhado (HH:MM)": fmt_hhmm(t["trabalhado"]),
+            f"Extras {t['extra_util_pct']}% (h)": dec(t["extra_50"]), f"Extras {t['extra_util_pct']}% (HH:MM)": fmt_hhmm(t["extra_50"]),
+            f"Extras {t['extra_descanso_pct']}% (h)": dec(t["extra_100"]), f"Extras {t['extra_descanso_pct']}% (HH:MM)": fmt_hhmm(t["extra_100"]),
+            "Atrasos (h)": dec(t["atraso"]), "Atrasos (HH:MM)": fmt_hhmm(t["atraso"]),
+            "Faltas (dias)": t["faltas_dias"], "Faltas (h)": dec(t["falta_seg"]),
+            "Adicional noturno (h)": dec(t["noturno_ficto"]) if t.get("noturno_ativo") else 0,
+            "Afastados (dias)": c.get("total_dias_afastados", 0),
+            "Dias incompletos": t["incompletos"],
+            "Ciência": e.ciencia_status,
+            "Ciência em": e.ciencia_em.strftime("%d/%m/%Y %H:%M") if e.ciencia_em else "",
+            "Código do espelho": e.hash[:12],
+        })
+    # Protege só textos contra injeção de fórmula; números seguem numéricos (somáveis no Excel).
+    seguro = lambda v: _neutralise_export_value(v) if isinstance(v, str) else v
+    df = pd.DataFrame([[seguro(v) for v in r.values()] for r in linhas] if linhas else [],
+                      columns=list(linhas[0].keys()) if linhas else ["Colaborador"])
+    nome = f"Fechamento_{ano}-{mes:02d}"
+    registrar_log(current_user.id, f"Exportou o fechamento de {f.rotulo} ({formato})", f.id)
+    if formato == "csv":
+        out = io.StringIO()
+        df.to_csv(out, index=False, sep=";", decimal=",", encoding="utf-8-sig")
+        return send_file(io.BytesIO(out.getvalue().encode("utf-8-sig")), as_attachment=True,
+                         download_name=f"{nome}.csv", mimetype="text/csv")
+    out = io.BytesIO()
+    with pd.ExcelWriter(out, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name=f"{mes:02d}-{ano}")
+    out.seek(0)
+    return send_file(out, as_attachment=True, download_name=f"{nome}.xlsx",
+                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
+# ---------- Espelho do colaborador ----------
+def _espelho_do_usuario(ano, mes):
+    return (EspelhoMensal.query.join(FechamentoMes)
+            .filter(EspelhoMensal.usuario_id == current_user.id, FechamentoMes.ano == ano,
+                    FechamentoMes.mes == mes, FechamentoMes.fechado.is_(True))
+            .first_or_404())
+
+
+@app.route("/espelhos")
+@login_required
+def meus_espelhos():
+    espelhos = (EspelhoMensal.query.join(FechamentoMes)
+                .filter(EspelhoMensal.usuario_id == current_user.id, FechamentoMes.fechado.is_(True))
+                .order_by(FechamentoMes.ano.desc(), FechamentoMes.mes.desc()).all())
+    return render_template("espelhos.html", espelhos=espelhos, fmt_hhmm=fmt_hhmm)
+
+
+@app.route("/espelho/<int:ano>/<int:mes>")
+@login_required
+def ver_espelho(ano, mes):
+    e = _espelho_do_usuario(ano, mes)
+    return render_template("espelho.html", e=e, c=e.conteudo, fmt_hhmm=fmt_hhmm)
+
+
+@app.route("/espelho/<int:ano>/<int:mes>/pdf")
+@login_required
+def espelho_pdf(ano, mes):
+    e = _espelho_do_usuario(ano, mes)
+    c = e.conteudo
+    dados = {
+        "usuario": current_user, "is_pj": c["is_pj"],
+        "data_inicio_obj": date.fromisoformat(c["inicio"]), "data_fim_obj": date.fromisoformat(c["fim"]),
+        "tabela_linhas": c["tabela_linhas"], "max_pares": c["max_pares"], "totais": c["totais"],
+        "total_dias_afastados": c.get("total_dias_afastados", 0),
+        "rodape": f"Espelho do fechamento de {e.fechamento.rotulo} · código {e.hash[:12]}",
+    }
+    return _gerar_arquivo_folha_ponto(dados, "pdf")
+
+
+@app.route("/espelho/<int:ano>/<int:mes>/ciencia", methods=["POST"])
+@login_required
+def dar_ciencia_espelho(ano, mes):
+    e = _espelho_do_usuario(ano, mes)
+    acao = request.form.get("acao")
+    comentario = (request.form.get("comentario") or "").strip()[:1000]
+    if acao not in ("ciente", "contestar"):
+        abort(400)
+    if acao == "contestar" and len(comentario) < 5:
+        flash("Explique o que está errado para o RH poder verificar.", "danger")
+        return redirect(url_for("ver_espelho", ano=ano, mes=mes))
+    e.ciencia_status = "ciente" if acao == "ciente" else "contestado"
+    e.comentario = comentario or None
+    e.ciencia_em = datetime.now(ZoneInfo("America/Sao_Paulo"))
+    e.ciencia_ip = (request.remote_addr or "")[:64]
+    e.ciencia_user_agent = (request.headers.get("User-Agent") or "")[:255]
+    e.ciencia_hash = e.hash
+    db.session.commit()
+    _invalidar_notif_cache(current_user.id)
+    registrar_log(current_user.id, f"{'Deu ciência no' if acao == 'ciente' else 'Contestou o'} espelho de {e.fechamento.rotulo}"
+                  + (f": {comentario[:200]}" if acao == "contestar" else ""), e.id)
+    flash("Ciência registrada. Obrigado!" if acao == "ciente" else "Contestação enviada ao RH.", "success")
+    return redirect(url_for("ver_espelho", ano=ano, mes=mes))
+
+
+# ==========================================
+#   NOTIFICAÇÕES PUSH E LEMBRETES DE PONTO
+# ==========================================
+def _carregar_vapid():
+    """Valida o par VAPID do ambiente; sem par válido o push fica desligado."""
+    pub = (os.environ.get("VAPID_PUBLIC_KEY") or "").strip()
+    priv = (os.environ.get("VAPID_PRIVATE_KEY") or "").strip()
+    claim = (os.environ.get("VAPID_CLAIM_EMAIL") or "").strip()
+    if not (pub and priv and claim):
+        return None
+    try:
+        import base64
+        from py_vapid import Vapid02
+        from cryptography.hazmat.primitives import serialization
+        derivada = base64.urlsafe_b64encode(
+            Vapid02.from_raw(priv.encode()).public_key.public_bytes(
+                serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
+        ).rstrip(b"=").decode()
+        if derivada != pub:
+            app.logger.warning("VAPID_PUBLIC_KEY não corresponde à VAPID_PRIVATE_KEY: push desligado.")
+            return None
+    except Exception as exc:
+        app.logger.warning("Chaves VAPID inválidas, push desligado: %s", exc)
+        return None
+    return {"publica": pub, "privada": priv, "claim": claim if claim.startswith("mailto:") else f"mailto:{claim}"}
+
+
+VAPID = _carregar_vapid()
+if VAPID is None:
+    print("AVISO: chaves VAPID ausentes ou inválidas. Notificações push desligadas.")
+
+LEMBRETE_JANELA_MIN = 4  # tolera atrasos do verificador sem enviar dois lembretes juntos
+
+
+def config_lembretes():
+    """Parâmetros de lembrete definidos pela TI (Configuracao)."""
+    def inteiro(chave, padrao, minimo, maximo):
+        try:
+            return max(minimo, min(maximo, int(_get_config(chave, padrao))))
+        except (TypeError, ValueError):
+            return padrao
+    antecedencias = sorted({inteiro("lembrete_antecedencia_1", 10, 0, 60), inteiro("lembrete_antecedencia_2", 5, 0, 60)} - {0}, reverse=True)
+    return {
+        "ativos": (_get_config("lembretes_ativos", "true") or "true").lower() == "true",
+        "antecedencias": antecedencias,
+        "esquecimento_min": inteiro("lembrete_esquecimento_min", 15, 5, 120),
+    }
+
+
+def enviar_push(usuario_id, titulo, corpo, url="/", tag=None):
+    """Envia push a todos os aparelhos do usuário; remove inscrições expiradas."""
+    if VAPID is None:
+        return 0
+    from pywebpush import webpush, WebPushException
+    import json as _json
+    enviados = 0
+    payload = _json.dumps({"titulo": titulo, "corpo": corpo, "url": url, "tag": tag or "ponto"})
+    for insc in PushInscricao.query.filter_by(usuario_id=usuario_id).all():
+        try:
+            webpush(
+                subscription_info={"endpoint": insc.endpoint, "keys": {"p256dh": insc.p256dh, "auth": insc.auth}},
+                data=payload,
+                vapid_private_key=VAPID["privada"],
+                vapid_claims={"sub": VAPID["claim"]},
+                ttl=900,
+                timeout=10,
+            )
+            enviados += 1
+        except WebPushException as exc:
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            if status in (404, 410):
+                db.session.delete(insc)  # aparelho desinscrito/expirado
+                db.session.commit()
+            else:
+                app.logger.warning("Falha no push para usuário %s: %s", usuario_id, exc)
+        except Exception as exc:
+            app.logger.warning("Falha no push para usuário %s: %s", usuario_id, exc)
+    return enviados
+
+
+def lembretes_devidos(agora=None):
+    """Lista os lembretes que deveriam sair agora (sem considerar os já enviados)."""
+    cfg = config_lembretes()
+    if not cfg["ativos"]:
+        return []
+    agora = agora or datetime.now(ZoneInfo("America/Sao_Paulo"))
+    hoje = agora.date()
+    minuto = agora.hour * 60 + agora.minute
+    hoje_str = hoje.strftime("%d/%m/%Y")
+
+    batidas = defaultdict(list)
+    for r in RegistroPonto.query.filter_by(data=hoje_str).all():
+        batidas[r.usuario_id].append((r.hora or "", r.tipo))
+
+    def fmt(m):
+        return f"{m // 60:02d}:{m % 60:02d}"
+
+    devidos = []
+    for u in Usuario.query.all():
+        dep = u.departamento_id
+        if not eh_dia_util(hoje, dep) or afastamento_no_dia(u.id, hoje):
+            continue
+        j = jornada_vigente(hoje, dep)
+        entrada, saida = j.horario_entrada_min, j.horario_saida_min
+        if entrada is None or saida is None:
+            continue
+        tipos = [t for _h, t in sorted(batidas.get(u.id, []))]
+        tem_entrada = "Entrada" in tipos
+        expediente_aberto = bool(tipos) and tipos[-1] == "Entrada"
+
+        for k in cfg["antecedencias"]:
+            if not tem_entrada and entrada - k <= minuto < entrada - k + LEMBRETE_JANELA_MIN:
+                devidos.append({"usuario": u, "tipo": f"entrada_{k}", "persistir": False,
+                                "titulo": f"Expediente começa em {k} min",
+                                "corpo": f"Sua entrada é às {fmt(entrada)}. Não esqueça de bater o ponto."})
+            if expediente_aberto and saida - k <= minuto < saida - k + LEMBRETE_JANELA_MIN:
+                devidos.append({"usuario": u, "tipo": f"saida_{k}", "persistir": False,
+                                "titulo": f"Expediente termina em {k} min",
+                                "corpo": f"Sua saída é às {fmt(saida)}. Lembre-se de bater o ponto ao sair."})
+
+        esquecimento = entrada + cfg["esquecimento_min"]
+        if not tem_entrada and esquecimento <= minuto < saida:
+            devidos.append({"usuario": u, "tipo": "esqueceu_entrada", "persistir": True,
+                            "titulo": "Você ainda não bateu a entrada",
+                            "corpo": f"Seu expediente começou às {fmt(entrada)} e não há registro de entrada hoje."})
+    return devidos
+
+
+def processar_lembretes(agora=None):
+    """Envia os lembretes devidos uma única vez (registro único por pessoa/dia/tipo)."""
+    from sqlalchemy.exc import IntegrityError
+    agora = agora or datetime.now(ZoneInfo("America/Sao_Paulo"))
+    enviados = 0
+    for item in lembretes_devidos(agora):
+        u = item["usuario"]
+        db.session.add(LembreteEnviado(usuario_id=u.id, data=agora.date(), tipo=item["tipo"]))
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()  # outro processo/execução já enviou
+            continue
+        if item["persistir"]:
+            db.session.add(Notificacao(usuario_id=u.id, titulo=item["titulo"], mensagem=item["corpo"],
+                                       tipo="warning", link=url_for("index") if has_request_context() else "/"))
+            db.session.commit()
+            _invalidar_notif_cache(u.id)
+        enviar_push(u.id, item["titulo"], item["corpo"], url="/", tag=item["tipo"])
+        enviados += 1
+    return enviados
+
+
+def _laco_lembretes():
+    app.logger.info("Verificador de lembretes de ponto iniciado.")
+    while True:
+        try:
+            with app.app_context():
+                processar_lembretes()
+        except Exception:
+            app.logger.exception("Erro no verificador de lembretes")
+        time.sleep(max(5, 60 - datetime.now().second))
+
+
+_lembretes_lock = threading.Lock()
+_lembretes_iniciado = False
+
+
+def iniciar_verificador_lembretes():
+    global _lembretes_iniciado
+    with _lembretes_lock:
+        if _lembretes_iniciado:
+            return
+        _lembretes_iniciado = True
+    threading.Thread(target=_laco_lembretes, name="lembretes-ponto", daemon=True).start()
+
+
+@app.before_request
+def _garantir_verificador_lembretes():
+    # Roda dentro do processo web (padrão). Para um processo separado, defina
+    # LEMBRETES_NO_WEB=false e rode `flask --app app lembretes`.
+    if not _lembretes_iniciado and not app.config.get("TESTING") and _env_bool("LEMBRETES_NO_WEB", True):
+        iniciar_verificador_lembretes()
+
+
+@app.cli.command("lembretes")
+def lembretes_command():
+    """Roda o verificador de lembretes em primeiro plano (processo worker)."""
+    _laco_lembretes()
+
+
+# ---------- Service worker e manifesto (PWA) ----------
+@app.route("/sw.js")
+def service_worker():
+    resp = send_from_directory(os.path.join(app.root_path, "static", "js"), "sw.js", mimetype="application/javascript")
+    resp.headers["Service-Worker-Allowed"] = "/"
+    resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
+@app.route("/manifest.webmanifest")
+def manifesto_pwa():
+    dados = {
+        "name": "4Lab Orbit | Controle de Ponto",
+        "short_name": "Ponto",
+        "start_url": "/",
+        "scope": "/",
+        "display": "standalone",
+        "background_color": "#0f172a",
+        "theme_color": "#0f172a",
+        "lang": "pt-BR",
+        "icons": [
+            {"src": url_for("static", filename="icons/icon-192.png"), "sizes": "192x192", "type": "image/png"},
+            {"src": url_for("static", filename="icons/icon-512.png"), "sizes": "512x512", "type": "image/png"},
+            {"src": url_for("static", filename="icons/icon-512.png"), "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
+        ],
+    }
+    resp = jsonify(dados)
+    resp.headers["Content-Type"] = "application/manifest+json"
+    return resp
+
+
+# ---------- Inscrição de aparelhos ----------
+@app.route("/api/push/chave")
+@login_required
+def api_push_chave():
+    return jsonify(ativo=VAPID is not None, chave=VAPID["publica"] if VAPID else None,
+                   inscritos=PushInscricao.query.filter_by(usuario_id=current_user.id).count())
+
+
+@app.route("/api/push/inscrever", methods=["POST"])
+@login_required
+def api_push_inscrever():
+    if VAPID is None:
+        return jsonify(erro="Notificações push não estão configuradas no servidor."), 503
+    dados = request.get_json(silent=True) or {}
+    endpoint = str(dados.get("endpoint") or "")
+    chaves = dados.get("keys") or {}
+    p256dh, auth = str(chaves.get("p256dh") or ""), str(chaves.get("auth") or "")
+    if not endpoint.startswith("https://") or len(endpoint) > 2000 or not p256dh or not auth or len(p256dh) > 255 or len(auth) > 255:
+        return jsonify(erro="Inscrição inválida."), 400
+    h = hashlib.sha256(endpoint.encode()).hexdigest()
+    insc = PushInscricao.query.filter_by(endpoint_hash=h).first()
+    if insc is None:
+        insc = PushInscricao(endpoint=endpoint, endpoint_hash=h)
+        db.session.add(insc)
+    insc.usuario_id = current_user.id  # aparelho passa a ser de quem está logado
+    insc.p256dh, insc.auth = p256dh, auth
+    insc.user_agent = (request.headers.get("User-Agent") or "")[:255]
+    db.session.commit()
+    return jsonify(ok=True)
+
+
+@app.route("/api/push/cancelar", methods=["POST"])
+@login_required
+def api_push_cancelar():
+    dados = request.get_json(silent=True) or {}
+    endpoint = str(dados.get("endpoint") or "")
+    h = hashlib.sha256(endpoint.encode()).hexdigest()
+    PushInscricao.query.filter_by(endpoint_hash=h, usuario_id=current_user.id).delete()
+    db.session.commit()
+    return jsonify(ok=True)
+
+
+@app.route("/api/push/teste", methods=["POST"])
+@login_required
+def api_push_teste():
+    n = enviar_push(current_user.id, "Lembretes ativados ✅", "É assim que os lembretes de ponto vão aparecer.", url="/", tag="teste")
+    return jsonify(enviados=n)
+
+
+# ---------- Parâmetros de lembrete (TI) ----------
+@app.route("/admin/parametros/lembretes", methods=["POST"])
+@login_required
+@ti_required
+def admin_parametros_lembretes():
+    def ler(campo, minimo, maximo):
+        try:
+            v = int(request.form.get(campo, ""))
+        except ValueError:
+            return None
+        return v if minimo <= v <= maximo else None
+
+    a1, a2 = ler("lembrete_antecedencia_1", 0, 60), ler("lembrete_antecedencia_2", 0, 60)
+    esq = ler("lembrete_esquecimento_min", 5, 120)
+    if a1 is None or a2 is None or esq is None:
+        flash("Lembretes: antecedências de 0 a 60 min e aviso de esquecimento de 5 a 120 min.", "danger")
+        return _redirect_admin("parametros", "lembretes")
+    novos = {
+        "lembretes_ativos": "true" if request.form.get("lembretes_ativos") == "on" else "false",
+        "lembrete_antecedencia_1": str(a1),
+        "lembrete_antecedencia_2": str(a2),
+        "lembrete_esquecimento_min": str(esq),
+    }
+    padroes = {"lembretes_ativos": "true", "lembrete_antecedencia_1": "10", "lembrete_antecedencia_2": "5", "lembrete_esquecimento_min": "15"}
+    mudancas = []
+    for chave, valor in novos.items():
+        antes = _get_config(chave, padroes[chave])
+        if str(antes) != valor:
+            mudancas.append(f"{chave}: {antes} -> {valor}")
+            _set_config(chave, valor)
+    if not mudancas:
+        flash("Nenhuma regra foi alterada.", "info")
+        return _redirect_admin("parametros", "lembretes")
+    db.session.commit()
+    registrar_log(current_user.id, "Alterou os lembretes de ponto: " + "; ".join(mudancas))
+    flash("Lembretes de ponto atualizados.", "success")
+    return _redirect_admin("parametros", "lembretes")
+
+
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
+    port = int(os.environ.get("PORT", 1234))
     app.run(host="0.0.0.0", port=port, debug=app.config["DEBUG"])
