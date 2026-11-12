@@ -43,6 +43,11 @@
             --orange-glow: rgba(245, 158, 11, 0.25);
             --nav-btn-bg: rgba(255, 255, 255, 0.05);
             --nav-btn-hover: rgba(255, 255, 255, 0.12);
+            /* Sombreado: no escuro a sombra precisa ser mais densa e ganha um brilho fino no topo */
+            --sombra-card: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 10px 28px rgba(0, 0, 0, 0.45), 0 2px 6px rgba(0, 0, 0, 0.35);
+            --sombra-card-hover: 0 1px 0 rgba(255, 255, 255, 0.06) inset, 0 16px 38px rgba(0, 0, 0, 0.55), 0 4px 10px rgba(0, 0, 0, 0.4);
+            --sombra-item: 0 4px 12px rgba(0, 0, 0, 0.35);
+            --sombra-texto: 0 1px 2px rgba(0, 0, 0, 0.55);
         }
 
         /* TEMA CLARO */
@@ -61,6 +66,10 @@
             --orange-glow: rgba(217, 119, 6, 0.15);
             --nav-btn-bg: #f8fafc;
             --nav-btn-hover: #e2e8f0;
+            --sombra-card: 0 10px 28px rgba(15, 23, 42, 0.08), 0 2px 6px rgba(15, 23, 42, 0.06);
+            --sombra-card-hover: 0 16px 38px rgba(15, 23, 42, 0.12), 0 4px 10px rgba(15, 23, 42, 0.08);
+            --sombra-item: 0 4px 12px rgba(15, 23, 42, 0.10);
+            --sombra-texto: 0 1px 1px rgba(15, 23, 42, 0.12);
         }
 
         :root {
@@ -673,6 +682,18 @@
             background: var(--card-border) !important; 
             border-color: var(--blue-accent) !important;
         }
+        /* ---------- Sombreado (cartões, elementos internos e títulos) ---------- */
+        .top-navbar, .dashboard-card, .pastel-card, .metric-card { box-shadow: var(--sombra-card); }
+        .dashboard-card:hover, .metric-card:hover { box-shadow: var(--sombra-card-hover); }
+        .metric-icon, .activity-icon, .atalho-icone { box-shadow: var(--sombra-item); }
+        .activity-item:hover, .atalho:hover { box-shadow: var(--sombra-item); }
+        .quick-action-btn, .nav-btn.active { box-shadow: var(--sombra-item); }
+        #adminContent .badge { box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18); }
+        #adminContent h3, #adminContent h4, #adminContent h5,
+        #adminContent .activity-content .fw-bold, .atalho-nome, .brand-title {
+            text-shadow: var(--sombra-texto);
+        }
+        .painel-grid.editando .painel-bloco-ctrl { box-shadow: var(--sombra-item); }
     </style>
     <link href="{{ url_for('static', filename='css/tema.css') }}" rel="stylesheet">
 </head>
