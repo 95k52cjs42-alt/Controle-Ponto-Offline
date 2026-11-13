@@ -3642,18 +3642,72 @@ def excluir_departamento(id):
 @login_required
 @rh_required
 def atualizar_usuario_admin(user_id):
+    """Atualização de cadastro pelo RH. Para incluir um campo novo: ler e
+    validar abaixo e acrescentá-lo em ``_resumo_cadastro`` (o log de
+    auditoria registra o antes -> depois de cada campo alterado)."""
     user = Usuario.query.get_or_404(user_id)
-    user.departamento_id = _departamento_do_form(request.form.get("departamento_id"))
+    antes = _resumo_cadastro(user)
 
-    # Atualizar Tipo de Contrato (CLT / PJ)
+    nome = request.form.get("nome", user.nome or "").strip()
+    email = request.form.get("email", user.email or "").strip().lower()
+    if not nome or len(nome) > 100:
+        flash("Informe o nome (até 100 caracteres).", "danger")
+        return _redirect_admin("usuarios")
+    if len(email) > 100 or not _EMAIL_RE.match(email):
+        flash("Informe um e-mail válido (até 100 caracteres).", "danger")
+        return _redirect_admin("usuarios")
+
+    email_mudou = email != (user.email or "").lower()
+    if email_mudou:
+        if user.is_ti and not current_user.is_ti:
+            # O e-mail é o login; trocá-lo numa conta da TI abriria caminho
+            # para assumir a conta (mesma regra da troca de senha).
+            flash(f"{user.nome} tem papel de TI: só a TI pode alterar o e-mail dessa conta.", "danger")
+            return _redirect_admin("usuarios")
+        if Usuario.query.filter(db.func.lower(Usuario.email) == email, Usuario.id != user.id).first():
+            flash(f"Já existe um usuário com o e-mail {email}.", "danger")
+            return _redirect_admin("usuarios")
+
+    user.nome = nome
+    user.email = email
+    user.departamento_id = _departamento_do_form(request.form.get("departamento_id"))
     tipo_contrato = request.form.get("tipo_contrato", "").strip().upper()
     if tipo_contrato in ("CLT", "PJ"):
         user.tipo_contrato = tipo_contrato
-    
+
+    if email_mudou:
+        # Links de convite/redefinição foram para o endereço antigo (que pode
+        # estar errado e ser de outra pessoa): deixam de valer.
+        SecurityToken.query.filter(
+            SecurityToken.usuario_id == user.id,
+            SecurityToken.purpose.in_([SecurityToken.PURPOSE_RESET, SecurityToken.PURPOSE_INVITE]),
+            SecurityToken.usado_em.is_(None),
+        ).update({"usado_em": _local_now()}, synchronize_session=False)
+
+    depois = _resumo_cadastro(user)
+    mudancas = [f"{campo}: {antes[campo]} -> {depois[campo]}" for campo in depois if antes[campo] != depois[campo]]
+    if not mudancas:
+        db.session.rollback()
+        flash(f"Nenhuma alteração no cadastro de {user.nome}.", "info")
+        return _redirect_admin("usuarios")
+
     db.session.commit()
-    registrar_log(current_user.id, f"Atualizou departamento/contrato do usuário {user.nome}", user_id)
-    flash(f"Dados do colaborador {user.nome} salvos com sucesso!", "success")
+    _invalidar_notif_cache(user.id)
+    registrar_log(current_user.id, f"Atualizou o cadastro de {antes['nome']}: " + "; ".join(mudancas), user_id)
+    aviso = " O link de convite pendente foi cancelado; defina uma senha se a pessoa ainda não tiver acesso." if email_mudou else ""
+    flash(f"Cadastro de {user.nome} atualizado.{aviso}", "success")
     return _redirect_admin("usuarios")
+
+
+def _resumo_cadastro(user):
+    """Campos do cadastro, legíveis, para comparar antes/depois no log."""
+    setor = db.session.get(Departamento, user.departamento_id) if user.departamento_id else None
+    return {
+        "nome": user.nome or "",
+        "e-mail": (user.email or "").lower(),
+        "setor": setor.nome if setor else "nenhum",
+        "contrato": user.tipo_contrato or "CLT",
+    }
 
 # ==========================================
 #          ROTAS DE ADMINISTRAÇÃO
@@ -5615,7 +5669,7 @@ def manifesto_pwa():
         "start_url": "/",
         "scope": "/",
         "display": "standalone",
-        "background_color": "#0f172a",
+        "background_color": "#030825",  # fundo do ícone (tela de abertura)
         "theme_color": "#0f172a",
         "lang": "pt-BR",
         "icons": [

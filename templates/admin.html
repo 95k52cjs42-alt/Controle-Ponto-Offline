@@ -3,6 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='icons/favicon-32.png') }}">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/apple-touch-icon.png') }}">
     <title>Painel Admin | 4Lab Orbit</title>
     
     <!-- Script anti-flicker (padrão escuro) -->
@@ -124,13 +126,10 @@
         .brand-icon {
             width: 36px;
             height: 36px;
-            background: var(--blue-accent);
-            color: #fff;
             border-radius: 10px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 1.1rem;
+            display: block;
+            flex-shrink: 0;
+            object-fit: cover;
             box-shadow: 0 0 12px var(--blue-glow);
         }
 
@@ -712,9 +711,7 @@
         <!-- Topbar Navbar -->
         <div class="top-navbar">
             <div class="brand-title">
-                <div class="brand-icon">
-                    <i class="bi bi-speedometer2"></i>
-                </div>
+                <img class="brand-icon" src="{{ url_for('static', filename='icons/icon-192.png') }}" alt="4Lab Orbit" width="36" height="36">
                 <span>4Lab Orbit | Painel Admin</span>
             </div>
 
@@ -1925,95 +1922,138 @@
             });
         });
     </script>
-<!-- Modal Global Configurar Usuário -->
-<!-- Os campos usam o atributo form= para pertencer a formulários separados
-     (dados/contrato e senha: RH; papéis: TI), declarados vazios no fim do modal. -->
-<div class="modal fade" id="modalConfigurarUsuario" tabindex="-1" aria-hidden="true">
+<!-- Modal Global Configurar Usuário: abas Cadastro (RH), Senha (RH/TI) e Acessos (TI).
+     Os campos usam o atributo form= para pertencer a formulários separados,
+     declarados vazios no fim do modal. Novos campos de cadastro entram na aba
+     Cadastro e em _resumo_cadastro no app.py. -->
+<style>
+    #modalConfigurarUsuario .modal-content { background: var(--card-bg); border: 1px solid var(--card-border); color: var(--text-main); border-radius: var(--radius-main); overflow: hidden; }
+    #modalConfigurarUsuario .cfg-topo { display: flex; align-items: center; gap: 14px; padding: 1.25rem 1.25rem 0.75rem; }
+    #modalConfigurarUsuario .cfg-avatar { width: 48px; height: 48px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 1.2rem; background: var(--blue-glow); color: var(--blue-accent); }
+    #modalConfigurarUsuario .cfg-nome { font-weight: 700; font-size: 1.05rem; line-height: 1.2; }
+    #modalConfigurarUsuario .cfg-sub { color: var(--text-muted); font-size: 0.82rem; }
+    #modalConfigurarUsuario .cfg-chip { display: inline-block; font-size: 0.7rem; font-weight: 600; padding: 1px 8px; border-radius: 999px; background: var(--nav-btn-bg); border: 1px solid var(--card-border); color: var(--text-muted); margin-right: 4px; }
+    #modalConfigurarUsuario .cfg-abas { display: flex; gap: 4px; padding: 0 1.25rem; border-bottom: 1px solid var(--card-border); }
+    #modalConfigurarUsuario .cfg-abas .nav-link { background: none; border: none; border-bottom: 2px solid transparent; border-radius: 0; color: var(--text-muted); font-weight: 600; font-size: 0.88rem; padding: 0.6rem 0.75rem; }
+    #modalConfigurarUsuario .cfg-abas .nav-link:hover { color: var(--text-main); }
+    #modalConfigurarUsuario .cfg-abas .nav-link.active { color: var(--blue-accent); border-bottom-color: var(--blue-accent); }
+    #modalConfigurarUsuario .tab-content { padding: 1.25rem; min-height: 250px; }
+    #modalConfigurarUsuario .form-label { font-size: 0.8rem; font-weight: 600; color: var(--text-muted); margin-bottom: 0.3rem; }
+    #modalConfigurarUsuario .cfg-campo { background: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main); border-radius: 10px; }
+    #modalConfigurarUsuario .cfg-campo:focus { border-color: var(--blue-accent); box-shadow: 0 0 0 0.2rem var(--blue-glow); }
+    #modalConfigurarUsuario .cfg-campo[readonly] { opacity: 0.65; }
+    #modalConfigurarUsuario .cfg-dica { font-size: 0.78rem; color: var(--text-muted); }
+    #modalConfigurarUsuario .cfg-aviso { font-size: 0.85rem; color: var(--text-muted); background: var(--nav-btn-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 0.85rem 1rem; }
+    #modalConfigurarUsuario .cfg-papel { display: flex; gap: 12px; align-items: flex-start; padding: 0.85rem 1rem; border: 1px solid var(--card-border); border-radius: 12px; margin-bottom: 0.6rem; cursor: pointer; }
+    #modalConfigurarUsuario .cfg-papel .form-check-input { margin-top: 0.2rem; flex-shrink: 0; }
+    #modalConfigurarUsuario .cfg-rodape { display: flex; justify-content: flex-end; gap: 8px; padding: 0.85rem 1.25rem; border-top: 1px solid var(--card-border); }
+</style>
+<div class="modal fade" id="modalConfigurarUsuario" tabindex="-1" aria-labelledby="cfgNome" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content" style="background: var(--card-bg); border: 1px solid var(--card-border); color: var(--text-main); border-radius: var(--radius-main);">
-            <div class="modal-header border-bottom border-secondary border-opacity-25 py-3">
-                <h6 class="modal-title fw-bold"><i class="bi bi-sliders me-1 text-primary"></i> Configurar: <span id="modalUserName"></span></h6>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+        <div class="modal-content">
+            <div class="cfg-topo">
+                <div class="cfg-avatar" id="cfgAvatar" aria-hidden="true"></div>
+                <div class="flex-grow-1 min-w-0">
+                    <div class="cfg-nome text-truncate" id="cfgNome"></div>
+                    <div class="cfg-sub text-truncate" id="cfgEmail"></div>
+                    <div class="mt-1" id="cfgChips"></div>
+                </div>
+                <button type="button" class="btn-close btn-close-white align-self-start" data-bs-dismiss="modal" aria-label="Fechar"></button>
             </div>
-            <div class="modal-body py-3">
-                {% if current_user.is_rh %}
-                <div class="mb-3">
-                    <label class="form-label small fw-semibold text-muted" for="modalUserTipoContrato">Tipo de Contrato</label>
-                    <select name="tipo_contrato" id="modalUserTipoContrato" form="formConfigurarUsuario" class="form-select form-select-sm" style="background: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main);">
-                        <option value="CLT">CLT</option>
-                        <option value="PJ">PJ</option>
-                    </select>
-                </div>
 
-                <div class="mb-2">
-                    <label class="form-label small fw-semibold text-muted" for="modalUserDepartamento">Departamento / Setor</label>
-                    <select name="departamento_id" id="modalUserDepartamento" form="formConfigurarUsuario" class="form-select form-select-sm" style="background: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main);">
-                        <option value="none">Nenhum Departamento</option>
-                        {% for d in departamentos %}
-                            <option value="{{ d.id }}">{{ d.nome }}</option>
-                        {% endfor %}
-                    </select>
+            <ul class="nav cfg-abas" role="tablist">
+                {% if current_user.is_rh %}
+                <li class="nav-item" role="presentation"><button class="nav-link" id="cfgAbaCadastro" data-bs-toggle="tab" data-bs-target="#cfgPainelCadastro" data-salvar="cfgSalvarCadastro" type="button" role="tab"><i class="bi bi-person-vcard me-1"></i>Cadastro</button></li>
+                {% endif %}
+                {% if current_user.tem_gestao %}
+                <li class="nav-item" role="presentation"><button class="nav-link" id="cfgAbaSenha" data-bs-toggle="tab" data-bs-target="#cfgPainelSenha" data-salvar="cfgSalvarSenha" type="button" role="tab"><i class="bi bi-key me-1"></i>Senha</button></li>
+                {% endif %}
+                {% if current_user.is_ti %}
+                <li class="nav-item" role="presentation"><button class="nav-link" id="cfgAbaAcessos" data-bs-toggle="tab" data-bs-target="#cfgPainelAcessos" data-salvar="cfgSalvarAcessos" type="button" role="tab"><i class="bi bi-shield-lock me-1"></i>Acessos</button></li>
+                {% endif %}
+            </ul>
+
+            <div class="tab-content">
+                {% if current_user.is_rh %}
+                <div class="tab-pane fade" id="cfgPainelCadastro" role="tabpanel">
+                    <div class="mb-3">
+                        <label class="form-label" for="modalUserNome">Nome completo</label>
+                        <input type="text" name="nome" id="modalUserNome" form="formConfigurarUsuario" maxlength="100" required autocomplete="off" class="form-control cfg-campo">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="modalUserEmail">E-mail (usado para entrar)</label>
+                        <input type="email" name="email" id="modalUserEmail" form="formConfigurarUsuario" maxlength="100" required autocomplete="off" class="form-control cfg-campo">
+                        <div id="avisoEmailTi" class="cfg-dica mt-1 d-none"><i class="bi bi-lock me-1"></i>Conta da TI: só a TI pode alterar o e-mail.</div>
+                        <div id="avisoEmailMudou" class="cfg-dica text-warning mt-1 d-none"><i class="bi bi-exclamation-triangle me-1"></i>A pessoa passará a entrar com o novo e-mail. Avise-a.</div>
+                    </div>
+                    <div class="row g-3">
+                        <div class="col-5">
+                            <label class="form-label" for="modalUserTipoContrato">Contrato</label>
+                            <select name="tipo_contrato" id="modalUserTipoContrato" form="formConfigurarUsuario" class="form-select cfg-campo">
+                                <option value="CLT">CLT</option>
+                                <option value="PJ">PJ</option>
+                            </select>
+                        </div>
+                        <div class="col-7">
+                            <label class="form-label" for="modalUserDepartamento">Setor</label>
+                            <select name="departamento_id" id="modalUserDepartamento" form="formConfigurarUsuario" class="form-select cfg-campo">
+                                <option value="none">Nenhum</option>
+                                {% for d in departamentos %}
+                                    <option value="{{ d.id }}">{{ d.nome }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
                 </div>
-                <button type="submit" form="formConfigurarUsuario" class="btn btn-primary btn-sm w-100 mb-1"><i class="bi bi-check-lg me-1"></i> Salvar dados</button>
                 {% endif %}
 
                 {% if current_user.tem_gestao %}
-                <!-- Alterar senha: TI troca a de todos; RH, a de colaboradores e do RH -->
-                <div class="{% if current_user.is_rh %}border-top border-secondary border-opacity-25 mt-3 pt-3{% endif %}">
+                <div class="tab-pane fade" id="cfgPainelSenha" role="tabpanel">
                     <div id="secaoSenhaUsuario">
-                        <button type="button" class="btn btn-outline-warning btn-sm w-100" data-bs-toggle="collapse" data-bs-target="#collapseAlterarSenha" aria-expanded="false" aria-controls="collapseAlterarSenha">
-                            <i class="bi bi-key me-1"></i> Alterar senha
-                        </button>
-                        <div class="collapse" id="collapseAlterarSenha">
-                            <div class="pt-3">
-                                <label for="admNovaSenha" class="form-label small fw-semibold text-muted">Nova senha</label>
-                                <div class="input-group input-group-sm mb-2">
-                                    <input type="password" class="form-control js-senha-politica" id="admNovaSenha" name="nova_senha" form="formSenhaUsuario" autocomplete="new-password" required data-confirmar="#admConfirmarSenha" style="background: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main);">
-                                    <button type="button" class="btn btn-outline-secondary" data-pw-toggle="#admNovaSenha,#admConfirmarSenha" title="Mostrar/ocultar"><i class="bi bi-eye"></i></button>
-                                    <button type="button" class="btn btn-outline-secondary" data-pw-gerar="#admNovaSenha,#admConfirmarSenha" title="Gerar senha forte"><i class="bi bi-magic"></i> Gerar</button>
-                                    <button type="button" class="btn btn-outline-secondary" data-pw-copiar="#admNovaSenha" title="Copiar senha"><i class="bi bi-clipboard"></i></button>
-                                </div>
-                                <label for="admConfirmarSenha" class="form-label small fw-semibold text-muted">Confirmar nova senha</label>
-                                <input type="password" class="form-control form-control-sm mb-2" id="admConfirmarSenha" name="confirmar_senha" form="formSenhaUsuario" autocomplete="new-password" required style="background: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main);">
-                                <div class="form-text small text-muted mb-2">Mínimo 8 caracteres, com maiúscula, minúscula, número e um de @ # *.</div>
-                                <div class="form-check form-switch small mb-2">
-                                    <input class="form-check-input" type="checkbox" name="exigir_troca" id="admExigirTroca" form="formSenhaUsuario" checked>
-                                    <label class="form-check-label" for="admExigirTroca">Exigir troca no próximo acesso</label>
-                                </div>
-                                <div class="small text-muted mb-2"><i class="bi bi-info-circle me-1"></i>As sessões abertas do colaborador serão encerradas.</div>
-                                <button type="submit" form="formSenhaUsuario" class="btn btn-warning btn-sm w-100"><i class="bi bi-key-fill me-1"></i> Salvar nova senha</button>
-                            </div>
+                        <label for="admNovaSenha" class="form-label">Nova senha</label>
+                        <div class="input-group mb-3">
+                            <input type="password" class="form-control cfg-campo js-senha-politica" id="admNovaSenha" name="nova_senha" form="formSenhaUsuario" autocomplete="new-password" required data-confirmar="#admConfirmarSenha">
+                            <button type="button" class="btn btn-outline-secondary" data-pw-toggle="#admNovaSenha,#admConfirmarSenha" title="Mostrar/ocultar"><i class="bi bi-eye"></i></button>
+                            <button type="button" class="btn btn-outline-secondary" data-pw-gerar="#admNovaSenha,#admConfirmarSenha" title="Gerar senha forte"><i class="bi bi-magic"></i></button>
+                            <button type="button" class="btn btn-outline-secondary" data-pw-copiar="#admNovaSenha" title="Copiar senha"><i class="bi bi-clipboard"></i></button>
+                        </div>
+                        <label for="admConfirmarSenha" class="form-label">Confirmar nova senha</label>
+                        <input type="password" class="form-control cfg-campo mb-2" id="admConfirmarSenha" name="confirmar_senha" form="formSenhaUsuario" autocomplete="new-password" required>
+                        <div class="cfg-dica mb-3">Mínimo 8 caracteres, com maiúscula, minúscula, número e um de @ # *. As sessões abertas da pessoa serão encerradas.</div>
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" name="exigir_troca" id="admExigirTroca" form="formSenhaUsuario" checked>
+                            <label class="form-check-label small" for="admExigirTroca">Exigir troca no próximo acesso</label>
                         </div>
                     </div>
-                    <div id="avisoSenhaBloqueada" class="small text-muted d-none">
+                    <div id="avisoSenhaBloqueada" class="cfg-aviso d-none">
                         <i class="bi bi-info-circle me-1"></i> <span id="avisoSenhaBloqueadaTexto"></span>
                     </div>
                 </div>
                 {% endif %}
 
                 {% if current_user.is_ti %}
-                <!-- Papéis de acesso (TI) -->
-                <div class="border-top border-secondary border-opacity-25 mt-3 pt-3">
-                    <h6 class="fw-bold small text-primary mb-2"><i class="bi bi-shield-lock me-1"></i> Papéis de acesso</h6>
-                    <div class="d-flex flex-column gap-2 mb-2">
-                        <div class="form-check form-switch small">
-                            <input class="form-check-input" type="checkbox" name="is_rh" id="papelRh" form="formPapeisUsuario">
-                            <label class="form-check-label" for="papelRh"><b>RH</b>: colaboradores, ponto, correções e relatórios</label>
-                        </div>
-                        <div class="form-check form-switch small">
-                            <input class="form-check-input" type="checkbox" name="is_ti" id="papelTi" form="formPapeisUsuario">
-                            <label class="form-check-label" for="papelTi"><b>TI</b>: parâmetros, feriados, departamentos, acessos e logs</label>
-                        </div>
-                    </div>
-                    <div class="small text-muted mb-2"><i class="bi bi-info-circle me-1"></i>Sem nenhum papel, a pessoa é colaborador comum. A mudança encerra as sessões dela.</div>
-                    <div id="avisoPapelProprio" class="small text-warning mb-2 d-none"><i class="bi bi-exclamation-triangle me-1"></i>Você está alterando os seus próprios papéis e precisará entrar novamente.</div>
-                    <button type="submit" form="formPapeisUsuario" class="btn btn-outline-primary btn-sm w-100"><i class="bi bi-shield-check me-1"></i> Salvar papéis</button>
+                <div class="tab-pane fade" id="cfgPainelAcessos" role="tabpanel">
+                    <label class="cfg-papel" for="papelRh">
+                        <input class="form-check-input" type="checkbox" name="is_rh" id="papelRh" form="formPapeisUsuario">
+                        <span><b>RH</b><br><span class="cfg-dica">Colaboradores, ponto, correções e relatórios</span></span>
+                    </label>
+                    <label class="cfg-papel" for="papelTi">
+                        <input class="form-check-input" type="checkbox" name="is_ti" id="papelTi" form="formPapeisUsuario">
+                        <span><b>TI</b><br><span class="cfg-dica">Parâmetros, feriados, setores, acessos e logs</span></span>
+                    </label>
+                    <div class="cfg-dica mt-2">Sem nenhum papel, a pessoa é colaborador comum. A mudança encerra as sessões dela.</div>
+                    <div id="avisoPapelProprio" class="cfg-dica text-warning mt-2 d-none"><i class="bi bi-exclamation-triangle me-1"></i>Você está alterando os seus próprios papéis e precisará entrar novamente.</div>
                 </div>
                 {% endif %}
             </div>
-            <div class="modal-footer border-top border-secondary border-opacity-25 py-2">
-                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Fechar</button>
+
+            <div class="cfg-rodape">
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+                {% if current_user.is_rh %}<button type="submit" form="formConfigurarUsuario" id="cfgSalvarCadastro" class="btn btn-primary btn-sm d-none"><i class="bi bi-check-lg me-1"></i>Salvar cadastro</button>{% endif %}
+                {% if current_user.tem_gestao %}<button type="submit" form="formSenhaUsuario" id="cfgSalvarSenha" class="btn btn-warning btn-sm d-none"><i class="bi bi-key-fill me-1"></i>Salvar nova senha</button>{% endif %}
+                {% if current_user.is_ti %}<button type="submit" form="formPapeisUsuario" id="cfgSalvarAcessos" class="btn btn-primary btn-sm d-none"><i class="bi bi-shield-check me-1"></i>Salvar acessos</button>{% endif %}
             </div>
+
             {% if current_user.is_rh %}
             <form id="formConfigurarUsuario" method="POST"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}"></form>
             {% endif %}
@@ -2030,32 +2070,79 @@
 <script nonce="{{ csp_nonce() }}">
     const modalConfigurar = document.getElementById('modalConfigurarUsuario');
     if (modalConfigurar) {
+        const souTi = {{ 'true' if current_user.is_ti else 'false' }};
+        let senhaBloqueada = false;
+
+        // O rodapé mostra só o botão de salvar da aba ativa (e nenhum quando
+        // a troca de senha não é permitida para esta pessoa).
+        function mostrarSalvar(aba) {
+            modalConfigurar.querySelectorAll('.cfg-rodape [type="submit"]').forEach(b => b.classList.add('d-none'));
+            const id = aba && aba.dataset.salvar;
+            if (!id || (id === 'cfgSalvarSenha' && senhaBloqueada)) return;
+            document.getElementById(id).classList.remove('d-none');
+        }
+        modalConfigurar.querySelectorAll('.cfg-abas [data-bs-toggle="tab"]').forEach(aba => {
+            aba.addEventListener('shown.bs.tab', () => mostrarSalvar(aba));
+        });
+
         modalConfigurar.addEventListener('show.bs.modal', function (event) {
             const button = event.relatedTarget;
             const userId = button.getAttribute('data-user-id');
             const isSelf = button.getAttribute('data-is-self') === 'true';
-            document.getElementById('modalUserName').textContent = button.getAttribute('data-user-nome');
+            const alvoRh = button.getAttribute('data-is-rh') === 'true';
+            const alvoTi = button.getAttribute('data-is-ti') === 'true';
+            const nome = button.getAttribute('data-user-nome') || '';
+            const email = button.getAttribute('data-user-email') || '';
 
-            // RH: dados do colaborador.
+            // Cabeçalho: inicial, e-mail e etiquetas (contrato, setor, papéis).
+            document.getElementById('cfgAvatar').textContent = nome.trim().charAt(0).toUpperCase();
+            document.getElementById('cfgNome').textContent = nome;
+            document.getElementById('cfgEmail').textContent = email;
+            const depId = button.getAttribute('data-user-departamento');
+            const setorSel = Array.from(document.querySelectorAll('#modalUserDepartamento option')).find(o => o.value === depId);
+            const chips = [button.getAttribute('data-tipo-contrato') || 'CLT'];
+            if (setorSel && setorSel.value !== 'none') chips.push(setorSel.textContent.trim());
+            if (alvoRh) chips.push('RH');
+            if (alvoTi) chips.push('TI');
+            if (!alvoRh && !alvoTi) chips.push('Colaborador');
+            document.getElementById('cfgChips').replaceChildren(...chips.map(t => {
+                const s = document.createElement('span');
+                s.className = 'cfg-chip';
+                s.textContent = t;
+                return s;
+            }));
+
+            // Cadastro (RH).
             const formDados = document.getElementById('formConfigurarUsuario');
             if (formDados) {
                 formDados.action = `/admin/usuarios/${userId}/atualizar`;
-                document.getElementById('modalUserDepartamento').value = button.getAttribute('data-user-departamento');
+                document.getElementById('modalUserDepartamento').value = depId;
                 document.getElementById('modalUserTipoContrato').value = button.getAttribute('data-tipo-contrato') || 'CLT';
+                const campoNome = document.getElementById('modalUserNome');
+                const campoEmail = document.getElementById('modalUserEmail');
+                campoNome.value = nome;
+                campoEmail.value = email;
+                // RH sem papel TI não altera o e-mail de contas da TI (o servidor também recusa).
+                const emailTravado = alvoTi && !souTi;
+                campoEmail.readOnly = emailTravado;
+                document.getElementById('avisoEmailTi').classList.toggle('d-none', !emailTravado);
+                const avisoMudou = document.getElementById('avisoEmailMudou');
+                avisoMudou.classList.add('d-none');
+                campoEmail.oninput = () => avisoMudou.classList.toggle(
+                    'd-none', campoEmail.value.trim().toLowerCase() === email.toLowerCase());
             }
 
             // Senha: TI troca a de todos; RH, a de colaboradores e do RH (não
             // a da TI). O servidor aplica a mesma regra; aqui só se esconde.
             const formSenha = document.getElementById('formSenhaUsuario');
             if (formSenha) {
-                const souTi = {{ 'true' if current_user.is_ti else 'false' }};
-                const alvoTi = button.getAttribute('data-is-ti') === 'true';
                 let bloqueio = '';
                 if (isSelf) bloqueio = 'Para alterar a sua própria senha, use a opção do seu perfil na página inicial.';
                 else if (alvoTi && !souTi) bloqueio = 'A senha de quem tem papel de TI só pode ser trocada pela TI.';
+                senhaBloqueada = !!bloqueio;
                 formSenha.action = `/admin/usuarios/${userId}/senha`;
-                document.getElementById('secaoSenhaUsuario').classList.toggle('d-none', !!bloqueio);
-                document.getElementById('avisoSenhaBloqueada').classList.toggle('d-none', !bloqueio);
+                document.getElementById('secaoSenhaUsuario').classList.toggle('d-none', senhaBloqueada);
+                document.getElementById('avisoSenhaBloqueada').classList.toggle('d-none', !senhaBloqueada);
                 document.getElementById('avisoSenhaBloqueadaTexto').textContent = bloqueio;
                 ['admNovaSenha', 'admConfirmarSenha'].forEach(id => {
                     const el = document.getElementById(id);
@@ -2064,19 +2151,22 @@
                     el.setCustomValidity('');
                 });
                 document.getElementById('admExigirTroca').checked = true;
-                const collapse = document.getElementById('collapseAlterarSenha');
-                if (collapse.classList.contains('show')) {
-                    bootstrap.Collapse.getOrCreateInstance(collapse, { toggle: false }).hide();
-                }
             }
 
-            // TI: papéis de acesso.
+            // Acessos (TI).
             const formPapeis = document.getElementById('formPapeisUsuario');
             if (formPapeis) {
                 formPapeis.action = `/admin/usuarios/${userId}/papeis`;
-                document.getElementById('papelRh').checked = button.getAttribute('data-is-rh') === 'true';
-                document.getElementById('papelTi').checked = button.getAttribute('data-is-ti') === 'true';
+                document.getElementById('papelRh').checked = alvoRh;
+                document.getElementById('papelTi').checked = alvoTi;
                 document.getElementById('avisoPapelProprio').classList.toggle('d-none', !isSelf);
+            }
+
+            // Sempre abre na primeira aba disponível.
+            const primeira = modalConfigurar.querySelector('.cfg-abas [data-bs-toggle="tab"]');
+            if (primeira) {
+                bootstrap.Tab.getOrCreateInstance(primeira).show();
+                mostrarSalvar(primeira);
             }
         });
     }

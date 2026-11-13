@@ -1752,6 +1752,55 @@ class SecurityRegressionTests(unittest.TestCase):
             for alvo in (ti_id, rh2_id):
                 self.assertIsNotNone(self.module.db.session.get(self.module.Usuario, alvo))
 
+    def test_rh_atualiza_cadastro_com_log_e_validacoes(self):
+        self.make_user(email="rh@example.com", rh=True)
+        func_id = self.make_user(email="func@example.com")
+        ti_id = self.make_user(email="ti@example.com", ti=True)
+        self.make_user(email="ocupado@example.com")
+        m = self.module
+        with self.app.app_context():
+            convite, _ = m.issue_security_token(func_id, m.SecurityToken.PURPOSE_INVITE, 3600)
+            m.db.session.commit()
+        base = {"tipo_contrato": "CLT", "departamento_id": "none"}
+        with self.app.test_client() as client:
+            self.login(client, email="rh@example.com")
+            # Inválidos: nada muda.
+            self._post(client, f"/admin/usuarios/{func_id}/atualizar", nome="", email="func@example.com", **base)
+            self._post(client, f"/admin/usuarios/{func_id}/atualizar", nome="Ok", email="sem-arroba", **base)
+            self._post(client, f"/admin/usuarios/{func_id}/atualizar", nome="Ok", email="Ocupado@Example.com", **base)
+            # RH não troca o e-mail de conta da TI, mas pode corrigir o nome.
+            self._post(client, f"/admin/usuarios/{ti_id}/atualizar", nome="TI Novo Nome", email="outro@example.com", **base)
+            self._post(client, f"/admin/usuarios/{ti_id}/atualizar", nome="TI Novo Nome", email="ti@example.com", **base)
+            # Válido.
+            self._post(client, f"/admin/usuarios/{func_id}/atualizar", nome="Fulana de Tal",
+                       email=" Fulana@Example.com ", tipo_contrato="PJ", departamento_id="none")
+        with self.app.app_context():
+            func = m.db.session.get(m.Usuario, func_id)
+            ti = m.db.session.get(m.Usuario, ti_id)
+            self.assertEqual((func.nome, func.email, func.tipo_contrato), ("Fulana de Tal", "fulana@example.com", "PJ"))
+            self.assertEqual((ti.nome, ti.email), ("TI Novo Nome", "ti@example.com"))
+            # Convite enviado ao e-mail antigo deixa de valer.
+            self.assertIsNone(m._get_valid_security_token(convite, m.SecurityToken.PURPOSE_INVITE))
+            log = m.LogAuditoria.query.filter(m.LogAuditoria.acao.like("Atualizou o cadastro de Usuário%")).all()
+            textos = " | ".join(l.acao for l in log)
+            self.assertIn("e-mail: func@example.com -> fulana@example.com", textos)
+            self.assertIn("contrato: CLT -> PJ", textos)
+        # O colaborador entra com o novo e-mail.
+        with self.app.test_client() as client:
+            self.assertEqual(self._login_senha(client, "fulana@example.com", "Abcdef1@").location, "/")
+
+    def test_colaborador_e_ti_sem_rh_nao_atualizam_cadastro(self):
+        func_id = self.make_user(email="func@example.com")
+        self.make_user(email="ti@example.com", ti=True)
+        for quem in ("func@example.com", "ti@example.com"):
+            with self.app.test_client() as client:
+                self.login(client, email=quem)
+                token = self.csrf(client, "/")
+                client.post(f"/admin/usuarios/{func_id}/atualizar", data={
+                    "_csrf_token": token, "nome": "Hack", "email": "hack@example.com"})
+        with self.app.app_context():
+            self.assertEqual(self.module.db.session.get(self.module.Usuario, func_id).email, "func@example.com")
+
     def test_comando_de_emergencia_redefine_senha(self):
         uid = self.make_user(email="ti@example.com", ti=True)
         runner = self.app.test_cli_runner()
