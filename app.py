@@ -2482,7 +2482,8 @@ def admin_lancar_ponto_manual():
     if not usuario_alvo:
         flash("Usuário não encontrado.", "danger")
         return _redirect_admin("painel")
-    if usuario_alvo.id == current_user.id:
+    proprio_ponto = usuario_alvo.id == current_user.id
+    if proprio_ponto and not eh_superadmin(current_user):
         flash("Você não pode lançar ponto para si mesmo. Peça a outra pessoa do RH ou use a solicitação de correção.", "danger")
         return _redirect_admin("painel")
 
@@ -2555,7 +2556,7 @@ def admin_lancar_ponto_manual():
     db.session.commit()
     _invalidar_notif_cache(int(usuario_alvo.id))
 
-    desc_log = msg_acao
+    desc_log = (MARCA_ADMIN if proprio_ponto else "") + msg_acao
     if justificativa:
         desc_log += f" Justificativa: {justificativa}"
     registrar_log(current_user.id, desc_log, entidade_id=usuario_alvo.id)
@@ -2570,7 +2571,8 @@ def admin_lancar_ponto_manual():
 def admin_excluir_ponto(ponto_id):
     """Exclui um registro de ponto (apenas admin/RH). Usado para remover duplicatas."""
     ponto = RegistroPonto.query.get_or_404(ponto_id)
-    if ponto.usuario_id == current_user.id:
+    proprio_ponto = ponto.usuario_id == current_user.id
+    if proprio_ponto and not eh_superadmin(current_user):
         flash("Você não pode excluir registros do seu próprio ponto. Peça a outra pessoa do RH.", "danger")
         return _redirect_admin("historico")
     try:
@@ -2585,7 +2587,8 @@ def admin_excluir_ponto(ponto_id):
     # Salvar dados para o log de auditoria ANTES de excluir
     nome_usuario = usuario_alvo.nome if usuario_alvo else "Usuário"
     desc_log = (
-        f"Excluiu ponto ({ponto.tipo}) de {nome_usuario} "
+        (MARCA_ADMIN if proprio_ponto else "")
+        + f"Excluiu ponto ({ponto.tipo}) de {nome_usuario} "
         f"para o dia {ponto.data} às {ponto.hora}"
     )
 
@@ -2725,9 +2728,22 @@ def admin_cadastrar_usuario():
 # cada uso vai para o log com a marca [AUTOAPROVAÇÃO].
 AUTOAPROVACAO_EMAILS = set(_env_list("AUTOAPROVACAO_EMAILS"))
 
+# Superadministradores (ex.: admin@ponto.com): ficam acima das regras de
+# separação de funções (podem se dar papéis/isenções, mexer no próprio ponto,
+# excluir contas de RH/TI). Também só pelo ambiente do servidor, e cada uso
+# dessas exceções vai para o log com a marca [ADMIN]. Continuam valendo as
+# travas que trancariam o sistema: excluir a própria conta e ficar sem TI.
+SUPERADMIN_EMAILS = set(_env_list("SUPERADMIN_EMAILS"))
+MARCA_ADMIN = "[ADMIN] "
+
+
+def eh_superadmin(usuario):
+    return bool(usuario and getattr(usuario, "is_authenticated", True)
+                and (getattr(usuario, "email", "") or "").lower() in SUPERADMIN_EMAILS)
+
 
 def _pode_autoaprovar(usuario):
-    return bool(usuario.is_rh) and (usuario.email or "").lower() in AUTOAPROVACAO_EMAILS
+    return eh_superadmin(usuario) or (bool(usuario.is_rh) and (usuario.email or "").lower() in AUTOAPROVACAO_EMAILS)
 
 
 def _pode_trocar_senha_de(autor, alvo):
@@ -4634,11 +4650,13 @@ def atualizar_papeis_usuario(user_id):
     novo_ti = request.form.get("is_ti") == "on"
     novo_fora = request.form.get("ponto_fora_do_raio") == "on"
 
-    if user.id == current_user.id and ((novo_rh and not user.is_rh) or (novo_ti and not user.is_ti)
-                                       or (novo_fora and not user.ponto_fora_do_raio)):
+    autoconcessao = user.id == current_user.id and ((novo_rh and not user.is_rh) or (novo_ti and not user.is_ti)
+                                                    or (novo_fora and not user.ponto_fora_do_raio))
+    if autoconcessao and not eh_superadmin(current_user):
         # Separação de funções: ninguém acumula papel ou isenção por conta própria.
         flash("Você não pode atribuir a si mesmo um papel novo ou a isenção do raio. Peça a outra pessoa da TI.", "danger")
         return _redirect_admin("usuarios")
+    marca = MARCA_ADMIN if autoconcessao else ""
 
     if user.is_ti and not novo_ti and Usuario.query.filter(Usuario.is_ti.is_(True), Usuario.id != user.id).count() == 0:
         flash("É preciso manter pelo menos uma pessoa com o papel TI.", "danger")
@@ -4653,7 +4671,7 @@ def atualizar_papeis_usuario(user_id):
     if isencao_mudou:
         user.ponto_fora_do_raio = novo_fora
         db.session.commit()
-        registrar_log(current_user.id, f"{'Liberou' if novo_fora else 'Retirou'} a batida de ponto fora do raio para {user.nome}", user_id)
+        registrar_log(current_user.id, marca + f"{'Liberou' if novo_fora else 'Retirou'} a batida de ponto fora do raio para {user.nome}", user_id)
         if not papeis_mudaram:
             flash(f"{user.nome} {'pode' if novo_fora else 'não pode mais'} bater o ponto fora do raio do local de trabalho.", "success")
             return _redirect_admin("usuarios")
@@ -4663,7 +4681,7 @@ def atualizar_papeis_usuario(user_id):
     # Encerra as sessões para o novo conjunto de acessos valer imediatamente.
     user.auth_version = int(user.auth_version or 0) + 1
     db.session.commit()
-    registrar_log(current_user.id, f"Alterou papéis de {user.nome}: {antes} -> {user.papeis_texto}", user_id)
+    registrar_log(current_user.id, marca + f"Alterou papéis de {user.nome}: {antes} -> {user.papeis_texto}", user_id)
     if user.id == current_user.id:
         flash("Seus papéis foram alterados. Entre novamente.", "info")
         logout_user()
@@ -4694,12 +4712,15 @@ def registrar_log(usuario_id, acao, entidade_id=None):
 def excluir_usuario(user_id):
     user = Usuario.query.get_or_404(user_id)
     
+    conta_gestao = user.tem_gestao
     if user.id == current_user.id:
         flash("Você não pode excluir sua própria conta.", "danger")
-    elif user.tem_gestao:
+    elif conta_gestao and not eh_superadmin(current_user):
         # Contas de RH/TI só saem depois que a TI remove os papéis (o que
         # também preserva a regra de manter ao menos uma pessoa na TI).
         flash(f"{user.nome} tem papel de RH/TI. A TI precisa remover os papéis antes da exclusão.", "danger")
+    elif user.is_ti and Usuario.query.filter(Usuario.is_ti.is_(True), Usuario.id != user.id).count() == 0:
+        flash("É preciso manter pelo menos uma pessoa com o papel TI.", "danger")
     else:
         # Não excluímos logs de auditoria para manter conformidade (Portaria 671)
         # Excluímos apenas registros de ponto e solicitações associadas
@@ -4735,7 +4756,7 @@ def excluir_usuario(user_id):
             return _redirect_admin("usuarios")
 
         _invalidar_notif_cache(user_id)
-        registrar_log(current_user.id, f"Excluiu usuário {user_nome}", user_id)
+        registrar_log(current_user.id, (MARCA_ADMIN if conta_gestao else "") + f"Excluiu usuário {user_nome}", user_id)
 
         flash(f"Usuário {user_nome} excluído com sucesso!", "success")
 
@@ -5038,7 +5059,7 @@ def admin_afastamentos():
         pass
     if usuario is None:
         erros.append("Selecione o colaborador.")
-    elif usuario.id == current_user.id:
+    elif usuario.id == current_user.id and not eh_superadmin(current_user):
         erros.append("Você não pode lançar afastamento para si mesmo. Peça a outra pessoa do RH.")
     tipo = request.form.get("tipo", "")
     if tipo not in AFASTAMENTO_TIPOS:
@@ -5086,7 +5107,8 @@ def admin_afastamentos():
     _limpar_cache_afastamentos()
     _invalidar_notif_cache(usuario.id)
     periodo = f"{inicio.strftime('%d/%m/%Y')} a {fim.strftime('%d/%m/%Y')}"
-    registrar_log(current_user.id, f"Lançou afastamento ({afast.rotulo}) de {usuario.nome}: {periodo}" + (" com anexo" if anexo_dados else ""), afast.id)
+    registrar_log(current_user.id, (MARCA_ADMIN if usuario.id == current_user.id else "")
+                  + f"Lançou afastamento ({afast.rotulo}) de {usuario.nome}: {periodo}" + (" com anexo" if anexo_dados else ""), afast.id)
     flash(f"{afast.rotulo} de {usuario.nome} lançado(a): {periodo}.", "success")
     return _redirect_admin("afastamentos")
 
@@ -5096,7 +5118,8 @@ def admin_afastamentos():
 @rh_required
 def excluir_afastamento(id):
     afast = Afastamento.query.get_or_404(id)
-    if afast.usuario_id == current_user.id:
+    proprio = afast.usuario_id == current_user.id
+    if proprio and not eh_superadmin(current_user):
         flash("Você não pode cancelar o seu próprio afastamento. Peça a outra pessoa do RH.", "danger")
         return _redirect_admin("afastamentos")
     trava = fechado_no_intervalo(afast.data_inicio, afast.data_fim)
@@ -5110,7 +5133,7 @@ def excluir_afastamento(id):
     db.session.commit()
     _limpar_cache_afastamentos()
     _invalidar_notif_cache(uid)
-    registrar_log(current_user.id, f"Cancelou afastamento ({descricao})", id)
+    registrar_log(current_user.id, (MARCA_ADMIN if proprio else "") + f"Cancelou afastamento ({descricao})", id)
     flash(f"Afastamento cancelado ({descricao}).", "success")
     return _redirect_admin("afastamentos")
 
@@ -5139,6 +5162,7 @@ def admin_logs():
 # Categorias do filtro dos logs: padrões (LIKE, sem diferenciar maiúsculas)
 # sobre o texto da ação. Uma ação pode cair em mais de uma categoria.
 LOG_CATEGORIAS = {
+    "admin": ("Exceções do administrador", ["[ADMIN]%", "[AUTOAPROVAÇÃO]%"]),
     "acesso": ("Acessos (login, logout, bloqueios)",
                ["Entrou no sistema%", "Saiu do sistema%", "Falha de login%", "Login bloqueado%"]),
     "senha": ("Senhas", ["%senha%"]),

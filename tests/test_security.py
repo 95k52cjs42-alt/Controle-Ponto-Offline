@@ -2028,6 +2028,38 @@ class SecurityRegressionTests(unittest.TestCase):
         with self.app.app_context():
             self.assertIsNone(m.config_local_trabalho())
 
+    def test_superadmin_pode_tudo_com_registro_no_log(self):
+        admin_id = self.make_user(email="admin@ponto.com", admin=True)
+        rh2_id = self.make_user(email="rh2@example.com", rh=True)
+        m = self.module
+        hoje = m._local_now().date()
+        with self.app.app_context():
+            p = m.RegistroPonto(data=hoje.strftime("%d/%m/%Y"), tipo="Entrada", hora="08:00:00", usuario_id=admin_id)
+            m.db.session.add(p)
+            m.db.session.commit()
+            ponto_id = p.id
+        with patch.object(m, "SUPERADMIN_EMAILS", {"admin@ponto.com"}):
+            with self.app.test_client() as client:
+                self.login(client, email="admin@ponto.com")
+                self._post(client, f"/admin/usuarios/{admin_id}/papeis", is_rh="on", is_ti="on", ponto_fora_do_raio="on")
+                self._post(client, "/admin/lancar-ponto-manual", usuario_id=str(admin_id),
+                           data=hoje.isoformat(), tipo="Saída", hora="17:00")
+                self._post(client, f"/admin/excluir-ponto/{ponto_id}")
+                self._post(client, f"/admin/excluir-usuario/{rh2_id}")
+                self._post(client, f"/admin/excluir-usuario/{admin_id}")  # a própria conta: continua bloqueado
+            with self.app.app_context():
+                admin = m.db.session.get(m.Usuario, admin_id)
+                self.assertIsNotNone(admin)
+                self.assertTrue(admin.ponto_fora_do_raio)
+                self.assertEqual([r.tipo for r in m.RegistroPonto.query.filter_by(usuario_id=admin_id)], ["Saída"])
+                self.assertIsNone(m.db.session.get(m.Usuario, rh2_id))
+                marcados = m.LogAuditoria.query.filter(m.LogAuditoria.acao.like("[ADMIN]%")).count()
+                self.assertEqual(marcados, 4)  # isenção, lançamento, exclusão de ponto, exclusão de conta RH
+            with self.app.test_client() as client:
+                self.login(client, email="admin@ponto.com")
+                html = client.get("/admin/fragment/logs?categoria=admin").get_data(as_text=True)
+                self.assertIn("[ADMIN]", html)
+
     def test_isencao_do_raio_por_usuario(self):
         ti_id = self.make_user(email="ti@example.com", ti=True)
         self.make_user(email="ti2@example.com", ti=True)
