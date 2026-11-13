@@ -30,6 +30,10 @@
 
         .marca { position: fixed; top: max(18px, env(safe-area-inset-top)); left: 24px; display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 1.15rem; opacity: .9; z-index: 5; }
         .marca img { width: 40px; height: 40px; border-radius: 11px; }
+        body.camera-ativa .marca { display: none; }
+        .status-rec { margin-top: 1.1rem; color: var(--suave); font-size: .95rem; min-height: 1.3rem; }
+        .status-rec.pronto { color: #34d399; } .status-rec.falhou { color: var(--ambar); }
+        .detalhe-tecnico { color: var(--suave); font-size: .8rem; opacity: .7; margin-top: .4rem; }
 
         .relogio { font-size: clamp(4.5rem, 14vw, 9rem); font-weight: 800; letter-spacing: -2px; line-height: 1; font-variant-numeric: tabular-nums; }
         .data { color: var(--suave); font-size: clamp(1.1rem, 2.6vw, 1.5rem); margin: .6rem 0 3rem; text-transform: capitalize; }
@@ -101,6 +105,7 @@
         <div class="data" id="data"></div>
         <button class="btn-q btn-principal btn-gigante" id="btnBater"><i class="bi bi-{{ 'person-bounding-box' if metodo == 'facial' else 'fingerprint' }}"></i> Bater ponto</button>
         {% if metodo == 'facial' %}
+        <div class="status-rec" id="statusRec"><i class="bi bi-hourglass-split"></i> Preparando o reconhecimento facial…</div>
         <button class="btn-q btn-secundario" id="btnUsarCpf" style="margin-top: 1.4rem; font-size: 1.05rem; padding: .8rem 1.6rem;"><i class="bi bi-123"></i> Usar CPF ou e-mail</button>
         {% endif %}
         <div class="aviso-rodape"><i class="bi bi-camera me-1"></i> Uma foto do rosto é registrada junto com a marcação.</div>
@@ -169,6 +174,7 @@
         <div class="icone-grande" style="color: var(--ambar);"><i class="bi bi-person-x"></i></div>
         <h1 class="titulo">Não reconhecemos você</h1>
         <p class="sub" id="naoRecMsg">Tente de novo olhando de frente para a câmera, ou use o CPF.</p>
+        <div class="detalhe-tecnico" id="naoRecDetalhe"></div>
         <div class="acoes">
             <button type="button" class="btn-q btn-secundario" id="btnRecUsarCpf"><i class="bi bi-123"></i> Usar CPF ou e-mail</button>
             <button type="button" class="btn-q btn-principal" id="btnRecTentar"><i class="bi bi-arrow-repeat"></i> Tentar de novo</button>
@@ -221,6 +227,7 @@
         // ---------- Utilidades ----------
         function mostrar(id) {
             document.querySelectorAll('.tela').forEach(t => t.classList.toggle('ativa', t.id === id));
+            document.body.classList.toggle('camera-ativa', id === 'tela-camera');
             clearTimeout(estado.inatividade);
             // Fora do início, volta sozinho após 45 s sem conclusão (alguém desistiu no meio).
             if (id !== 'tela-inicio' && id !== 'tela-enviando') estado.inatividade = setTimeout(reiniciar, 45000);
@@ -277,12 +284,16 @@
             prepararDetector();  // carrega o detector enquanto a pessoa digita
         }
         $('btnBater').addEventListener('click', () => {
-            if (METODO === 'facial') { estado.fluxo = 'facial'; estado.nome = ''; abrirCamera(); }
+            // Reconhecimento indisponível neste aparelho: vai direto para o CPF.
+            if (METODO === 'facial' && rec.estado !== 'falhou') { estado.fluxo = 'facial'; estado.nome = ''; abrirCamera(); }
             else irParaCpf();
         });
         $('btnUsarCpf')?.addEventListener('click', irParaCpf);
         $('btnRecUsarCpf').addEventListener('click', irParaCpf);
-        $('btnRecTentar').addEventListener('click', () => { estado.fluxo = 'facial'; estado.fotoPendente = null; abrirCamera(); });
+        $('btnRecTentar').addEventListener('click', () => {
+            if (rec.estado === 'falhou') prepararReconhecimento().catch(() => {});  // tenta preparar de novo
+            estado.fluxo = 'facial'; estado.fotoPendente = null; abrirCamera();
+        });
 
         document.querySelectorAll('.seletor button').forEach(b => b.addEventListener('click', () => {
             estado.modo = b.dataset.modo;
@@ -385,7 +396,6 @@
         async function abrirCamera() {
             estado.capturando = false; estado.encaixadoDesde = 0;
             $('cameraNome').textContent = estado.fluxo === 'facial' ? 'Olhe para a câmera' : estado.nome;
-            if (estado.fluxo === 'facial') prepararReconhecimento();
             $('btnFotoManual').hidden = true;
             mostrar('tela-camera');
             desenharMoldura();
@@ -487,27 +497,70 @@
         }
 
         // ---------- Reconhecimento facial (face-api no aparelho) ----------
+        // Nada pode ficar esperando para sempre: toda etapa tem tempo-limite.
+        const comTempo = (promessa, ms, motivo) => Promise.race([
+            promessa, new Promise((_, rej) => setTimeout(() => rej(new Error(motivo)), ms))]);
+
+        // Carrega e AQUECE o reconhecimento com o tablet parado na tela inicial
+        // (a 1ª execução compila os shaders da placa de vídeo e pode travar a
+        // página por segundos). Tenta a placa de vídeo (WebGL) e, se falhar ou
+        // demorar, o processador.
+        const rec = { estado: 'carregando', backend: '', erro: '' };
         let carregandoRec = null;
+        function statusRec(texto, classe) {
+            const el = $('statusRec'); if (!el) return;
+            el.className = 'status-rec ' + (classe || '');
+            el.innerHTML = '';
+            const i = document.createElement('i');
+            i.className = 'bi ' + (classe === 'pronto' ? 'bi-check-circle' : classe === 'falhou' ? 'bi-exclamation-triangle' : 'bi-hourglass-split');
+            el.append(i, document.createTextNode(' ' + texto));
+        }
         function prepararReconhecimento() {
             if (carregandoRec) return carregandoRec;
             carregandoRec = (async () => {
-                const api = await import(BASE_FA + '/face-api.esm.js');
-                try { await api.tf.setBackend('webgl'); } catch (_) { await api.tf.setBackend('cpu'); }
-                await api.tf.ready();
-                await Promise.all([
-                    api.nets.tinyFaceDetector.loadFromUri(BASE_FA + '/model'),
-                    api.nets.faceLandmark68TinyNet.loadFromUri(BASE_FA + '/model'),
-                    api.nets.faceRecognitionNet.loadFromUri(BASE_FA + '/model'),
-                ]);
-                return api;
-            })().catch((err) => { carregandoRec = null; throw err; });
+                const api = await comTempo(import(BASE_FA + '/face-api.esm.js'), 30000, 'download da biblioteca demorou');
+                const teste = document.createElement('canvas');
+                teste.width = teste.height = 150;
+                const ctx = teste.getContext('2d'); ctx.fillStyle = '#888'; ctx.fillRect(0, 0, 150, 150);
+                let ultimoErro = null;
+                for (const backend of ['webgl', 'cpu']) {
+                    try {
+                        if (!(await api.tf.setBackend(backend))) throw new Error(backend + ' indisponível');
+                        await api.tf.ready();
+                        await comTempo(Promise.all([
+                            api.nets.tinyFaceDetector.loadFromUri(BASE_FA + '/model'),
+                            api.nets.faceLandmark68TinyNet.loadFromUri(BASE_FA + '/model'),
+                            api.nets.faceRecognitionNet.loadFromUri(BASE_FA + '/model'),
+                        ]), 45000, 'download dos modelos demorou');
+                        // Aquecimento: roda as redes uma vez e confere que os números saem válidos.
+                        await comTempo(api.detectSingleFace(teste, new api.TinyFaceDetectorOptions({ inputSize: 224 })), 20000, 'aquecimento do detector demorou (' + backend + ')');
+                        const d = await comTempo(api.computeFaceDescriptor(teste), 25000, 'aquecimento do reconhecimento demorou (' + backend + ')');
+                        if (!d || !Array.from(d).every(Number.isFinite)) throw new Error('resultado inválido em ' + backend);
+                        rec.backend = backend;
+                        return api;
+                    } catch (err) {
+                        ultimoErro = err;
+                        console.warn('Reconhecimento facial falhou com', backend, err);
+                    }
+                }
+                throw ultimoErro || new Error('reconhecimento indisponível');
+            })();
+            carregandoRec.then(() => {
+                rec.estado = 'pronto';
+                statusRec('Reconhecimento facial pronto', 'pronto');
+            }, (err) => {
+                rec.estado = 'falhou'; rec.erro = String(err && err.message || err);
+                statusRec('Reconhecimento indisponível neste aparelho: use o CPF', 'falhou');
+                carregandoRec = null;  // tenta de novo na próxima vez
+            });
             return carregandoRec;
         }
-        if (METODO === 'facial') setTimeout(() => prepararReconhecimento().catch(() => {}), 1500);
+        if (METODO === 'facial') setTimeout(() => prepararReconhecimento().catch(() => {}), 800);
 
-        function naoReconhecido(msg) {
+        function naoReconhecido(msg, detalhe = '') {
             estado.fotoPendente = null;
             $('naoRecMsg').textContent = msg;
+            $('naoRecDetalhe').textContent = detalhe ? 'Detalhe técnico: ' + detalhe : '';
             mostrar('tela-naoreconhecido');
         }
 
@@ -516,14 +569,17 @@
             mostrar('tela-enviando');
             let descritor;
             try {
-                const api = await prepararReconhecimento();
-                const r = await api.detectSingleFace(canvas, new api.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.5 }))
-                    .withFaceLandmarks(true).withFaceDescriptor();
+                const api = await comTempo(prepararReconhecimento(), 60000, 'preparação demorou');
+                const r = await comTempo(
+                    api.detectSingleFace(canvas, new api.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.5 }))
+                        .withFaceLandmarks(true).withFaceDescriptor(),
+                    15000, 'reconhecimento demorou (' + rec.backend + ')');
                 if (!r) { naoReconhecido('Não encontramos um rosto na foto. Olhe de frente para a câmera e tente de novo.'); return; }
                 descritor = Array.from(r.descriptor);
+                if (!descritor.every(Number.isFinite)) throw new Error('descritor inválido (' + rec.backend + ')');
             } catch (err) {
                 console.warn('Reconhecimento indisponível', err);
-                naoReconhecido('O reconhecimento facial não funcionou neste aparelho agora. Use o CPF.');
+                naoReconhecido('O reconhecimento facial não funcionou agora. Use o CPF ou tente de novo.', String(err && err.message || err));
                 return;
             }
             try {
