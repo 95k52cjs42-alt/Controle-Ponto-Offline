@@ -839,9 +839,10 @@
                     </button>
                 </form>
                 {% if exige_localizacao %}
-                <div class="small text-center mt-2" id="avisoLocal" style="color: var(--text-muted);">
-                    <i class="bi bi-geo-alt me-1"></i>O ponto só é registrado no local de trabalho; a localização é pedida ao bater.
+                <div class="small text-center mt-2" id="avisoLocal" style="color: var(--text-muted);" role="status" aria-live="polite">
+                    <i class="bi bi-geo-alt me-1"></i>Verificando se você está no local de trabalho…
                 </div>
+                <script type="application/json" id="localTrabalho" nonce="{{ csp_nonce() }}">{{ local_trabalho|tojson }}</script>
                 {% endif %}
             </div>
 
@@ -1167,16 +1168,57 @@
                 if (label) label.textContent = texto;
             }
             function restaurar(msg) {
-                btn.disabled = false;
+                btn.disabled = !!foraDoRaio;
                 btn.classList.remove('btn-loading');
                 if (icone) icone.className = iconeOriginal;
                 if (label) label.textContent = textoOriginal;
-                var aviso = document.getElementById('avisoLocal');
                 if (aviso && msg) { aviso.textContent = msg; aviso.style.color = '#f43f5e'; }
             }
 
+            // Acompanha a posição e só libera o botão dentro do raio. Na dúvida
+            // (GPS demorando), deixa liberado: o servidor confere ao bater.
+            var dadosLocal = document.getElementById('localTrabalho');
+            var local = dadosLocal ? JSON.parse(dadosLocal.textContent || 'null') : null;
+            var aviso = document.getElementById('avisoLocal');
+            var foraDoRaio = false;
+            function distanciaM(lat1, lon1, lat2, lon2) {
+                var r = 6371000, rad = Math.PI / 180;
+                var dp = (lat2 - lat1) * rad, dl = (lon2 - lon1) * rad;
+                var a = Math.sin(dp / 2) * Math.sin(dp / 2) + Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(dl / 2) * Math.sin(dl / 2);
+                return 2 * r * Math.asin(Math.sqrt(a));
+            }
+            function formatarDist(m) { return m >= 1000 ? (m / 1000).toFixed(1).replace('.', ',') + ' km' : Math.round(m) + ' m'; }
+            function mostrarAviso(html, cor) { if (aviso) { aviso.innerHTML = html; aviso.style.color = cor || 'var(--text-muted)'; } }
+            function bloquearPorLocal(bloquear, html, cor) {
+                foraDoRaio = bloquear;
+                if (btn && !btn.classList.contains('btn-loading')) {
+                    btn.disabled = bloquear;
+                    btn.style.opacity = bloquear ? '0.45' : '';
+                    btn.title = bloquear ? 'Fora do local de trabalho' : '';
+                }
+                mostrarAviso(html, cor);
+            }
+            if (local && 'geolocation' in navigator) {
+                navigator.geolocation.watchPosition(function(pos) {
+                    var prec = pos.coords.accuracy || 9999;
+                    if (prec > local.precisao_max_m) {
+                        bloquearPorLocal(false, '<i class="bi bi-geo-alt me-1"></i>Localização imprecisa; ative o GPS. A posição será conferida ao bater.');
+                        return;
+                    }
+                    var d = distanciaM(pos.coords.latitude, pos.coords.longitude, local.lat, local.lon);
+                    if (d - Math.min(prec, local.tolerancia_m) > local.raio_m) {
+                        bloquearPorLocal(true, '<i class="bi bi-geo-alt-fill me-1"></i>Você está a ' + formatarDist(d) + ' do local de trabalho. O ponto só pode ser batido lá.', '#f43f5e');
+                    } else {
+                        bloquearPorLocal(false, '<i class="bi bi-geo-alt-fill me-1"></i>Você está no local de trabalho.', '#10b981');
+                    }
+                }, function(err) {
+                    if (err.code === 1) bloquearPorLocal(true, '<i class="bi bi-geo-alt me-1"></i>Permita o acesso à localização (ícone ao lado do endereço) para bater o ponto.', '#f43f5e');
+                    else bloquearPorLocal(false, '<i class="bi bi-geo-alt me-1"></i>Não foi possível confirmar sua localização agora; ela será conferida ao bater.');
+                }, { enableHighAccuracy: true, maximumAge: 15000, timeout: 20000 });
+            }
+
             form.addEventListener('submit', function(e) {
-                if (!btn || btn.disabled) { e.preventDefault(); return; }
+                if (!btn || btn.disabled || foraDoRaio) { e.preventDefault(); return; }
                 if (!form.dataset.exigeLocal) { carregando('Registrando...'); return; }
                 e.preventDefault();
                 if (!('geolocation' in navigator)) { restaurar('Este aparelho não informa a localização; não é possível bater o ponto por aqui.'); return; }

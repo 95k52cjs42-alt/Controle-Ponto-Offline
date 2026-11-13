@@ -91,6 +91,7 @@
                             data-tipo-contrato="{{ u.tipo_contrato if u.tipo_contrato else 'CLT' }}"
                             data-is-rh="{{ 'true' if u.is_rh else 'false' }}"
                             data-is-ti="{{ 'true' if u.is_ti else 'false' }}"
+                            data-fora-raio="{{ 'true' if u.ponto_fora_do_raio else 'false' }}"
                             data-is-self="{{ 'true' if current_user and u.id == current_user.id else 'false' }}">
                         <i class="bi bi-gear-fill"></i> Configurar
                     </button>

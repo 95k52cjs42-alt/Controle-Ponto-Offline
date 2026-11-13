@@ -2028,6 +2028,43 @@ class SecurityRegressionTests(unittest.TestCase):
         with self.app.app_context():
             self.assertIsNone(m.config_local_trabalho())
 
+    def test_isencao_do_raio_por_usuario(self):
+        ti_id = self.make_user(email="ti@example.com", ti=True)
+        self.make_user(email="ti2@example.com", ti=True)
+        admin_id = self.make_user(email="admin@ponto.com", admin=True)
+        func_id = self.make_user(email="func@example.com")
+        m = self.module
+        with self.app.test_client() as client:
+            self.login(client, email="ti@example.com")
+            self._configurar_local(client)
+            # Ninguém se dá a isenção; outra pessoa da TI pode dar.
+            self._post(client, f"/admin/usuarios/{ti_id}/papeis", is_ti="on", ponto_fora_do_raio="on")
+            self._post(client, f"/admin/usuarios/{admin_id}/papeis", is_rh="on", is_ti="on", ponto_fora_do_raio="on")
+        with self.app.app_context():
+            self.assertFalse(m.db.session.get(m.Usuario, ti_id).ponto_fora_do_raio)
+            admin = m.db.session.get(m.Usuario, admin_id)
+            self.assertTrue(admin.ponto_fora_do_raio)
+            self.assertTrue(admin.is_rh and admin.is_ti)  # papéis intactos
+            self.assertEqual(m.LogAuditoria.query.filter(m.LogAuditoria.acao.like("Liberou a batida de ponto fora do raio%")).count(), 1)
+
+        # Colaborador comum: a página recebe o local e trava o botão fora do raio.
+        with self.app.test_client() as client:
+            self.login(client, email="func@example.com")
+            html = client.get("/").get_data(as_text=True)
+            self.assertIn('id="localTrabalho"', html)
+            self.assertIn('"raio_m": 200', html)
+        # Administrador isento: sem verificação na página e bate sem localização.
+        with self.app.test_client() as client:
+            self.login(client, email="admin@ponto.com")
+            html = client.get("/").get_data(as_text=True)
+            self.assertNotIn('id="localTrabalho"', html)
+            self.assertNotIn("data-exige-local", html)
+            token = self.csrf(client, "/")
+            client.post("/registrar/auto", data={"_csrf_token": token})
+        with self.app.app_context():
+            self.assertEqual(m.RegistroPonto.query.filter_by(usuario_id=admin_id).count(), 1)
+            self.assertEqual(m.RegistroPonto.query.filter_by(usuario_id=func_id).count(), 0)
+
     def _descritor(self, base=0.05, ruido=0.0, semente=1):
         import random
         rnd = random.Random(semente)

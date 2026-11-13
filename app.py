@@ -1091,6 +1091,8 @@ class Usuario(UserMixin, db.Model):
     departamento_id = db.Column(db.Integer, db.ForeignKey('departamento.id'), nullable=True)
     tipo_contrato = db.Column(db.String(10), nullable=False, default="CLT")
     cpf = db.Column(db.String(11), nullable=True, unique=True, index=True)  # só dígitos
+    # Isenção do raio do local de trabalho (ex.: administrador, trabalho externo); só a TI marca.
+    ponto_fora_do_raio = db.Column(db.Boolean, nullable=False, default=False)
     data_cadastro = db.Column(db.DateTime, default=lambda: datetime.now(ZoneInfo("America/Sao_Paulo")))
     pontos = db.relationship("RegistroPonto", backref="usuario", lazy=True)
     solicitacoes = db.relationship("SolicitacaoCorrecao", backref="usuario", lazy=True)
@@ -1682,6 +1684,8 @@ def _apply_database_migrations():
         # CPF (só dígitos) para identificar a pessoa no quiosque; único quando preenchido.
         db.session.execute(text("ALTER TABLE usuario ADD COLUMN cpf VARCHAR(11)"))
     db.session.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_usuario_cpf ON usuario (cpf)"))
+    if "ponto_fora_do_raio" not in colunas_usuario:
+        db.session.execute(text("ALTER TABLE usuario ADD COLUMN ponto_fora_do_raio BOOLEAN NOT NULL DEFAULT FALSE"))
 
     colunas_ponto = [c["name"] for c in inspector.get_columns("registro_ponto")]
     if "foi_ajustado" not in colunas_ponto:
@@ -2928,9 +2932,16 @@ def index():
     faltantes_hoje = identificar_pontos_faltantes(pontos_hoje_objs)
     proximo_tipo = faltantes_hoje[0] if faltantes_hoje else "Entrada"
 
+    # Raio ativo e a pessoa não isenta: a página checa a posição e só libera
+    # o botão dentro do raio (o servidor confere de novo ao bater).
+    local_trabalho = None if current_user.ponto_fora_do_raio else config_local_trabalho()
+    if local_trabalho:
+        local_trabalho.update(tolerancia_m=GEO_TOLERANCIA_MAX_M, precisao_max_m=GEO_PRECISAO_MAX_M)
+
     return render_template(
         "index.html",
-        exige_localizacao=config_local_trabalho() is not None,
+        local_trabalho=local_trabalho,
+        exige_localizacao=local_trabalho is not None,
         ultimo_ponto=ultimo_ponto,
         data_hoje=data_hoje,
         total_solicitacoes_pendentes=total_solicitacoes_pendentes,
@@ -2960,7 +2971,7 @@ def registrar(tipo):
     if tipo not in PONTOS_PERMITIDOS:
         flash("Tipo de ponto inválido.", "danger")
         return redirect(url_for("index"))
-    local, erro_local = _checar_local_da_batida(request.form)
+    local, erro_local = _checar_local_da_batida(request.form, current_user)
     if erro_local:
         flash(erro_local, "danger")
         return redirect(url_for("index"))
@@ -3006,7 +3017,7 @@ def registrar(tipo):
 @app.route("/registrar/auto", methods=["POST"])
 @login_required
 def registrar_auto():
-    local, erro_local = _checar_local_da_batida(request.form)
+    local, erro_local = _checar_local_da_batida(request.form, current_user)
     if erro_local:
         flash(erro_local, "danger")
         return redirect(url_for("index"))
@@ -3045,14 +3056,15 @@ def _distancia_m(lat1, lon1, lat2, lon2):
     return 2 * r * math.asin(math.sqrt(a))
 
 
-def _checar_local_da_batida(form):
-    """Com o raio ativo, exige a localização do aparelho dentro dele.
+def _checar_local_da_batida(form, usuario=None):
+    """Com o raio ativo, exige a localização do aparelho dentro dele
+    (exceto para quem a TI liberou a bater de qualquer lugar).
 
     Devolve (dados_do_local | None, mensagem_de_erro | None). Obs.: a posição
     vem do navegador; impede o uso comum fora da empresa, mas não resiste a
     quem falsificar o GPS de propósito."""
     local = config_local_trabalho()
-    if local is None:
+    if local is None or (usuario is not None and usuario.ponto_fora_do_raio):
         return None, None
     try:
         lat, lon = float(form.get("lat", "")), float(form.get("lon", ""))
@@ -4620,19 +4632,31 @@ def atualizar_papeis_usuario(user_id):
     user = Usuario.query.get_or_404(user_id)
     novo_rh = request.form.get("is_rh") == "on"
     novo_ti = request.form.get("is_ti") == "on"
+    novo_fora = request.form.get("ponto_fora_do_raio") == "on"
 
-    if user.id == current_user.id and ((novo_rh and not user.is_rh) or (novo_ti and not user.is_ti)):
-        # Separação de funções: ninguém acumula um papel novo por conta própria.
-        flash("Você não pode atribuir um papel novo a si mesmo. Peça a outra pessoa da TI.", "danger")
+    if user.id == current_user.id and ((novo_rh and not user.is_rh) or (novo_ti and not user.is_ti)
+                                       or (novo_fora and not user.ponto_fora_do_raio)):
+        # Separação de funções: ninguém acumula papel ou isenção por conta própria.
+        flash("Você não pode atribuir a si mesmo um papel novo ou a isenção do raio. Peça a outra pessoa da TI.", "danger")
         return _redirect_admin("usuarios")
 
     if user.is_ti and not novo_ti and Usuario.query.filter(Usuario.is_ti.is_(True), Usuario.id != user.id).count() == 0:
         flash("É preciso manter pelo menos uma pessoa com o papel TI.", "danger")
         return _redirect_admin("usuarios")
 
-    if (novo_rh, novo_ti) == (bool(user.is_rh), bool(user.is_ti)):
-        flash(f"Nenhuma alteração nos papéis de {user.nome}.", "info")
+    papeis_mudaram = (novo_rh, novo_ti) != (bool(user.is_rh), bool(user.is_ti))
+    isencao_mudou = novo_fora != bool(user.ponto_fora_do_raio)
+    if not papeis_mudaram and not isencao_mudou:
+        flash(f"Nenhuma alteração nos acessos de {user.nome}.", "info")
         return _redirect_admin("usuarios")
+
+    if isencao_mudou:
+        user.ponto_fora_do_raio = novo_fora
+        db.session.commit()
+        registrar_log(current_user.id, f"{'Liberou' if novo_fora else 'Retirou'} a batida de ponto fora do raio para {user.nome}", user_id)
+        if not papeis_mudaram:
+            flash(f"{user.nome} {'pode' if novo_fora else 'não pode mais'} bater o ponto fora do raio do local de trabalho.", "success")
+            return _redirect_admin("usuarios")
 
     antes = user.papeis_texto
     user.is_rh, user.is_ti = novo_rh, novo_ti

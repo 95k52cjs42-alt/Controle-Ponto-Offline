@@ -2134,6 +2134,10 @@
                         <span><b>TI</b><br><span class="cfg-dica">Parâmetros, feriados, setores, acessos e logs</span></span>
                     </label>
                     <div class="cfg-dica mt-2">Sem nenhum papel, a pessoa é colaborador comum. A mudança encerra as sessões dela.</div>
+                    <label class="cfg-papel mt-3" for="papelForaRaio">
+                        <input class="form-check-input" type="checkbox" name="ponto_fora_do_raio" id="papelForaRaio" form="formPapeisUsuario">
+                        <span><b>Pode bater o ponto fora do raio</b><br><span class="cfg-dica">Isenta do raio do local de trabalho (ex.: administrador, trabalho externo). A localização deixa de ser pedida para esta pessoa.</span></span>
+                    </label>
                     <div id="avisoPapelProprio" class="cfg-dica text-warning mt-2 d-none"><i class="bi bi-exclamation-triangle me-1"></i>Você está alterando os seus próprios papéis e precisará entrar novamente.</div>
                 </div>
 
@@ -2409,6 +2413,7 @@
                 formPapeis.action = `/admin/usuarios/${userId}/papeis`;
                 document.getElementById('papelRh').checked = alvoRh;
                 document.getElementById('papelTi').checked = alvoTi;
+                document.getElementById('papelForaRaio').checked = button.getAttribute('data-fora-raio') === 'true';
                 document.getElementById('avisoPapelProprio').classList.toggle('d-none', !isSelf);
             }
 
