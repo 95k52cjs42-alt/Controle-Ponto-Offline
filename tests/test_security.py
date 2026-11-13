@@ -2098,6 +2098,16 @@ class SecurityRegressionTests(unittest.TestCase):
         with self.app.app_context():
             self.assertEqual(m.RostoCadastrado.query.filter_by(usuario_id=b_id).count(), 0)
 
+    def test_arquivos_do_quiosque_com_cache_longo(self):
+        with self.app.test_client() as client:
+            r = client.get("/static/quiosque/faceapi/model/tiny_face_detector_model-weights_manifest.json")
+            self.assertEqual(r.status_code, 200)
+            self.assertIn("max-age=2592000", r.headers["Cache-Control"])
+            r.close()
+            r = client.get("/static/icons/icon-192.png")  # demais arquivos: comportamento padrão
+            self.assertNotIn("immutable", r.headers.get("Cache-Control", ""))
+            r.close()
+
     def test_metodo_do_quiosque_so_pela_ti(self):
         self.make_user(email="ti@example.com", ti=True)
         self.make_user(email="rh@example.com", rh=True)

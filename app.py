@@ -1493,6 +1493,11 @@ def add_security_headers(response):
     )
     if app.config["SESSION_COOKIE_SECURE"] and request.is_secure:
         response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    # Bibliotecas e modelos do quiosque (~22 MB) não mudam entre versões: o
+    # aparelho guarda por 30 dias em vez de revalidar a cada abertura.
+    # Ao atualizar algum desses arquivos, troque o nome da pasta/arquivo.
+    if request.path.startswith("/static/quiosque/") and response.status_code == 200:
+        response.headers["Cache-Control"] = "public, max-age=2592000, immutable"
     if request.endpoint in {
         "login", "forgot_password", "reset_password", "definir_senha_usuario",
         "logout", "redefinir_senha_forca", "alterar_senha",

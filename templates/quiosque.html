@@ -10,6 +10,13 @@
     <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='icons/favicon-32.png') }}">
     <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/apple-touch-icon.png') }}">
     <title>Quiosque | 4Lab Orbit</title>
+    {% if metodo == 'facial' %}
+    <!-- Baixa a biblioteca e os modelos em paralelo, antes do script pedir. -->
+    <link rel="modulepreload" href="{{ url_for('static', filename='quiosque/faceapi/face-api.esm.js') }}">
+    <link rel="preload" as="fetch" crossorigin href="{{ url_for('static', filename='quiosque/faceapi/model/face_recognition_model.bin') }}">
+    <link rel="preload" as="fetch" crossorigin href="{{ url_for('static', filename='quiosque/faceapi/model/tiny_face_detector_model.bin') }}">
+    <link rel="preload" as="fetch" crossorigin href="{{ url_for('static', filename='quiosque/faceapi/model/face_landmark_68_tiny_model.bin') }}">
+    {% endif %}
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -445,7 +452,7 @@
         // por vez, ~8 por segundo; converte para o formato que avaliar() usa.
         async function loopDeteccaoFaceApi(api) {
             const v = $('video');
-            const opcoes = new api.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 });
+            const opcoes = OPCOES_DETECTOR(api);
             const meuStream = estado.stream;
             while (estado.stream === meuStream && !estado.capturando) {
                 if (v.readyState >= 2) {
@@ -539,6 +546,11 @@
         }
 
         // ---------- Reconhecimento facial (face-api no aparelho) ----------
+        // Um único tamanho de entrada do detector em todo lugar (aquecimento,
+        // enquadramento e reconhecimento): evita compilar programas novos na
+        // placa de vídeo na hora da foto.
+        const OPCOES_DETECTOR = (api) => new api.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 });
+
         // Nada pode ficar esperando para sempre: toda etapa tem tempo-limite.
         const comTempo = (promessa, ms, motivo) => Promise.race([
             promessa, new Promise((_, rej) => setTimeout(() => rej(new Error(motivo)), ms))]);
@@ -575,7 +587,10 @@
                             api.nets.faceRecognitionNet.loadFromUri(BASE_FA + '/model'),
                         ]), 45000, 'download dos modelos demorou');
                         // Aquecimento: roda as redes uma vez e confere que os números saem válidos.
-                        await comTempo(api.detectSingleFace(teste, new api.TinyFaceDetectorOptions({ inputSize: 224 })), 20000, 'aquecimento do detector demorou (' + backend + ')');
+                        // Aquece as 3 redes com os MESMOS tamanhos usados depois (a placa
+                        // de vídeo compila um programa por tamanho de imagem).
+                        await comTempo(api.detectAllFaces(teste, OPCOES_DETECTOR(api)), 20000, 'aquecimento do detector demorou (' + backend + ')');
+                        await comTempo(api.detectFaceLandmarksTiny(teste), 20000, 'aquecimento dos pontos do rosto demorou (' + backend + ')');
                         const d = await comTempo(api.computeFaceDescriptor(teste), 25000, 'aquecimento do reconhecimento demorou (' + backend + ')');
                         if (!d || !Array.from(d).every(Number.isFinite)) throw new Error('resultado inválido em ' + backend);
                         rec.backend = backend;
@@ -600,7 +615,7 @@
             });
             return carregandoRec;
         }
-        if (METODO === 'facial') setTimeout(() => prepararReconhecimento().catch(() => {}), 800);
+        if (METODO === 'facial') prepararReconhecimento().catch(() => {});  // começa já ao abrir a página
 
         function naoReconhecido(msg, detalhe = '') {
             estado.fotoPendente = null;
@@ -616,7 +631,7 @@
             try {
                 const api = await comTempo(prepararReconhecimento(), 60000, 'preparação demorou');
                 const r = await comTempo(
-                    api.detectSingleFace(canvas, new api.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.5 }))
+                    api.detectSingleFace(canvas, OPCOES_DETECTOR(api))
                         .withFaceLandmarks(true).withFaceDescriptor(),
                     15000, 'reconhecimento demorou (' + rec.backend + ')');
                 if (!r) { naoReconhecido('Não encontramos um rosto na foto. Olhe de frente para a câmera e tente de novo.'); return; }
