@@ -281,11 +281,18 @@
             estado.fluxo = 'cpf'; estado.fotoPendente = null; estado.token = null;
             mostrar('tela-identificar');
             setTimeout(() => $('campoIdent').focus(), 50);
-            prepararDetector();  // carrega o detector enquanto a pessoa digita
+            // Carrega o detector enquanto a pessoa digita (no modo facial já pronto, usa a face-api).
+            if (!(METODO === 'facial' && rec.estado === 'pronto')) prepararDetector();
         }
         $('btnBater').addEventListener('click', () => {
             // Reconhecimento indisponível neste aparelho: vai direto para o CPF.
-            if (METODO === 'facial' && rec.estado !== 'falhou') { estado.fluxo = 'facial'; estado.nome = ''; abrirCamera(); }
+            if (METODO === 'facial' && rec.estado === 'carregando') {
+                // Abrir a câmera enquanto o reconhecimento se prepara disputa memória
+                // e placa de vídeo (travava no iPhone). Espera ficar pronto.
+                statusRec('Aguarde: preparando o reconhecimento… (ou use o CPF)', '');
+                return;
+            }
+            if (METODO === 'facial' && rec.estado === 'pronto') { estado.fluxo = 'facial'; estado.nome = ''; abrirCamera(); }
             else irParaCpf();
         });
         $('btnUsarCpf')?.addEventListener('click', irParaCpf);
@@ -401,22 +408,57 @@
             desenharMoldura();
             instrucao('Abrindo a câmera…');
             try {
-                estado.stream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 960 } }, audio: false });
+                estado.stream = await comTempo(navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 960 } }, audio: false }),
+                    15000, 'a câmera não respondeu');
             } catch (err) {
                 erro('Não foi possível usar a câmera. Verifique se o navegador tem permissão para a câmera e tente de novo.');
                 return;
             }
             const video = $('video');
             video.srcObject = estado.stream;
-            try { await video.play(); } catch (_) {}
-            await prepararDetector();
-            // Sem detector (aparelho sem suporte): foto pelo botão.
-            if (!estado.detector) { instrucao('Encaixe o rosto e toque em "Tirar foto"'); $('btnFotoManual').hidden = false; return; }
+            try { await comTempo(video.play(), 8000, 'vídeo não iniciou'); } catch (_) {}
             // Rede de segurança: se não encaixar em 15 s, libera o botão manual.
             setTimeout(() => { if ($('tela-camera').classList.contains('ativa') && !estado.capturando) $('btnFotoManual').hidden = false; }, 15000);
+
+            if (estado.fluxo === 'facial' || (METODO === 'facial' && rec.estado === 'pronto')) {
+                // Modo facial: a própria face-api enquadra o rosto (uma biblioteca
+                // só na memória; o MediaPipe nem é carregado), também no CPF.
+                let api;
+                try { api = await comTempo(prepararReconhecimento(), 30000, 'preparação demorou'); }
+                catch (err) { naoReconhecido('O reconhecimento facial não está disponível agora. Use o CPF.', String(err && err.message || err)); pararCamera(); return; }
+                if (!estado.stream) return;  // cancelaram enquanto preparava
+                instrucao('Encaixe o rosto na moldura');
+                loopDeteccaoFaceApi(api);
+                return;
+            }
+
+            try { await comTempo(prepararDetector(), 20000, 'detector demorou'); } catch (_) {}
+            if (!estado.stream) return;
+            // Sem detector (aparelho sem suporte ou lento demais): foto pelo botão.
+            if (!estado.detector) { instrucao('Encaixe o rosto e toque em "Tirar foto"'); $('btnFotoManual').hidden = false; return; }
             instrucao('Encaixe o rosto na moldura');
             loopDeteccao();
+        }
+
+        // Enquadramento com a face-api (modo facial). Assíncrono: uma detecção
+        // por vez, ~8 por segundo; converte para o formato que avaliar() usa.
+        async function loopDeteccaoFaceApi(api) {
+            const v = $('video');
+            const opcoes = new api.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 });
+            const meuStream = estado.stream;
+            while (estado.stream === meuStream && !estado.capturando) {
+                if (v.readyState >= 2) {
+                    let rostos = [];
+                    try {
+                        const dets = await comTempo(api.detectAllFaces(v, opcoes), 5000, 'detecção lenta');
+                        rostos = dets.map(d => ({ boundingBox: { originX: d.box.x, originY: d.box.y, width: d.box.width, height: d.box.height } }));
+                    } catch (_) { /* quadro perdido: segue para o próximo */ }
+                    if (estado.stream !== meuStream || estado.capturando) return;
+                    avaliar(rostos, performance.now());
+                }
+                await new Promise(res => setTimeout(res, 120));
+            }
         }
 
         function pararCamera() {
@@ -545,12 +587,15 @@
                 }
                 throw ultimoErro || new Error('reconhecimento indisponível');
             })();
+            const inicioPreparo = performance.now();
+            rec.estado = 'carregando';
             carregandoRec.then(() => {
                 rec.estado = 'pronto';
-                statusRec('Reconhecimento facial pronto', 'pronto');
+                const seg = Math.round((performance.now() - inicioPreparo) / 1000);
+                statusRec(`Reconhecimento facial pronto (${rec.backend === 'webgl' ? 'placa de vídeo' : 'processador'}, ${seg} s)`, 'pronto');
             }, (err) => {
                 rec.estado = 'falhou'; rec.erro = String(err && err.message || err);
-                statusRec('Reconhecimento indisponível neste aparelho: use o CPF', 'falhou');
+                statusRec('Reconhecimento indisponível neste aparelho: use o CPF (' + rec.erro + ')', 'falhou');
                 carregandoRec = null;  // tenta de novo na próxima vez
             });
             return carregandoRec;
