@@ -1937,6 +1937,26 @@ class SecurityRegressionTests(unittest.TestCase):
             self.login(client, email="func@example.com")
             self.assertNotEqual(client.get(f"/admin/ponto/{reg_id}/foto").status_code, 200)
 
+    def test_saida_escondida_do_quiosque_exige_conta_ti(self):
+        self.make_user(email="rh@example.com", rh=True)
+        with self.app.test_client() as tablet:
+            self._ativar_quiosque(tablet)
+            h = {"X-CSRF-Token": self._csrf_quiosque(tablet)}
+            for email, senha in (("ti@example.com", "errada"), ("rh@example.com", "Abcdef1@"), ("x@example.com", "x")):
+                r = tablet.post("/quiosque/api/sair", headers=h, json={"email": email, "senha": senha})
+                self.assertEqual(r.status_code, 401, email)
+            self.assertEqual(tablet.get("/quiosque").status_code, 200)  # continua ativo
+            r = tablet.post("/quiosque/api/sair", headers=h, json={"email": "TI@example.com", "senha": "Abcdef1@"})
+            self.assertEqual(r.status_code, 200)
+            self.assertIn("ponto_quiosque=;", r.headers.get("Set-Cookie", "").replace('"', ""))
+            # O tablet volta para o login normal.
+            self.assertEqual(tablet.get("/login").status_code, 200)
+        with self.app.app_context():
+            m = self.module
+            self.assertEqual(m.QuiosqueDispositivo.query.count(), 0)
+            self.assertEqual(m.LogAuditoria.query.filter(m.LogAuditoria.acao.like("Desativou o quiosque pelo próprio tablet%")).count(), 1)
+            self.assertEqual(m.LogAuditoria.query.filter(m.LogAuditoria.acao.like("Tentativa de sair do quiosque recusada%")).count(), 3)
+
     def test_excluir_registro_apaga_a_foto(self):
         self.make_user(email="rh@example.com", rh=True)
         func_id = self.make_user(email="func@example.com")

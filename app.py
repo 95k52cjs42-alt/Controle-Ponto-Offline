@@ -5941,6 +5941,8 @@ def quiosque_required(f):
             disp.ultimo_uso_em = agora
             db.session.commit()
         resposta = make_response(f(*args, **kwargs))
+        if getattr(request, "_quiosque_encerrado", False):
+            return resposta  # saída pelo tablet: o cookie acabou de ser apagado
         # Renova o cookie a cada uso: o quiosque não "cai" enquanto estiver ligado.
         return _quiosque_cookie(resposta, request.cookies[QUIOSQUE_COOKIE])
     return decorado
@@ -6043,6 +6045,36 @@ def quiosque_registrar():
         return jsonify(erro=erro), 409 if "recentemente" in erro else 500
     return jsonify(ok=True, tipo=registro.tipo, hora=registro.hora[:5],
                    nome=_primeiro_e_ultimo_nome(pessoa.nome))
+
+
+@app.route("/quiosque/api/sair", methods=["POST"])
+@quiosque_required
+def quiosque_sair():
+    """Saída escondida do próprio tablet: exige e-mail e senha de uma conta
+    da TI (com o mesmo bloqueio por tentativas do login) e desativa o quiosque."""
+    _rate_limit("login")
+    dados = request.get_json(silent=True) or {}
+    email = str(dados.get("email") or "").strip().lower()[:254]
+    senha = str(dados.get("senha") or "")
+    email_hash = hashlib.sha256(email.encode()).hexdigest()
+    if _conta_bloqueada(email_hash):
+        return jsonify(erro=f"Muitas tentativas. Aguarde {LOGIN_BLOQUEIO_MIN} minutos."), 429
+    user = Usuario.query.filter(db.func.lower(Usuario.email) == email).first()
+    valido = check_password_hash(user.senha_hash if user else DUMMY_PASSWORD_HASH, senha)
+    if not (valido and user is not None and user.is_ti):
+        _registrar_falha_login(email_hash)
+        registrar_log(user.id if user else None,
+                      f"Tentativa de sair do quiosque recusada: {email} (IP {request.remote_addr})")
+        return jsonify(erro="E-mail ou senha incorretos, ou a conta não é da TI."), 401
+    TentativaLogin.query.filter_by(email_hash=email_hash).delete()
+    QuiosqueDispositivo.query.delete()
+    db.session.commit()
+    registrar_log(user.id, "Desativou o quiosque pelo próprio tablet", user.id)
+    request._quiosque_encerrado = True
+    resposta = jsonify(ok=True)
+    resposta.delete_cookie(QUIOSQUE_COOKIE, path="/", secure=app.config["SESSION_COOKIE_SECURE"],
+                           httponly=True, samesite="Strict")
+    return resposta
 
 
 @app.route("/admin/quiosque/ativar", methods=["POST"])

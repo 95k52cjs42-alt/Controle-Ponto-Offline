@@ -81,11 +81,19 @@
         .foto-mini { width: 120px; height: 160px; object-fit: cover; border-radius: 18px; border: 3px solid var(--verde); margin: 1rem 0; }
         .hora-registro { font-size: clamp(2.6rem, 7vw, 4rem); font-weight: 800; font-variant-numeric: tabular-nums; }
         .contagem { color: var(--suave); margin-top: 1.4rem; }
+        /* Saída escondida: segurar o canto superior direito por 5 s. */
+        .canto-saida { position: fixed; top: 0; right: 0; width: 96px; height: 96px; z-index: 50; touch-action: none; -webkit-touch-callout: none; }
+        .canto-saida svg { position: absolute; top: max(14px, env(safe-area-inset-top)); right: 14px; width: 56px; height: 56px; opacity: 0; transition: opacity .3s; }
+        .canto-saida.segurando svg { opacity: 1; }
+        .canto-saida circle { fill: none; stroke: var(--suave); stroke-width: 4; stroke-linecap: round; transform: rotate(-90deg); transform-origin: 50% 50%; }
         .aviso-rodape { position: fixed; bottom: max(14px, env(safe-area-inset-bottom)); left: 0; right: 0; color: var(--suave); font-size: .95rem; opacity: .75; }
     </style>
 </head>
 <body>
     <div class="marca"><img src="{{ url_for('static', filename='icons/icon-192.png') }}" alt=""><span>4Lab Orbit</span></div>
+    <div class="canto-saida" id="cantoSaida" aria-hidden="true">
+        <svg viewBox="0 0 56 56"><circle id="anelSaida" cx="28" cy="28" r="24"/></svg>
+    </div>
 
     <!-- 1. Início -->
     <section class="tela ativa" id="tela-inicio">
@@ -162,6 +170,21 @@
         <p class="sub mb-0" id="sucNome"></p>
         <button type="button" class="btn-q btn-principal mt-3" data-acao="voltar" style="margin-top: 1.4rem;">Concluir</button>
         <div class="contagem" id="sucContagem"></div>
+    </section>
+
+    <!-- Saída do modo quiosque (só TI) -->
+    <section class="tela" id="tela-sair">
+        <form class="cartao" id="formSair" autocomplete="off" novalidate>
+            <h1 class="titulo"><i class="bi bi-shield-lock me-1"></i> Sair do modo quiosque</h1>
+            <p class="sub">Entre com uma conta da TI. O tablet volta para a tela de login.</p>
+            <input class="campo" id="sairEmail" type="email" inputmode="email" placeholder="E-mail da TI" autocapitalize="none" autocorrect="off" spellcheck="false" style="font-size: 1.3rem; margin-bottom: .8rem;">
+            <input class="campo" id="sairSenha" type="password" placeholder="Senha" style="font-size: 1.3rem;">
+            <div class="erro-campo" id="erroSair" role="alert"></div>
+            <div class="acoes">
+                <button type="button" class="btn-q btn-secundario" data-acao="voltar">Cancelar</button>
+                <button type="submit" class="btn-q btn-principal" id="btnSair" style="background: linear-gradient(135deg, #f43f5e, #e11d48); box-shadow: none;">Sair do quiosque</button>
+            </div>
+        </form>
     </section>
 
     <!-- 7. Erro -->
@@ -454,6 +477,59 @@
         }
 
         window.addEventListener('resize', () => { if ($('tela-camera').classList.contains('ativa')) desenharMoldura(); });
+
+        // ---------- Saída escondida (canto superior direito, segurar 5 s) ----------
+        (() => {
+            const canto = $('cantoSaida'), anel = $('anelSaida');
+            const C = 2 * Math.PI * 24, DURACAO = 5000;
+            let inicio = 0, quadro = null;
+            anel.style.strokeDasharray = `0 ${C}`;
+            const cancelar = () => {
+                inicio = 0; canto.classList.remove('segurando');
+                if (quadro) cancelAnimationFrame(quadro);
+                anel.style.strokeDasharray = `0 ${C}`;
+            };
+            const animar = (t) => {
+                if (!inicio) return;
+                const frac = Math.min(1, (t - inicio) / DURACAO);
+                // O anel só aparece depois de 1 s segurando (toques comuns não mostram nada).
+                canto.classList.toggle('segurando', t - inicio > 1000);
+                anel.style.strokeDasharray = `${C * frac} ${C}`;
+                if (frac >= 1) { cancelar(); abrirSaida(); return; }
+                quadro = requestAnimationFrame(animar);
+            };
+            canto.addEventListener('pointerdown', (e) => { e.preventDefault(); inicio = performance.now(); quadro = requestAnimationFrame(animar); });
+            ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => canto.addEventListener(ev, cancelar));
+            canto.addEventListener('contextmenu', (e) => e.preventDefault());
+        })();
+
+        function abrirSaida() {
+            pararCamera();
+            $('sairEmail').value = ''; $('sairSenha').value = ''; $('erroSair').textContent = '';
+            mostrar('tela-sair');
+            setTimeout(() => $('sairEmail').focus(), 50);
+        }
+        $('formSair').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            $('btnSair').disabled = true; $('erroSair').textContent = '';
+            try {
+                if (!estado.csrf) await atualizarEstado();
+                const r = await fetch('/quiosque/api/sair', {
+                    method: 'POST', credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': estado.csrf || '' },
+                    body: JSON.stringify({ email: $('sairEmail').value.trim(), senha: $('sairSenha').value }),
+                });
+                const d = await r.json().catch(() => ({}));
+                if (r.ok) { location.href = '/login'; return; }
+                if (r.status === 403 && !d.erro) { await atualizarEstado(); $('erroSair').textContent = 'Tente de novo.'; return; }
+                $('erroSair').textContent = d.erro || 'Não foi possível sair. Tente de novo.';
+                $('sairSenha').value = '';
+            } catch (_) {
+                $('erroSair').textContent = 'Sem conexão. Tente de novo.';
+            } finally {
+                $('btnSair').disabled = false;
+            }
+        });
     </script>
 </body>
 </html>
