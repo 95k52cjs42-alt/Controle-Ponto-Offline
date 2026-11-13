@@ -79,7 +79,7 @@
                 <div class="user-actions">
                     <button type="button"
                             class="btn-action-outline text-warning border-warning btn-configurar-usuario"
-                            title="{% if current_user.is_rh %}Dados, senha{% if current_user.is_ti %} e papéis{% endif %}{% else %}Papéis de acesso{% endif %}"
+                            title="{% if current_user.is_rh %}Dados, senha{% if current_user.is_ti %} e papéis{% endif %}{% else %}Senha e papéis de acesso{% endif %}"
                             data-bs-toggle="modal"
                             data-bs-target="#modalConfigurarUsuario"
                             data-user-id="{{ u.id }}"

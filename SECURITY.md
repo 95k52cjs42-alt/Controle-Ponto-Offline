@@ -54,7 +54,19 @@ flask --app app bootstrap-admin --email admin@example.com --nome "Administrador"
   `app.py` and its `integrity` hash to the tag.
 - **Separation of duties.**
   - Nobody grants themselves a new role.
-  - RH cannot reset the password of, or delete, RH or TI accounts.
+  - Who resets whose password:
+    - TI resets anyone's password.
+    - RH resets passwords of employees and of other RH accounts, never of an
+      account with the TI role.
+    - Everyone changes their own password from the profile, using the
+      current one.
+  - RH cannot delete RH or TI accounts.
+  - If every TI user is locked out, run
+    `heroku run flask --app app redefinir-senha --email <email>`. This sets a
+    temporary password that must be changed at next login, and the reset is
+    audit-logged.
+  - "Forgot password" by e-mail is off unless `ESQUECI_SENHA_ATIVO=true`
+    (this needs a Resend domain).
   - Nobody edits, approves or deletes entries on their own timesheet, or
     their own leave records.
 - **Push notifications.** Only endpoints of real push services (FCM, Mozilla,

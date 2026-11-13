@@ -1489,8 +1489,7 @@ class SecurityRegressionTests(unittest.TestCase):
         with self.app.test_client() as client:
             self.login(client, email="ti@example.com")
             token = self.csrf(client, "/admin")
-            client.post(f"/admin/usuarios/{alvo_id}/senha", data={
-                "_csrf_token": token, "nova_senha": "Nova@Senha9", "confirmar_senha": "Nova@Senha9"})
+            # (Troca de senha pela TI é permitida: ver test_quem_troca_senha_de_quem.)
             client.post("/admin/cadastrar_usuario", data={
                 "_csrf_token": token, "nome": "X", "email": "x@example.com", "modo_acesso": "senha",
                 "senha": "Nova@Senha9", "confirmar_senha": "Nova@Senha9"})
@@ -1498,12 +1497,12 @@ class SecurityRegressionTests(unittest.TestCase):
             client.post("/admin/departamentos", data={"_csrf_token": token, "nome": "TI"})
             painel = client.get("/admin").get_data(as_text=True)
             self.assertIn('id="formPapeisUsuario"', painel)
-            self.assertNotIn('id="formSenhaUsuario"', painel)
+            self.assertIn('id="formSenhaUsuario"', painel)
+            self.assertNotIn('id="formConfigurarUsuario"', painel)
         with self.app.app_context():
             m = self.module
             alvo = m.db.session.get(m.Usuario, alvo_id)
             self.assertIsNotNone(alvo)
-            self.assertTrue(m.check_password_hash(alvo.senha_hash, "Abcdef1@"))
             self.assertIsNone(m.Usuario.query.filter_by(email="x@example.com").first())
             self.assertEqual(m.Departamento.query.filter_by(nome="TI").count(), 1)
 
@@ -1704,21 +1703,70 @@ class SecurityRegressionTests(unittest.TestCase):
         token = self.csrf(client, "/admin")
         return client.post(path, data={"_csrf_token": token, **data})
 
-    def test_rh_nao_troca_senha_nem_exclui_conta_de_rh_ou_ti(self):
+    def test_quem_troca_senha_de_quem(self):
+        # RH: colaboradores e RH, nunca TI (nem quem acumula RH + TI).
+        # TI: qualquer conta. Ninguém troca a própria por aqui.
+        rh_id = self.make_user(email="rh@example.com", rh=True)
+        ti_id = self.make_user(email="ti@example.com", ti=True)
+        ti2_id = self.make_user(email="ti2@example.com", ti=True)
+        rh2_id = self.make_user(email="rh2@example.com", rh=True)
+        ambos_id = self.make_user(email="ambos@example.com", admin=True)
+        func_id = self.make_user(email="func@example.com")
+        m = self.module
+        nova = {"nova_senha": "Nova@Senha9", "confirmar_senha": "Nova@Senha9"}
+
+        def senha_trocada(uid):
+            with self.app.app_context():
+                return m.check_password_hash(m.db.session.get(m.Usuario, uid).senha_hash, "Nova@Senha9")
+
+        with self.app.test_client() as client:
+            self.login(client, email="rh@example.com")
+            for alvo in (ti_id, ambos_id, rh_id, func_id, rh2_id):
+                self._post(client, f"/admin/usuarios/{alvo}/senha", **nova)
+        self.assertEqual([senha_trocada(u) for u in (ti_id, ambos_id, rh_id, func_id, rh2_id)],
+                         [False, False, False, True, True])
+
+        with self.app.test_client() as client:
+            self.login(client, email="ti@example.com")
+            for alvo in (ti2_id, ambos_id, ti_id):
+                self._post(client, f"/admin/usuarios/{alvo}/senha", **nova)
+        self.assertEqual([senha_trocada(u) for u in (ti2_id, ambos_id, ti_id)], [True, True, False])
+
+        # Colaborador comum não troca a de ninguém.
+        outro_id = self.make_user(email="outro@example.com")
+        with self.app.test_client() as client:
+            self._login_senha(client, "func@example.com", "Nova@Senha9")
+            token = self.csrf(client, "/")
+            client.post(f"/admin/usuarios/{outro_id}/senha", data={"_csrf_token": token, **nova})
+        self.assertFalse(senha_trocada(outro_id))
+
+    def test_rh_nao_exclui_conta_de_rh_ou_ti(self):
         self.make_user(email="rh@example.com", rh=True)
         ti_id = self.make_user(email="ti@example.com", ti=True)
         rh2_id = self.make_user(email="rh2@example.com", rh=True)
         with self.app.test_client() as client:
             self.login(client, email="rh@example.com")
             for alvo in (ti_id, rh2_id):
-                self._post(client, f"/admin/usuarios/{alvo}/senha", nova_senha="Nova@Senha9", confirmar_senha="Nova@Senha9")
                 self._post(client, f"/admin/excluir-usuario/{alvo}")
         with self.app.app_context():
-            m = self.module
             for alvo in (ti_id, rh2_id):
-                user = m.db.session.get(m.Usuario, alvo)
-                self.assertIsNotNone(user)
-                self.assertTrue(m.check_password_hash(user.senha_hash, "Abcdef1@"))
+                self.assertIsNotNone(self.module.db.session.get(self.module.Usuario, alvo))
+
+    def test_comando_de_emergencia_redefine_senha(self):
+        uid = self.make_user(email="ti@example.com", ti=True)
+        runner = self.app.test_cli_runner()
+        r = runner.invoke(args=["redefinir-senha", "--email", "TI@example.com", "--senha", "Prov@Senha1"])
+        self.assertEqual(r.exit_code, 0, r.output)
+        r = runner.invoke(args=["redefinir-senha", "--email", "ninguem@example.com", "--senha", "Prov@Senha1"])
+        self.assertNotEqual(r.exit_code, 0)
+        r = runner.invoke(args=["redefinir-senha", "--email", "ti@example.com", "--senha", "fraca"])
+        self.assertNotEqual(r.exit_code, 0)
+        with self.app.app_context():
+            m = self.module
+            user = m.db.session.get(m.Usuario, uid)
+            self.assertTrue(m.check_password_hash(user.senha_hash, "Prov@Senha1"))
+            self.assertTrue(user.precisa_redefinir_senha)
+            self.assertEqual(m.LogAuditoria.query.filter(m.LogAuditoria.acao.like("%comando no servidor%")).count(), 1)
 
     def test_ti_nao_se_atribui_papel_novo(self):
         ti_id = self.make_user(email="ti@example.com", ti=True)

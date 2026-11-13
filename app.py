@@ -1710,6 +1710,27 @@ def bootstrap_admin(email, nome, senha):
     click.echo(f"Administrador (RH + TI) criado: {email}")
 
 
+@app.cli.command("redefinir-senha")
+@click.option("--email", prompt=True)
+@click.option("--senha", prompt="Senha provisória", hide_input=True, confirmation_prompt=True)
+def redefinir_senha_cli(email, senha):
+    """Emergência: troca a senha de qualquer conta (ex.: toda a TI esqueceu).
+
+    Só roda com acesso ao servidor (heroku run). A pessoa é obrigada a
+    escolher uma senha nova no próximo acesso, e a troca vai para o log."""
+    email = email.strip().lower()
+    user = Usuario.query.filter(db.func.lower(Usuario.email) == email).first()
+    if not user:
+        raise click.ClickException("Nenhuma conta com este e-mail.")
+    problem = _password_problem(senha)
+    if problem:
+        raise click.ClickException(problem)
+    _aplicar_senha(user, senha, exigir_troca=True)
+    db.session.commit()
+    registrar_log(None, f"Senha de {user.nome} redefinida por comando no servidor (emergência)", user.id)
+    click.echo(f"Senha de {user.nome} ({email}) redefinida. Troca obrigatória no próximo acesso; sessões abertas encerradas.")
+
+
 # ==========================================
 #         SISTEMA DE NOTIFICAÇÕES
 # ==========================================
@@ -2604,18 +2625,28 @@ def admin_cadastrar_usuario():
     return _redirect_admin("usuarios")
 
 
+def _pode_trocar_senha_de(autor, alvo):
+    """TI troca a senha de qualquer conta; RH, de colaboradores e do RH,
+    nunca de contas com papel TI. A própria senha é trocada pelo perfil."""
+    if autor.id == alvo.id:
+        return False
+    if autor.is_ti:
+        return True
+    return bool(autor.is_rh) and not alvo.is_ti
+
+
 @app.route("/admin/usuarios/<int:user_id>/senha", methods=["POST"])
 @login_required
-@rh_required
+@gestao_required
 def admin_alterar_senha_usuario(user_id):
     user = Usuario.query.get_or_404(user_id)
     if user.id == current_user.id:
         flash("Para alterar a sua própria senha, use a opção do seu perfil.", "warning")
         return _redirect_admin("usuarios")
-    if user.tem_gestao:
-        # Trocar a senha de outra conta de RH/TI permitiria entrar nela e
-        # assumir os papéis dela; essas contas trocam a senha pelo perfil.
-        flash(f"{user.nome} tem papel de RH/TI: a senha só pode ser trocada por ele mesmo, no perfil.", "danger")
+    if not _pode_trocar_senha_de(current_user, user):
+        # Trocar a senha de uma conta da TI permitiria entrar nela e assumir
+        # os acessos dela; só a própria TI faz isso.
+        flash(f"{user.nome} tem papel de TI: só a TI pode trocar a senha dessa conta.", "danger")
         return _redirect_admin("usuarios")
 
     senha = request.form.get("nova_senha", "")
@@ -2632,7 +2663,7 @@ def admin_alterar_senha_usuario(user_id):
         f"Alterou a senha do usuário {user.nome}" + (" (troca obrigatória no próximo acesso)" if exigir_troca else ""),
         user.id,
     )
-    aviso = " Ele deverá trocar a senha no próximo acesso." if exigir_troca else ""
+    aviso = " A pessoa deverá trocar a senha no próximo acesso." if exigir_troca else ""
     flash(f"Senha de {user.nome} alterada. As sessões abertas dele foram encerradas.{aviso}", "success")
     return _redirect_admin("usuarios")
 

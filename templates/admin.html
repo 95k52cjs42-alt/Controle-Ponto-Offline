@@ -1955,9 +1955,11 @@
                     </select>
                 </div>
                 <button type="submit" form="formConfigurarUsuario" class="btn btn-primary btn-sm w-100 mb-1"><i class="bi bi-check-lg me-1"></i> Salvar dados</button>
+                {% endif %}
 
-                <!-- Alterar senha (RH) -->
-                <div class="border-top border-secondary border-opacity-25 mt-3 pt-3">
+                {% if current_user.tem_gestao %}
+                <!-- Alterar senha: TI troca a de todos; RH, a de colaboradores e do RH -->
+                <div class="{% if current_user.is_rh %}border-top border-secondary border-opacity-25 mt-3 pt-3{% endif %}">
                     <div id="secaoSenhaUsuario">
                         <button type="button" class="btn btn-outline-warning btn-sm w-100" data-bs-toggle="collapse" data-bs-target="#collapseAlterarSenha" aria-expanded="false" aria-controls="collapseAlterarSenha">
                             <i class="bi bi-key me-1"></i> Alterar senha
@@ -1983,15 +1985,15 @@
                             </div>
                         </div>
                     </div>
-                    <div id="avisoSenhaPropria" class="small text-muted d-none">
-                        <i class="bi bi-info-circle me-1"></i> Para alterar a sua própria senha, use a opção do seu perfil.
+                    <div id="avisoSenhaBloqueada" class="small text-muted d-none">
+                        <i class="bi bi-info-circle me-1"></i> <span id="avisoSenhaBloqueadaTexto"></span>
                     </div>
                 </div>
                 {% endif %}
 
                 {% if current_user.is_ti %}
                 <!-- Papéis de acesso (TI) -->
-                <div class="{% if current_user.is_rh %}border-top border-secondary border-opacity-25 mt-3 pt-3{% endif %}">
+                <div class="border-top border-secondary border-opacity-25 mt-3 pt-3">
                     <h6 class="fw-bold small text-primary mb-2"><i class="bi bi-shield-lock me-1"></i> Papéis de acesso</h6>
                     <div class="d-flex flex-column gap-2 mb-2">
                         <div class="form-check form-switch small">
@@ -2014,6 +2016,8 @@
             </div>
             {% if current_user.is_rh %}
             <form id="formConfigurarUsuario" method="POST"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}"></form>
+            {% endif %}
+            {% if current_user.tem_gestao %}
             <form id="formSenhaUsuario" method="POST"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}"></form>
             {% endif %}
             {% if current_user.is_ti %}
@@ -2032,16 +2036,27 @@
             const isSelf = button.getAttribute('data-is-self') === 'true';
             document.getElementById('modalUserName').textContent = button.getAttribute('data-user-nome');
 
-            // RH: dados do colaborador e senha.
+            // RH: dados do colaborador.
             const formDados = document.getElementById('formConfigurarUsuario');
             if (formDados) {
                 formDados.action = `/admin/usuarios/${userId}/atualizar`;
                 document.getElementById('modalUserDepartamento').value = button.getAttribute('data-user-departamento');
                 document.getElementById('modalUserTipoContrato').value = button.getAttribute('data-tipo-contrato') || 'CLT';
+            }
 
-                document.getElementById('formSenhaUsuario').action = `/admin/usuarios/${userId}/senha`;
-                document.getElementById('secaoSenhaUsuario').classList.toggle('d-none', isSelf);
-                document.getElementById('avisoSenhaPropria').classList.toggle('d-none', !isSelf);
+            // Senha: TI troca a de todos; RH, a de colaboradores e do RH (não
+            // a da TI). O servidor aplica a mesma regra; aqui só se esconde.
+            const formSenha = document.getElementById('formSenhaUsuario');
+            if (formSenha) {
+                const souTi = {{ 'true' if current_user.is_ti else 'false' }};
+                const alvoTi = button.getAttribute('data-is-ti') === 'true';
+                let bloqueio = '';
+                if (isSelf) bloqueio = 'Para alterar a sua própria senha, use a opção do seu perfil na página inicial.';
+                else if (alvoTi && !souTi) bloqueio = 'A senha de quem tem papel de TI só pode ser trocada pela TI.';
+                formSenha.action = `/admin/usuarios/${userId}/senha`;
+                document.getElementById('secaoSenhaUsuario').classList.toggle('d-none', !!bloqueio);
+                document.getElementById('avisoSenhaBloqueada').classList.toggle('d-none', !bloqueio);
+                document.getElementById('avisoSenhaBloqueadaTexto').textContent = bloqueio;
                 ['admNovaSenha', 'admConfirmarSenha'].forEach(id => {
                     const el = document.getElementById(id);
                     el.value = '';
