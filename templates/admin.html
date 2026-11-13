@@ -98,15 +98,27 @@
         }
 
         /* Topbar / Navbar */
-        .top-navbar {
+        /* O wrapper fica preso ao topo e leva a faixa; a barra, dentro dele,
+           tem o visual. (Com a faixa na própria barra, o z-index -1 pintaria
+           por cima do fundo dela.) Mesmo efeito do _cabecalho.html. */
+        html { overflow-x: clip; }
+        .top-navbar-wrap {
             position: sticky;
             top: 16px;
             z-index: 1000;
+            margin-bottom: 2.5rem;
+        }
+        .top-navbar-wrap::before {
+            content: ""; position: absolute; z-index: -1; pointer-events: none;
+            top: -16px; left: 50%; width: 100vw; height: calc(100% + 16px + 20px);
+            transform: translateX(-50%);
+            background: linear-gradient(to bottom, var(--bg-dark) 0, var(--bg-dark) calc(100% - 20px), transparent 100%);
+        }
+        .top-navbar {
             background: var(--card-bg);
             border: 1px solid var(--card-border);
             border-radius: var(--radius-main);
             padding: 0.85rem 1.25rem;
-            margin-bottom: 2.5rem;
             display: flex;
             align-items: center;
             justify-content: space-between;
@@ -709,6 +721,7 @@
     <div class="container fade-in-up" style="max-width: 1100px;">
         
         <!-- Topbar Navbar -->
+        <div class="top-navbar-wrap">
         <div class="top-navbar">
             <div class="brand-title">
                 <img class="brand-icon" src="{{ url_for('static', filename='icons/icon-192.png') }}" alt="4Lab Orbit" width="36" height="36">
@@ -792,6 +805,7 @@
                     </ul>
                 </div>
             </div>
+        </div>
         </div>
 
         <!-- Flash Messages (feedback das ações do admin) -->

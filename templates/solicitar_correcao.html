@@ -73,7 +73,7 @@
             background-color: var(--bg-dark);
             color: var(--text-main);
             min-height: 100vh;
-            padding: 2rem 1rem;
+            padding: 0 1rem 2rem; /* topo: o cabeçalho flutuante já dá o respiro */
             transition: background-color 0.3s ease, color 0.3s ease;
         }
 
@@ -226,6 +226,7 @@
     <link href="{{ url_for('static', filename='css/tema.css') }}" rel="stylesheet">
 </head>
 <body>
+    {% include '_cabecalho.html' %}
 
     <div class="container fade-in-up" style="max-width: 650px;">
         
@@ -234,16 +235,6 @@
             <div>
                 <h4 class="fw-bold m-0">Solicitar Ajuste</h4>
                 <span class="text-muted small">Envie os ajustes da sua jornada de trabalho</span>
-            </div>
-            <div class="d-flex align-items-center gap-2">
-                <!-- BOTÃO DE ALTERNAR TEMA -->
-                <button class="nav-btn btn-theme" id="themeToggle" title="Mudar Tema">
-                    <i class="bi bi-sun" id="themeIcon"></i>
-                </button>
-
-                <a href="{{ url_for('index') }}" class="nav-btn">
-                    <i class="bi bi-arrow-left"></i> Voltar
-                </a>
             </div>
         </div>
 

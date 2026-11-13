@@ -84,7 +84,7 @@
             background-color: var(--bg-dark);
             color: var(--text-main);
             min-height: 100vh;
-            padding: 2rem 1rem;
+            padding: 0 1rem 2rem; /* topo: o cabeçalho flutuante já dá o respiro */
             transition: background-color 0.3s ease, color 0.3s ease;
         }
 
@@ -222,7 +222,8 @@
     </style>
     <link href="{{ url_for('static', filename='css/tema.css') }}" rel="stylesheet">
 </head>
-<body class="py-5">
+<body class="pb-5">
+    {% include '_cabecalho.html' %}
 
     <div class="container fade-in-up" style="max-width: 900px;">
         
@@ -249,14 +250,6 @@
                     </ul>
                 </div>
 
-                <!-- BOTÃO DE ALTERNAR TEMA -->
-                <button class="nav-btn btn-theme" id="themeToggle" title="Mudar Tema">
-                    <i class="bi bi-sun" id="themeIcon"></i>
-                </button>
-
-                <a href="{{ url_for('index') }}" class="nav-btn">
-                    <i class="bi bi-arrow-left"></i> Voltar
-                </a>
             </div>
         </div>
 
