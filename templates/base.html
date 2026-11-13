@@ -8,6 +8,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-title" content="Ponto">
+    <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='icons/favicon-32.png') }}">
     <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/apple-touch-icon.png') }}">
     <title>{% block title %}4Lab Orbit | App Ponto{% endblock %}</title>
 
@@ -90,14 +91,10 @@
         .brand-logo {
             width: 36px;
             height: 36px;
-            background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
-            color: #ffffff;
-            border-radius: 12px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 1.1rem;
-            box-shadow: 0 4px 10px rgba(59, 130, 246, 0.3);
+            border-radius: 10px;
+            display: block;
+            object-fit: cover;
+            box-shadow: 0 4px 10px rgba(59, 130, 246, 0.25);
         }
 
         .nav-link-custom {
@@ -224,9 +221,7 @@
         <div class="container justify-content-between">
             <!-- Logo / Nome -->
             <a class="navbar-brand d-flex align-items-center gap-2 m-0" href="{{ url_for('index') if current_user.is_authenticated else url_for('login') }}">
-                <div class="brand-logo">
-                    <i class="bi bi-clock-history"></i>
-                </div>
+                <img class="brand-logo" src="{{ url_for('static', filename='icons/icon-192.png') }}" alt="4Lab Orbit" width="36" height="36">
                 <span class="fw-bold fs-5 text-dark">{% block navbar_title %}Controle de Ponto{% endblock %}</span>
             </a>
 

@@ -14,16 +14,13 @@
     }
 
     .brand-icon {
-        width: 48px;
-        height: 48px;
-        background-color: var(--bg-input);
-        color: var(--text-muted);
+        width: 64px;
+        height: 64px;
         border-radius: 16px;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 1.25rem;
+        display: inline-block;
+        object-fit: cover;
         margin-bottom: 1rem;
+        box-shadow: 0 8px 22px rgba(59, 130, 246, 0.28);
     }
 
     .password-toggle {
@@ -52,11 +49,9 @@
             
             <!-- Icone e Cabeçalho -->
             <div class="text-center mb-4">
-                <div class="brand-icon shadow-sm">
-                    <i class="bi bi-box-arrow-in-right"></i>
-                </div>
-                <h3 class="fw-bold mb-1 text-dark">Entrar no Sistema</h3>
-                <p class="text-muted small">Informe seus dados para acessar sua conta</p>
+                <img class="brand-icon" src="{{ url_for('static', filename='icons/icon-192.png') }}" alt="4Lab Orbit" width="64" height="64">
+                <h3 class="fw-bold mb-1 text-dark">Acesse o Orbit</h3>
+                <p class="text-muted small">Entre com seu e-mail e senha para registrar seu ponto</p>
             </div>
 
             <!-- Flash Messages -->
