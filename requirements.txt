@@ -1,15 +1,19 @@
-Flask
-Flask-Login
-Flask-SQLAlchemy
-reportlab
-Pillow
-gunicorn
-psycopg2-binary
-tzdata
-resend
-pandas
-openpyxl
-python-dotenv
-holidays
-requests
-pywebpush
+# Versões fixas: o build do Heroku instala exatamente o que foi testado.
+# Atualizar de propósito (pip install -U <pacote>, rodar os testes, ajustar aqui).
+# Flask >= 3.1 é obrigatório: TRUSTED_HOSTS, MAX_FORM_MEMORY_SIZE e MAX_FORM_PARTS.
+Flask==3.1.3
+Werkzeug==3.1.8
+Flask-Login==0.6.3
+Flask-SQLAlchemy==3.1.1
+reportlab==5.0.0
+pillow==12.3.0
+gunicorn==26.0.0
+psycopg2-binary==2.9.12
+tzdata==2026.3
+resend==2.39.0
+pandas==3.0.5
+openpyxl==3.1.5
+python-dotenv==1.2.3
+holidays==0.103
+requests==2.34.2
+pywebpush==2.5.0

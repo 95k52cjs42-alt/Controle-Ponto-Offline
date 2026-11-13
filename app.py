@@ -93,7 +93,11 @@ def _normalise_public_base_url(value):
 # A aplicação não possui segredo de fallback. O teste injeta uma chave própria
 # antes da importação deste módulo.
 TESTING = _env_bool("TESTING")
-APP_ENV = os.environ.get("APP_ENV", os.environ.get("FLASK_ENV", "development")).strip().lower()
+# No Heroku (variável DYNO sempre presente) o padrão é produção: esquecer o
+# APP_ENV não pode desligar em silêncio as exigências de segurança abaixo.
+ON_HEROKU = bool(os.environ.get("DYNO"))
+_APP_ENV_PADRAO = "production" if ON_HEROKU else "development"
+APP_ENV = os.environ.get("APP_ENV", os.environ.get("FLASK_ENV", _APP_ENV_PADRAO)).strip().lower()
 IS_PRODUCTION = APP_ENV not in {"development", "dev", "test", "testing", "local"}
 SECRET_KEY = os.environ.get("SECRET_KEY", "").strip()
 if not SECRET_KEY:
@@ -138,6 +142,10 @@ if IS_PRODUCTION and app.config["DEBUG"]:
 # Links de e-mail são sempre baseados nesta URL, nunca no Host/Referer.
 if IS_PRODUCTION and len(SECRET_KEY) < 32:
     raise RuntimeError("Produção exige SECRET_KEY com pelo menos 32 caracteres.")
+# Chave de exemplo que já esteve publicada no SECURITY.md: quem a copiou
+# precisa gerar outra (com ela, qualquer um forja cookies de sessão).
+if IS_PRODUCTION and SECRET_KEY == "2d757d696d5190632b338f929beaf23dd7043c4eb35d9ad3cdb1dff19e6937ea":
+    raise RuntimeError("SECRET_KEY é a chave de exemplo da documentação. Gere uma nova.")
 public_base_url = _normalise_public_base_url(os.environ.get("PUBLIC_BASE_URL", ""))
 if not public_base_url:
     if IS_PRODUCTION:
@@ -169,9 +177,14 @@ app.config["REMEMBER_COOKIE_SECURE"] = cookie_secure
 # Com HTTPS, o prefixo __Host- impede que subdomínios definam o cookie.
 app.config["SESSION_COOKIE_NAME"] = "__Host-ponto_session" if cookie_secure else "ponto_session"
 app.config["REMEMBER_COOKIE_NAME"] = "__Host-ponto_remember" if cookie_secure else "ponto_remember"
-app.config["TRUST_PROXY_HEADERS"] = _env_bool("TRUST_PROXY_HEADERS", False)
+# O roteador do Heroku é exatamente um proxy e acrescenta o IP real do
+# cliente ao final do X-Forwarded-For, então lá o padrão é confiar nele.
+app.config["TRUST_PROXY_HEADERS"] = _env_bool("TRUST_PROXY_HEADERS", ON_HEROKU)
 if app.config["TRUST_PROXY_HEADERS"]:
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
+# Redirecionar para HTTPS só é seguro quando o esquema original é conhecido
+# (sem o ProxyFix, toda requisição atrás do proxy parece HTTP: laço infinito).
+app.config["FORCE_HTTPS"] = IS_PRODUCTION and app.config["TRUST_PROXY_HEADERS"]
 
 resend.api_key = os.environ.get("RESEND_API_KEY")
 if not resend.api_key:
@@ -212,7 +225,9 @@ app.config["RESET_TOKEN_TTL_SECONDS"] = 30 * 60
 app.config["INVITE_TOKEN_TTL_SECONDS"] = 24 * 60 * 60
 app.config["RATE_LIMIT_ENABLED"] = _env_bool("RATE_LIMIT_ENABLED", True)
 app.config["RATE_LIMITS"] = {
-    "login": (10, 300),
+    # Por IP. Por conta há um limite próprio (TentativaLogin), comum a todos
+    # os workers, que segura ataques distribuídos em muitos IPs.
+    "login": (30, 300),
     "forgot_password": (5, 900),
     "upload": (10, 900),
     "reset_password": (10, 900),
@@ -618,6 +633,17 @@ class LogAuditoria(db.Model):
     data_criacao = db.Column(db.DateTime, default=lambda: datetime.now(ZoneInfo("America/Sao_Paulo")))
 
     usuario = db.relationship("Usuario", backref=db.backref("logs", passive_deletes=True))
+
+
+class TentativaLogin(db.Model):
+    """Falha de login por conta (hash do e-mail), no banco para valer entre
+    workers e reinícios. Vale também para e-mails inexistentes, então o
+    bloqueio não revela quais contas existem."""
+    __tablename__ = "tentativa_login"
+    id = db.Column(db.Integer, primary_key=True)
+    email_hash = db.Column(db.String(64), nullable=False, index=True)
+    criado_em = db.Column(db.DateTime, nullable=False, index=True,
+                          default=lambda: datetime.now(ZoneInfo("America/Sao_Paulo")))
 
 class Departamento(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -1353,7 +1379,16 @@ def _csrf_is_valid():
         payload = request.get_json(silent=True)
         if isinstance(payload, dict):
             supplied = payload.get(app.config["CSRF_FIELD_NAME"])
-    return bool(expected and supplied and secrets.compare_digest(expected, supplied))
+    if not (expected and isinstance(supplied, str) and supplied):
+        return False
+    # Bytes: compare_digest recusa str com caracteres não ASCII (dava 500).
+    return secrets.compare_digest(expected.encode(), supplied.encode())
+
+
+@app.before_request
+def forcar_https():
+    if app.config.get("FORCE_HTTPS") and not request.is_secure:
+        return redirect(request.url.replace("http://", "https://", 1), code=301)
 
 
 @app.before_request
@@ -1368,6 +1403,12 @@ def enforce_csrf_and_rate_limits():
             voltar = _internal_referrer_path(url_for("index") if current_user.is_authenticated else url_for("login"))
             return render_template("erro_csrf.html", voltar=voltar), 403
     rate_endpoint = request.endpoint
+    # Só tentativas (POST) contam: abrir a tela de login não pode gastar o
+    # limite de um escritório inteiro que sai pelo mesmo IP.
+    if request.method != "POST" and rate_endpoint in {
+        "login", "forgot_password", "reset_password", "definir_senha_usuario",
+    }:
+        return None
     if rate_endpoint in {
         "login", "forgot_password", "upload_foto_perfil", "reset_password",
         "definir_senha_usuario", "api_localizacao",
@@ -2130,28 +2171,57 @@ def inject_notifications():
 # ROTAS DE AUTENTICAÇÃO
 # ==========================================
 
+LOGIN_FALHAS_MAX = 5
+LOGIN_BLOQUEIO_MIN = 15
+
+
+def _conta_bloqueada(email_hash):
+    desde = _local_now() - timedelta(minutes=LOGIN_BLOQUEIO_MIN)
+    return TentativaLogin.query.filter(
+        TentativaLogin.email_hash == email_hash, TentativaLogin.criado_em > desde
+    ).count() >= LOGIN_FALHAS_MAX
+
+
+def _registrar_falha_login(email_hash):
+    # Limpeza barata das falhas antigas a cada nova falha.
+    TentativaLogin.query.filter(TentativaLogin.criado_em < _local_now() - timedelta(days=1)).delete()
+    db.session.add(TentativaLogin(email_hash=email_hash, criado_em=_local_now()))
+    db.session.commit()
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if current_user.is_authenticated:
         return redirect(url_for("index"))
 
     if request.method == "POST":
-        email = request.form.get("email", "").strip().lower()
+        email = request.form.get("email", "").strip().lower()[:254]
         senha = request.form.get("senha", "")
+        email_hash = hashlib.sha256(email.encode()).hexdigest()
+        if _conta_bloqueada(email_hash):
+            registrar_log(None, f"Login bloqueado por excesso de tentativas: {email} (IP {request.remote_addr})")
+            flash(f"Muitas tentativas de login para esta conta. Aguarde {LOGIN_BLOQUEIO_MIN} minutos "
+                  "ou use \"Esqueci minha senha\".", "danger")
+            return render_template("login.html", email=email), 429
         user = Usuario.query.filter(db.func.lower(Usuario.email) == email).first()
         password_hash = user.senha_hash if user is not None else DUMMY_PASSWORD_HASH
         valid = check_password_hash(password_hash, senha)
         if valid and user is not None and user.email_confirmado:
+            TentativaLogin.query.filter_by(email_hash=email_hash).delete()
             # Rotaciona o identificador da sessão antes de autenticar para
             # impedir fixação de sessão.
             session.clear()
             login_user(user)
             session.permanent = True
             session["_auth_version"] = int(user.auth_version or 0)
+            registrar_log(user.id, f"Entrou no sistema (IP {request.remote_addr})", user.id)
             if user.precisa_redefinir_senha:
                 flash("Você precisa redefinir sua senha no primeiro acesso.", "info")
                 return redirect(url_for("redefinir_senha_forca"))
             return redirect(url_for("index"))
+        _registrar_falha_login(email_hash)
+        registrar_log(user.id if user else None,
+                      f"Falha de login: {email} (IP {request.remote_addr})", user.id if user else None)
         # A mesma resposta para e-mail inexistente, senha inválida ou e-mail
         # ainda não confirmado evita enumeração de contas.
         flash("E-mail ou senha incorretos.", "danger")
@@ -2173,6 +2243,7 @@ def cadastro():
 @app.route("/logout", methods=["POST"])
 @login_required
 def logout():
+    registrar_log(current_user.id, "Saiu do sistema", current_user.id)
     logout_user()
     session.clear()
     flash("Você saiu da conta.", "info")
@@ -2581,10 +2652,9 @@ def definir_senha_usuario(token):
             flash("Token inválido ou expirado.", "danger")
             return redirect(url_for("login"))
         usuario = consumed.usuario
-        usuario.senha_hash = generate_password_hash(senha, method="scrypt")
-        usuario.precisa_redefinir_senha = False
-        usuario.auth_version = int(usuario.auth_version or 0) + 1
+        _aplicar_senha(usuario, senha, exigir_troca=False)  # também anula links pendentes
         db.session.commit()
+        registrar_log(usuario.id, "Definiu a senha pelo link de convite", usuario.id)
         session.clear()
         login_user(usuario)
         session.permanent = True
@@ -2600,21 +2670,33 @@ def forgot_password():
         return redirect(url_for("index"))
 
     if request.method == "POST":
-        email = request.form.get("email", "").strip().lower()
-        user = Usuario.query.filter(db.func.lower(Usuario.email) == email).first()
-        if user:
-            token, _row = issue_security_token(
-                user.id,
-                SecurityToken.PURPOSE_RESET,
-                app.config["RESET_TOKEN_TTL_SECONDS"],
-            )
-            reset_link = _email_link("reset_password", token=token)
-            safe_name = html.escape(user.nome)
-            _send_email(
-                email,
-                "Redefinição de Senha",
-                f"<p>Olá {safe_name}, use o link abaixo para redefinir sua senha.</p>{_email_link_html(reset_link, 'Redefinir senha')}",
-            )
+        email = request.form.get("email", "").strip().lower()[:254]
+
+        def tarefa():
+            # Fora da requisição: o tempo de resposta não revela se o e-mail
+            # existe (gerar token + chamar o Resend leva centenas de ms).
+            with app.test_request_context(base_url=app.config["PUBLIC_BASE_URL"]):
+                user = Usuario.query.filter(db.func.lower(Usuario.email) == email).first()
+                if not user:
+                    return
+                token, _row = issue_security_token(
+                    user.id,
+                    SecurityToken.PURPOSE_RESET,
+                    app.config["RESET_TOKEN_TTL_SECONDS"],
+                )
+                reset_link = _email_link("reset_password", token=token)
+                safe_name = html.escape(user.nome)
+                _send_email(
+                    email,
+                    "Redefinição de Senha",
+                    f"<p>Olá {safe_name}, use o link abaixo para redefinir sua senha.</p>{_email_link_html(reset_link, 'Redefinir senha')}",
+                )
+                registrar_log(None, f"Pediu redefinição de senha por e-mail: {user.nome}", user.id)
+
+        if app.config.get("TESTING"):
+            tarefa()
+        else:
+            threading.Thread(target=tarefa, name="esqueci-senha", daemon=True).start()
         # A resposta é a mesma para qualquer endereço, inclusive inexistente.
         flash("Se o e-mail estiver cadastrado, você receberá instruções para redefinir a senha.", "info")
 
@@ -2649,10 +2731,9 @@ def reset_password(token):
             flash("Token inválido ou expirado.", "danger")
             return redirect(url_for("forgot_password"))
         usuario = consumed.usuario
-        usuario.senha_hash = generate_password_hash(senha, method="scrypt")
-        usuario.precisa_redefinir_senha = False
-        usuario.auth_version = int(usuario.auth_version or 0) + 1
+        _aplicar_senha(usuario, senha, exigir_troca=False)  # também anula o convite pendente
         db.session.commit()
+        registrar_log(usuario.id, f"Redefiniu a senha pelo e-mail (IP {request.remote_addr})", usuario.id)
         session.clear()
         flash("Senha redefinida com sucesso! Faça seu login.", "success")
         return redirect(url_for("login"))
@@ -4292,7 +4373,7 @@ def registrar_log(usuario_id, acao, entidade_id=None):
     log = LogAuditoria(
         usuario_id=usuario_id,
         usuario_nome=autor.nome if autor else None,
-        acao=acao,
+        acao=acao[:200],  # coluna VARCHAR(200): o Postgres recusaria o excesso
         entidade_id=entidade_id,
     )
     db.session.add(log)

@@ -1924,6 +1924,78 @@ class SecurityRegressionTests(unittest.TestCase):
             self.login(client, "rh@example.com")
             self.assertEqual(client.get("/admin/fragment/historico?data_inicio=x&data_fim=y").status_code, 200)
 
+    # ------------------------------------------------------------------
+    # Login e infraestrutura (auditoria de segurança, etapa 3)
+    # ------------------------------------------------------------------
+    def test_bloqueio_por_conta_apos_falhas_e_log_de_login(self):
+        self.make_user()
+        m = self.module
+        with self.app.test_client() as client:
+            for _ in range(m.LOGIN_FALHAS_MAX):
+                self.assertEqual(self._login_senha(client, "user@example.com", "errada").status_code, 200)
+            # Bloqueada: nem a senha certa entra.
+            r = self._login_senha(client, "user@example.com", "Abcdef1@")
+            self.assertEqual(r.status_code, 429)
+            # E-mail inexistente também é bloqueado (não revela quais existem).
+            for _ in range(m.LOGIN_FALHAS_MAX):
+                self._login_senha(client, "nao.existe@example.com", "x")
+            self.assertEqual(self._login_senha(client, "nao.existe@example.com", "x").status_code, 429)
+        with self.app.app_context():
+            # Passado o tempo de bloqueio, volta a entrar e as falhas são zeradas.
+            m.TentativaLogin.query.update({"criado_em": m._local_now() - m.timedelta(minutes=m.LOGIN_BLOQUEIO_MIN + 1)})
+            m.db.session.commit()
+        with self.app.test_client() as client:
+            self.assertEqual(self._login_senha(client, "user@example.com", "Abcdef1@").location, "/")
+            token = self.csrf(client, "/")
+            client.post("/logout", data={"_csrf_token": token})
+        with self.app.app_context():
+            acoes = [l.acao for l in m.LogAuditoria.query.all()]
+            self.assertTrue(any(a.startswith("Falha de login: user@example.com") for a in acoes))
+            self.assertTrue(any(a.startswith("Login bloqueado") for a in acoes))
+            self.assertTrue(any(a.startswith("Entrou no sistema") for a in acoes))
+            self.assertIn("Saiu do sistema", acoes)
+            self.assertEqual(m.TentativaLogin.query.filter_by(
+                email_hash=m.hashlib.sha256(b"user@example.com").hexdigest()).count(), 0)
+
+    def test_abrir_tela_de_login_nao_gasta_limite(self):
+        self.make_user()
+        self.app.config["RATE_LIMIT_ENABLED"] = True
+        try:
+            with self.app.test_client() as client:
+                for _ in range(40):
+                    self.assertEqual(client.get("/login").status_code, 200)
+                self.login(client)
+        finally:
+            self.app.config["RATE_LIMIT_ENABLED"] = False
+
+    def test_csrf_com_caractere_nao_ascii_da_403(self):
+        self.make_user()
+        with self.app.test_client() as client:
+            self.login(client)
+            r = client.post("/api/push/teste", headers={"X-CSRF-Token": "ção"})
+            self.assertEqual(r.status_code, 403)
+
+    def test_redefinir_pelo_email_anula_convite_e_registra_log(self):
+        uid = self.make_user()
+        m = self.module
+        with self.app.app_context():
+            convite, _ = m.issue_security_token(uid, m.SecurityToken.PURPOSE_INVITE, 3600)
+            reset, _ = m.issue_security_token(uid, m.SecurityToken.PURPOSE_RESET, 1800)
+            m.db.session.commit()
+        with self.app.test_client() as client:
+            token = self.csrf(client, f"/reset_password/{reset}")
+            r = client.post(f"/reset_password/{reset}", data={"_csrf_token": token, "senha": "Nova@Senha9"})
+            self.assertEqual(r.location, "/login")
+        with self.app.app_context():
+            self.assertIsNone(m._get_valid_security_token(convite, m.SecurityToken.PURPOSE_INVITE))
+            self.assertEqual(m.LogAuditoria.query.filter(m.LogAuditoria.acao.like("Redefiniu a senha pelo e-mail%")).count(), 1)
+
+    def test_log_longo_e_truncado(self):
+        uid = self.make_user()
+        with self.app.app_context():
+            self.module.registrar_log(uid, "x" * 500)
+            self.assertEqual(len(self.module.LogAuditoria.query.one().acao), 200)
+
 if __name__ == "__main__":
     unittest.main()
 
