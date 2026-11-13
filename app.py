@@ -1374,6 +1374,21 @@ def enforce_csrf_and_rate_limits():
         _rate_limit("upload" if rate_endpoint == "upload_foto_perfil" else rate_endpoint)
 
 
+_LIBERADO_NA_TROCA_DE_SENHA = {"redefinir_senha_forca", "logout", "static", "service_worker", "manifesto_pwa"}
+
+
+@app.before_request
+def exigir_troca_de_senha():
+    """Com a troca obrigatória pendente, nada além da própria troca funciona."""
+    if request.endpoint in _LIBERADO_NA_TROCA_DE_SENHA or not current_user.is_authenticated:
+        return None
+    if not current_user.precisa_redefinir_senha:
+        return None
+    if request.path.startswith("/api/") or request.is_json:
+        return jsonify(erro="Troque sua senha antes de continuar."), 403
+    return redirect(url_for("redefinir_senha_forca"))
+
+
 @app.context_processor
 def inject_security_context():
     return {"csrf_token": csrf_token}
@@ -1635,6 +1650,15 @@ def bootstrap_admin(email, nome, senha):
 # ==========================================
 
 PONTOS_PERMITIDOS = ["Entrada", "Saída"]
+_HORA_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$")
+
+
+def _hora_valida(valor):
+    """Normaliza HH:MM ou HH:MM:SS para HH:MM:SS; devolve None se inválida."""
+    valor = (valor or "").strip()
+    if not _HORA_RE.match(valor):
+        return None
+    return valor if len(valor) == 8 else f"{valor}:00"
 
 def identificar_pontos_faltantes(registros_do_dia):
     """
@@ -2130,6 +2154,10 @@ def logout():
 @app.route("/redefinir_senha_forca", methods=["GET", "POST"])
 @login_required
 def redefinir_senha_forca():
+    # Só existe para a troca obrigatória: sem isso, uma sessão roubada
+    # trocaria a senha sem informar a atual (o que /alterar_senha exige).
+    if not current_user.precisa_redefinir_senha:
+        return redirect(url_for("index"))
     if request.method == "POST":
         senha = request.form.get("senha", "")
 
@@ -2238,23 +2266,36 @@ def admin_lancar_ponto_manual():
         flash("Todos os campos obrigatórios devem ser preenchidos.", "danger")
         return _redirect_admin("painel")
 
-    usuario_alvo = db.session.get(Usuario, usuario_id)
+    try:
+        usuario_alvo = db.session.get(Usuario, int(usuario_id))
+    except (TypeError, ValueError):
+        usuario_alvo = None
     if not usuario_alvo:
         flash("Usuário não encontrado.", "danger")
         return _redirect_admin("painel")
+    if usuario_alvo.id == current_user.id:
+        flash("Você não pode lançar ponto para si mesmo. Peça a outra pessoa do RH ou use a solicitação de correção.", "danger")
+        return _redirect_admin("painel")
 
-    # Formatar data de YYYY-MM-DD para DD/MM/YYYY
+    if tipo not in PONTOS_PERMITIDOS:
+        flash("Tipo de ponto inválido.", "danger")
+        return _redirect_admin("painel")
+    hora_formatada = _hora_valida(hora_raw)
+    if not hora_formatada:
+        flash("Hora inválida.", "danger")
+        return _redirect_admin("painel")
+
+    # Formatar data de YYYY-MM-DD para DD/MM/YYYY. Qualquer outro formato é
+    # recusado: aceitá-lo pularia a trava de mês fechado.
     try:
         data_obj = datetime.strptime(data_raw, "%Y-%m-%d")
-        data_formatada = data_obj.strftime("%d/%m/%Y")
-        if mes_fechado(data_obj.date()):
-            flash(msg_mes_fechado(data_obj.year, data_obj.month), "danger")
-            return _redirect_admin("painel")
     except ValueError:
-        data_formatada = data_raw
-
-    # Garantir formato HH:MM:SS para hora
-    hora_formatada = hora_raw if len(hora_raw) == 8 else f"{hora_raw}:00"
+        flash("Data inválida.", "danger")
+        return _redirect_admin("painel")
+    data_formatada = data_obj.strftime("%d/%m/%Y")
+    if mes_fechado(data_obj.date()):
+        flash(msg_mes_fechado(data_obj.year, data_obj.month), "danger")
+        return _redirect_admin("painel")
 
     # --- Lógica automática: decide se cria novo ou substitui ---
     # Se já existe registro do mesmo tipo no dia, calcula a diferença de horário.
@@ -2320,6 +2361,9 @@ def admin_lancar_ponto_manual():
 def admin_excluir_ponto(ponto_id):
     """Exclui um registro de ponto (apenas admin/RH). Usado para remover duplicatas."""
     ponto = RegistroPonto.query.get_or_404(ponto_id)
+    if ponto.usuario_id == current_user.id:
+        flash("Você não pode excluir registros do seu próprio ponto. Peça a outra pessoa do RH.", "danger")
+        return _redirect_admin("historico")
     try:
         data_ponto = datetime.strptime(ponto.data, "%d/%m/%Y").date()
     except (TypeError, ValueError):
@@ -2464,6 +2508,12 @@ def admin_alterar_senha_usuario(user_id):
     user = Usuario.query.get_or_404(user_id)
     if user.id == current_user.id:
         flash("Para alterar a sua própria senha, use a opção do seu perfil.", "warning")
+        return _redirect_admin("usuarios")
+    if user.tem_gestao:
+        # Trocar a senha de outra conta de RH/TI permitiria entrar nela e
+        # assumir os papéis dela; essas contas usam "Esqueci minha senha".
+        flash(f"{user.nome} tem papel de RH/TI: a senha só pode ser trocada por ele mesmo "
+              "(perfil ou \"Esqueci minha senha\").", "danger")
         return _redirect_admin("usuarios")
 
     senha = request.form.get("nova_senha", "")
@@ -2882,6 +2932,12 @@ def solicitar_correcao():
             flash("Preencha todos os campos para solicitar a correção.", "warning")
             return redirect(url_for("solicitar_correcao"))
 
+        hora = _hora_valida(hora)
+        hora_original = _hora_valida(hora_original) if hora_original else None
+        if tipo_ponto not in PONTOS_PERMITIDOS or not hora:
+            flash("Tipo de ponto ou hora inválidos.", "danger")
+            return redirect(url_for("solicitar_correcao"))
+
         try:
             data_obj = datetime.strptime(data_raw, "%Y-%m-%d").date()
         except ValueError:
@@ -2908,13 +2964,6 @@ def solicitar_correcao():
             return redirect(url_for("solicitar_correcao"))
 
         data_formatada = data_obj.strftime("%d/%m/%Y")
-        
-        if len(hora) == 5:
-            hora += ":00"
-
-        # Se hora_original veio no formato HH:MM (5 chars), completa para HH:MM:SS
-        if hora_original and len(hora_original) == 5:
-            hora_original += ":00"
 
         solicitacao = SolicitacaoCorrecao(
             data_ponto=data_formatada,
@@ -4080,6 +4129,17 @@ def admin_solicitacoes():
 @rh_required
 def responder_solicitacao(id, acao):
     solicitacao = SolicitacaoCorrecao.query.get_or_404(id)
+    if acao not in {"aprovar", "recusar"}:
+        abort(404)
+    voltar = "painel" if request.form.get("voltar") == "painel" else "solicitacoes"
+    if solicitacao.usuario_id == current_user.id:
+        flash("Você não pode responder à sua própria solicitação. Outra pessoa do RH precisa analisá-la.", "danger")
+        return _redirect_admin(voltar)
+    if solicitacao.status != "Pendente":
+        # Reenvio (duplo clique, aba antiga) não pode duplicar batidas nem
+        # inverter uma decisão já tomada.
+        flash(f"Esta solicitação já foi respondida ({solicitacao.status}).", "warning")
+        return _redirect_admin(voltar)
 
     if acao == "aprovar":
         try:
@@ -4138,7 +4198,7 @@ def responder_solicitacao(id, acao):
 
     db.session.commit()
     _invalidar_notif_cache(solicitacao.usuario_id)
-    return _redirect_admin("painel" if request.form.get("voltar") == "painel" else "solicitacoes")
+    return _redirect_admin(voltar)
 
 @app.route("/admin/usuarios")
 @login_required
@@ -4167,6 +4227,11 @@ def atualizar_papeis_usuario(user_id):
     user = Usuario.query.get_or_404(user_id)
     novo_rh = request.form.get("is_rh") == "on"
     novo_ti = request.form.get("is_ti") == "on"
+
+    if user.id == current_user.id and ((novo_rh and not user.is_rh) or (novo_ti and not user.is_ti)):
+        # Separação de funções: ninguém acumula um papel novo por conta própria.
+        flash("Você não pode atribuir um papel novo a si mesmo. Peça a outra pessoa da TI.", "danger")
+        return _redirect_admin("usuarios")
 
     if user.is_ti and not novo_ti and Usuario.query.filter(Usuario.is_ti.is_(True), Usuario.id != user.id).count() == 0:
         flash("É preciso manter pelo menos uma pessoa com o papel TI.", "danger")
@@ -4214,6 +4279,10 @@ def excluir_usuario(user_id):
     
     if user.id == current_user.id:
         flash("Você não pode excluir sua própria conta.", "danger")
+    elif user.tem_gestao:
+        # Contas de RH/TI só saem depois que a TI remove os papéis (o que
+        # também preserva a regra de manter ao menos uma pessoa na TI).
+        flash(f"{user.nome} tem papel de RH/TI. A TI precisa remover os papéis antes da exclusão.", "danger")
     else:
         # Não excluímos logs de auditoria para manter conformidade (Portaria 671)
         # Excluímos apenas registros de ponto e solicitações associadas
@@ -4542,6 +4611,8 @@ def admin_afastamentos():
         pass
     if usuario is None:
         erros.append("Selecione o colaborador.")
+    elif usuario.id == current_user.id:
+        erros.append("Você não pode lançar afastamento para si mesmo. Peça a outra pessoa do RH.")
     tipo = request.form.get("tipo", "")
     if tipo not in AFASTAMENTO_TIPOS:
         erros.append("Selecione o tipo de afastamento.")
@@ -4598,6 +4669,9 @@ def admin_afastamentos():
 @rh_required
 def excluir_afastamento(id):
     afast = Afastamento.query.get_or_404(id)
+    if afast.usuario_id == current_user.id:
+        flash("Você não pode cancelar o seu próprio afastamento. Peça a outra pessoa do RH.", "danger")
+        return _redirect_admin("afastamentos")
     trava = fechado_no_intervalo(afast.data_inicio, afast.data_fim)
     if trava:
         flash(msg_mes_fechado(*trava), "danger")

@@ -1695,6 +1695,141 @@ class SecurityRegressionTests(unittest.TestCase):
             self.assertEqual(r.status_code, 302)
             self.assertTrue(r.headers["Location"].endswith("/admin"))
 
+    # ------------------------------------------------------------------
+    # Separação de funções (auditoria de segurança, etapa 1)
+    # ------------------------------------------------------------------
+    def _post(self, client, path, **data):
+        token = self.csrf(client, "/admin")
+        return client.post(path, data={"_csrf_token": token, **data})
+
+    def test_rh_nao_troca_senha_nem_exclui_conta_de_rh_ou_ti(self):
+        self.make_user(email="rh@example.com", rh=True)
+        ti_id = self.make_user(email="ti@example.com", ti=True)
+        rh2_id = self.make_user(email="rh2@example.com", rh=True)
+        with self.app.test_client() as client:
+            self.login(client, email="rh@example.com")
+            for alvo in (ti_id, rh2_id):
+                self._post(client, f"/admin/usuarios/{alvo}/senha", nova_senha="Nova@Senha9", confirmar_senha="Nova@Senha9")
+                self._post(client, f"/admin/excluir-usuario/{alvo}")
+        with self.app.app_context():
+            m = self.module
+            for alvo in (ti_id, rh2_id):
+                user = m.db.session.get(m.Usuario, alvo)
+                self.assertIsNotNone(user)
+                self.assertTrue(m.check_password_hash(user.senha_hash, "Abcdef1@"))
+
+    def test_ti_nao_se_atribui_papel_novo(self):
+        ti_id = self.make_user(email="ti@example.com", ti=True)
+        with self.app.test_client() as client:
+            self.login(client, email="ti@example.com")
+            self._post(client, f"/admin/usuarios/{ti_id}/papeis", is_rh="on", is_ti="on")
+        with self.app.app_context():
+            self.assertFalse(self.module.db.session.get(self.module.Usuario, ti_id).is_rh)
+
+    def test_rh_nao_mexe_no_proprio_ponto(self):
+        rh_id = self.make_user(email="rh@example.com", rh=True)
+        self.make_user(email="rh2@example.com", rh=True)
+        hoje = self.module.datetime.now(self.module.ZoneInfo("America/Sao_Paulo")).date()
+        with self.app.app_context():
+            m = self.module
+            ponto = m.RegistroPonto(data=hoje.strftime("%d/%m/%Y"), tipo="Entrada", hora="08:00:00", usuario_id=rh_id)
+            sol = m.SolicitacaoCorrecao(data_ponto=hoje.strftime("%d/%m/%Y"), tipo_ponto="Saída",
+                                        hora_correta="22:00:00", justificativa="x", usuario_id=rh_id)
+            m.db.session.add_all([ponto, sol])
+            m.db.session.commit()
+            ponto_id, sol_id = ponto.id, sol.id
+        with self.app.test_client() as client:
+            self.login(client, email="rh@example.com")
+            self._post(client, "/admin/lancar-ponto-manual", usuario_id=str(rh_id),
+                       data=hoje.isoformat(), tipo="Saída", hora="22:00")
+            self._post(client, f"/admin/excluir-ponto/{ponto_id}")
+            self._post(client, f"/admin/solicitacoes/{sol_id}/aprovar")
+            self._post(client, "/admin/afastamentos", usuario_id=str(rh_id), tipo="ferias",
+                       data_inicio=hoje.isoformat(), data_fim=hoje.isoformat())
+        with self.app.app_context():
+            m = self.module
+            self.assertEqual(m.RegistroPonto.query.filter_by(usuario_id=rh_id).count(), 1)
+            self.assertEqual(m.db.session.get(m.SolicitacaoCorrecao, sol_id).status, "Pendente")
+            self.assertEqual(m.Afastamento.query.filter_by(usuario_id=rh_id).count(), 0)
+        # A outra pessoa do RH pode aprovar.
+        with self.app.test_client() as client:
+            self.login(client, email="rh2@example.com")
+            self._post(client, f"/admin/solicitacoes/{sol_id}/aprovar")
+        with self.app.app_context():
+            m = self.module
+            self.assertEqual(m.db.session.get(m.SolicitacaoCorrecao, sol_id).status, "Aprovada")
+            self.assertEqual(m.RegistroPonto.query.filter_by(usuario_id=rh_id).count(), 2)
+
+    def test_solicitacao_respondida_nao_e_reprocessada(self):
+        self.make_user(email="rh@example.com", rh=True)
+        func_id = self.make_user(email="func@example.com")
+        hoje = self.module.datetime.now(self.module.ZoneInfo("America/Sao_Paulo")).date()
+        with self.app.app_context():
+            m = self.module
+            recusada = m.SolicitacaoCorrecao(data_ponto=hoje.strftime("%d/%m/%Y"), tipo_ponto="Entrada",
+                                             hora_correta="08:00:00", justificativa="x", usuario_id=func_id)
+            pendente = m.SolicitacaoCorrecao(data_ponto=hoje.strftime("%d/%m/%Y"), tipo_ponto="Saída",
+                                             hora_correta="17:00:00", justificativa="x", usuario_id=func_id)
+            m.db.session.add_all([recusada, pendente])
+            m.db.session.commit()
+            ids = recusada.id, pendente.id
+        with self.app.test_client() as client:
+            self.login(client, email="rh@example.com")
+            self._post(client, f"/admin/solicitacoes/{ids[0]}/recusar")
+            self._post(client, f"/admin/solicitacoes/{ids[0]}/aprovar")
+            for _ in range(3):
+                self._post(client, f"/admin/solicitacoes/{ids[1]}/aprovar")
+        with self.app.app_context():
+            m = self.module
+            self.assertEqual(m.db.session.get(m.SolicitacaoCorrecao, ids[0]).status, "Recusada")
+            self.assertEqual(m.RegistroPonto.query.filter_by(usuario_id=func_id).count(), 1)
+
+    def test_lancamento_manual_valida_data_tipo_e_hora(self):
+        self.make_user(email="rh@example.com", rh=True)
+        func_id = self.make_user(email="func@example.com")
+        hoje = self.module.datetime.now(self.module.ZoneInfo("America/Sao_Paulo")).date()
+        with self.app.test_client() as client:
+            self.login(client, email="rh@example.com")
+            base = {"usuario_id": str(func_id), "data": hoje.isoformat(), "tipo": "Entrada", "hora": "08:00"}
+            for invalido in ({"data": hoje.strftime("%d/%m/%Y")}, {"tipo": "Qualquer"}, {"hora": "25:00"}, {"hora": "x"}):
+                self._post(client, "/admin/lancar-ponto-manual", **{**base, **invalido})
+            with self.app.app_context():
+                self.assertEqual(self.module.RegistroPonto.query.count(), 0)
+            self._post(client, "/admin/lancar-ponto-manual", **base)
+        with self.app.app_context():
+            self.assertEqual(self.module.RegistroPonto.query.one().hora, "08:00:00")
+
+    def test_correcao_valida_tipo_e_hora(self):
+        self.make_user()
+        hoje = self.module.datetime.now(self.module.ZoneInfo("America/Sao_Paulo")).date()
+        with self.app.test_client() as client:
+            self.login(client)
+            token = self.csrf(client, "/solicitar-correcao")
+            base = {"_csrf_token": token, "data_ponto": hoje.isoformat(), "justificativa": "x"}
+            client.post("/solicitar-correcao", data={**base, "tipo_ponto": "Intervalo", "hora_correta": "08:00"})
+            client.post("/solicitar-correcao", data={**base, "tipo_ponto": "Entrada", "hora_correta": "99:99"})
+        with self.app.app_context():
+            self.assertEqual(self.module.SolicitacaoCorrecao.query.count(), 0)
+
+    def test_troca_obrigatoria_de_senha_bloqueia_o_resto(self):
+        self.make_user(needs_reset=True)
+        self.make_user(email="livre@example.com")
+        with self.app.test_client() as client:
+            self.login(client)
+            self.assertEqual(client.get("/").location, "/redefinir_senha_forca")
+            self.assertEqual(client.get("/meu_historico").location, "/redefinir_senha_forca")
+            self.assertEqual(client.get("/redefinir_senha_forca").status_code, 200)
+        # Sem a pendência, a rota não troca senha sem a senha atual.
+        with self.app.test_client() as client:
+            self.login(client, email="livre@example.com")
+            token = self.csrf(client, "/")
+            r = client.post("/redefinir_senha_forca", data={"_csrf_token": token, "senha": "Outra@Senha9"})
+            self.assertEqual(r.location, "/")
+        with self.app.app_context():
+            m = self.module
+            livre = m.Usuario.query.filter_by(email="livre@example.com").one()
+            self.assertTrue(m.check_password_hash(livre.senha_hash, "Abcdef1@"))
+
 if __name__ == "__main__":
     unittest.main()
 
