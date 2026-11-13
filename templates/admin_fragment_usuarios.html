@@ -85,6 +85,7 @@
                             data-user-id="{{ u.id }}"
                             data-user-nome="{{ u.nome }}"
                             data-user-email="{{ u.email }}"
+                            data-user-cpf="{{ u.cpf or '' }}"
                             data-user-departamento="{{ u.departamento_id if u.departamento_id else 'none' }}"
                             data-tipo-contrato="{{ u.tipo_contrato if u.tipo_contrato else 'CLT' }}"
                             data-is-rh="{{ 'true' if u.is_rh else 'false' }}"

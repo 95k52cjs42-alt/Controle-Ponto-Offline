@@ -81,6 +81,7 @@
 
 <div class="table-responsive mt-4">
     {% if registros %}
+    {% set com_foto = ids_com_foto(registros) %}
         <table class="table table-custom align-middle">
             <thead>
                 <tr class="small text-uppercase" style="color: var(--text-muted);">
@@ -124,6 +125,9 @@
 
                     <td class="fw-bold text-center" style="white-space: nowrap; color: var(--text-main);">
                         {{ reg.hora }}
+                        {% if reg.id in com_foto %}
+                        <a href="{{ url_for('admin_foto_ponto', registro_id=reg.id) }}" target="_blank" rel="noopener" class="ms-1 text-primary" title="Ver a foto tirada no quiosque"><i class="bi bi-camera-fill"></i></a>
+                        {% endif %}
                     </td>
 
                     <td class="text-center">

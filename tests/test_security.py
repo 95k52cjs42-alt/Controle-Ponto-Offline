@@ -1801,6 +1801,177 @@ class SecurityRegressionTests(unittest.TestCase):
         with self.app.app_context():
             self.assertEqual(self.module.db.session.get(self.module.Usuario, func_id).email, "func@example.com")
 
+    # ------------------------------------------------------------------
+    # Quiosque de ponto (tablet autorizado + foto)
+    # ------------------------------------------------------------------
+    CPF_VALIDO = "52998224725"
+
+    def _jpeg(self, w=640, h=480):
+        buf = io.BytesIO()
+        Image.new("RGB", (w, h), "gray").save(buf, format="JPEG")
+        buf.seek(0)
+        return buf
+
+    def _ativar_quiosque(self, client):
+        """TI ativa o aparelho do client; devolve o client já como quiosque."""
+        self.make_user(email="ti@example.com", ti=True)
+        self.login(client, email="ti@example.com")
+        r = self._post(client, "/admin/quiosque/ativar")
+        self.assertEqual(r.status_code, 302)
+        self.assertEqual(r.location, "/quiosque")
+        return client
+
+    def _csrf_quiosque(self, client):
+        r = client.get("/quiosque/api/estado")
+        self.assertEqual(r.status_code, 200)
+        return r.get_json()["csrf"]
+
+    def test_cpf_validacao(self):
+        m = self.module
+        self.assertEqual(m._cpf_normalizar("529.982.247-25"), self.CPF_VALIDO)
+        for invalido in ("529.982.247-24", "111.111.111-11", "123", "", None, "abc"):
+            self.assertIsNone(m._cpf_normalizar(invalido), invalido)
+        self.assertEqual(m._cpf_mascarado(self.CPF_VALIDO), "***.***.247-25")
+
+    def test_ativacao_do_quiosque_so_pela_ti_e_um_por_vez(self):
+        self.make_user(email="rh@example.com", rh=True)
+        with self.app.test_client() as client:
+            self.login(client, email="rh@example.com")
+            self._post(client, "/admin/quiosque/ativar")
+        with self.app.app_context():
+            self.assertEqual(self.module.QuiosqueDispositivo.query.count(), 0)
+
+        with self.app.test_client() as tablet1:
+            self._ativar_quiosque(tablet1)
+            # A conta da TI saiu do tablet; a tela do quiosque abre direto.
+            self.assertEqual(tablet1.get("/admin").status_code, 302)
+            self.assertEqual(tablet1.get("/login").location, "/quiosque")
+            r = tablet1.get("/quiosque")
+            self.assertEqual(r.status_code, 200)
+            self.assertIn("camera=(self)", r.headers["Permissions-Policy"])
+            self.assertIn("'wasm-unsafe-eval'", r.headers["Content-Security-Policy"])
+            # Outras páginas continuam sem câmera e sem WebAssembly.
+            r_login = self.app.test_client().get("/login")
+            self.assertIn("camera=()", r_login.headers["Permissions-Policy"])
+            self.assertNotIn("wasm-unsafe-eval", r_login.headers["Content-Security-Policy"])
+            # O cookie é renovado a cada uso (não expira enquanto estiver em uso).
+            self.assertIn("ponto_quiosque=", r.headers.get("Set-Cookie", ""))
+
+            # Ativar outro aparelho desativa o primeiro.
+            with self.app.test_client() as tablet2:
+                self.login(tablet2, email="ti@example.com")
+                self._post(tablet2, "/admin/quiosque/ativar")
+                self.assertEqual(tablet2.get("/quiosque").status_code, 200)
+            self.assertEqual(tablet1.get("/quiosque/api/estado").status_code, 403)
+        with self.app.app_context():
+            self.assertEqual(self.module.QuiosqueDispositivo.query.count(), 1)
+
+    def test_sem_autorizacao_nao_ha_quiosque(self):
+        self.make_user()
+        with self.app.test_client() as client:
+            self.assertEqual(client.get("/quiosque").location, "/login")
+            self.assertEqual(client.get("/quiosque/api/estado").status_code, 403)
+            # Nem um usuário logado comum vira quiosque.
+            self.login(client)
+            self.assertEqual(client.get("/quiosque").location, "/login")
+
+    def test_quiosque_identifica_e_registra_com_foto(self):
+        func_id = self.make_user(email="func@example.com")
+        with self.app.app_context():
+            self.module.db.session.get(self.module.Usuario, func_id).cpf = self.CPF_VALIDO
+            self.module.db.session.commit()
+        self.make_user(email="rh@example.com", rh=True)
+        with self.app.test_client() as tablet:
+            self._ativar_quiosque(tablet)
+            csrf = self._csrf_quiosque(tablet)
+            h = {"X-CSRF-Token": csrf}
+            # Sem CSRF: recusado.
+            self.assertEqual(tablet.post("/quiosque/api/identificar", json={"identificador": "func@example.com"}).status_code, 403)
+            self.assertEqual(tablet.post("/quiosque/api/identificar", headers=h, json={"identificador": "ninguem@example.com"}).status_code, 404)
+            self.assertEqual(tablet.post("/quiosque/api/identificar", headers=h, json={"identificador": "529.982.247-24"}).status_code, 404)
+            r = tablet.post("/quiosque/api/identificar", headers=h, json={"identificador": "529.982.247-25"})
+            self.assertEqual(r.status_code, 200)
+            dados = r.get_json()
+            self.assertEqual(dados["proximo"], "Entrada")
+            self.assertEqual(dados["nome"], "Usuário <Teste>")
+            token = dados["token"]
+
+            # Token adulterado, foto inválida: nada é registrado.
+            self.assertEqual(tablet.post("/quiosque/api/registrar", data={
+                "_csrf_token": csrf, "token": token + "x", "foto": (self._jpeg(), "f.jpg")},
+                content_type="multipart/form-data").status_code, 400)
+            self.assertEqual(tablet.post("/quiosque/api/registrar", data={
+                "_csrf_token": csrf, "token": token, "foto": (io.BytesIO(b"nao e imagem"), "f.jpg")},
+                content_type="multipart/form-data").status_code, 400)
+            with self.app.app_context():
+                self.assertEqual(self.module.RegistroPonto.query.count(), 0)
+
+            r = tablet.post("/quiosque/api/registrar", data={
+                "_csrf_token": csrf, "token": token, "foto": (self._jpeg(1280, 960), "f.jpg")},
+                content_type="multipart/form-data")
+            self.assertEqual(r.status_code, 200, r.get_data(as_text=True))
+            self.assertEqual(r.get_json()["tipo"], "Entrada")
+            # Segunda foto logo em seguida: anti-duplicata.
+            r2 = tablet.post("/quiosque/api/registrar", data={
+                "_csrf_token": csrf, "token": token, "foto": (self._jpeg(), "f.jpg")},
+                content_type="multipart/form-data")
+            self.assertEqual(r2.status_code, 409)
+
+        with self.app.app_context():
+            m = self.module
+            reg = m.RegistroPonto.query.one()
+            self.assertEqual((reg.usuario_id, reg.tipo), (func_id, "Entrada"))
+            foto = m.FotoPonto.query.filter_by(registro_id=reg.id).one()
+            with Image.open(io.BytesIO(foto.dados)) as img:
+                self.assertEqual(img.format, "JPEG")
+                self.assertEqual(img.width, m.QUIOSQUE_FOTO_LARGURA)  # reduzida
+            reg_id = reg.id
+
+        # RH vê a foto (e o ícone no histórico); colaborador não.
+        with self.app.test_client() as client:
+            self.login(client, email="rh@example.com")
+            r = client.get(f"/admin/ponto/{reg_id}/foto")
+            self.assertEqual((r.status_code, r.content_type), (200, "image/jpeg"))
+            self.assertIn(f"/admin/ponto/{reg_id}/foto", client.get("/admin/fragment/historico").get_data(as_text=True))
+        with self.app.test_client() as client:
+            self.login(client, email="func@example.com")
+            self.assertNotEqual(client.get(f"/admin/ponto/{reg_id}/foto").status_code, 200)
+
+    def test_excluir_registro_apaga_a_foto(self):
+        self.make_user(email="rh@example.com", rh=True)
+        func_id = self.make_user(email="func@example.com")
+        with self.app.app_context():
+            m = self.module
+            hoje = m._local_now().strftime("%d/%m/%Y")
+            reg = m.RegistroPonto(data=hoje, tipo="Entrada", hora="08:00:00", usuario_id=func_id)
+            reg.foto = m.FotoPonto(dados=b"x")
+            m.db.session.add(reg)
+            m.db.session.commit()
+            reg_id = reg.id
+        with self.app.test_client() as client:
+            self.login(client, email="rh@example.com")
+            self._post(client, f"/admin/excluir-ponto/{reg_id}")
+        with self.app.app_context():
+            self.assertEqual(self.module.FotoPonto.query.count(), 0)
+
+    def test_cpf_no_cadastro(self):
+        self.make_user(email="rh@example.com", rh=True)
+        a_id = self.make_user(email="a@example.com")
+        b_id = self.make_user(email="b@example.com")
+        base = {"nome": "Usuário <Teste>", "tipo_contrato": "CLT", "departamento_id": "none"}
+        with self.app.test_client() as client:
+            self.login(client, email="rh@example.com")
+            self._post(client, f"/admin/usuarios/{a_id}/atualizar", email="a@example.com", cpf="111.111.111-11", **base)
+            self._post(client, f"/admin/usuarios/{a_id}/atualizar", email="a@example.com", cpf="529.982.247-25", **base)
+            self._post(client, f"/admin/usuarios/{b_id}/atualizar", email="b@example.com", cpf="52998224725", **base)
+        with self.app.app_context():
+            m = self.module
+            self.assertEqual(m.db.session.get(m.Usuario, a_id).cpf, self.CPF_VALIDO)
+            self.assertIsNone(m.db.session.get(m.Usuario, b_id).cpf)  # duplicado recusado
+            log = m.LogAuditoria.query.filter(m.LogAuditoria.acao.like("%CPF%")).one().acao
+            self.assertIn("***.***.247-25", log)
+            self.assertNotIn(self.CPF_VALIDO, log)
+
     def test_comando_de_emergencia_redefine_senha(self):
         uid = self.make_user(email="ti@example.com", ti=True)
         runner = self.app.test_cli_runner()

@@ -973,6 +973,10 @@
                             <input type="email" class="form-control" name="email" required style="background: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main);">
                         </div>
                         <div class="mb-3">
+                            <label for="novoCpf" class="form-label text-muted small">CPF <span class="opacity-75">(opcional, para o quiosque)</span></label>
+                            <input type="text" class="form-control js-cpf" id="novoCpf" name="cpf" inputmode="numeric" maxlength="14" placeholder="000.000.000-00" autocomplete="off" style="background: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main);">
+                        </div>
+                        <div class="mb-3">
                             <label for="tipo_contrato" class="form-label text-muted small">Tipo de Contrato</label>
                             <select name="tipo_contrato" class="form-select" required style="background: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main);">
                                 <option value="CLT">CLT</option>
@@ -2000,6 +2004,10 @@
                         <div id="avisoEmailTi" class="cfg-dica mt-1 d-none"><i class="bi bi-lock me-1"></i>Conta da TI: só a TI pode alterar o e-mail.</div>
                         <div id="avisoEmailMudou" class="cfg-dica text-warning mt-1 d-none"><i class="bi bi-exclamation-triangle me-1"></i>A pessoa passará a entrar com o novo e-mail. Avise-a.</div>
                     </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="modalUserCpf">CPF <span class="fw-normal">(para bater ponto no quiosque)</span></label>
+                        <input type="text" name="cpf" id="modalUserCpf" form="formConfigurarUsuario" inputmode="numeric" maxlength="14" placeholder="000.000.000-00" autocomplete="off" class="form-control cfg-campo js-cpf">
+                    </div>
                     <div class="row g-3">
                         <div class="col-5">
                             <label class="form-label" for="modalUserTipoContrato">Contrato</label>
@@ -2082,6 +2090,15 @@
 </div>
 
 <script nonce="{{ csp_nonce() }}">
+    // CPF: máscara 000.000.000-00 enquanto digita (o servidor valida os dígitos).
+    function formatarCpf(v) {
+        const d = (v || '').replace(/\D/g, '').slice(0, 11);
+        return d.replace(/^(\d{3})(\d)/, '$1.$2').replace(/^(\d{3})\.(\d{3})(\d)/, '$1.$2.$3').replace(/\.(\d{3})(\d{1,2})$/, '.$1-$2');
+    }
+    document.addEventListener('input', (e) => {
+        if (e.target.classList && e.target.classList.contains('js-cpf')) e.target.value = formatarCpf(e.target.value);
+    });
+
     const modalConfigurar = document.getElementById('modalConfigurarUsuario');
     if (modalConfigurar) {
         const souTi = {{ 'true' if current_user.is_ti else 'false' }};
@@ -2136,6 +2153,7 @@
                 const campoEmail = document.getElementById('modalUserEmail');
                 campoNome.value = nome;
                 campoEmail.value = email;
+                document.getElementById('modalUserCpf').value = formatarCpf(button.getAttribute('data-user-cpf') || '');
                 // RH sem papel TI não altera o e-mail de contas da TI (o servidor também recusa).
                 const emailTravado = alvoTi && !souTi;
                 campoEmail.readOnly = emailTravado;

@@ -1,0 +1,8 @@
+MediaPipe Tasks Vision 1.1.1 (@mediapipe/tasks-vision, Apache-2.0, Google)
+https://www.npmjs.com/package/@mediapipe/tasks-vision
+Modelo: blaze_face_short_range (float16, v1)
+https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite
+
+Usado pela tela do quiosque para detectar o rosto na moldura e tirar a foto
+automaticamente. Roda inteiro no aparelho (WebAssembly); nenhum vídeo sai dele.
+Para atualizar: baixar a nova versão do pacote npm e substituir estes arquivos.

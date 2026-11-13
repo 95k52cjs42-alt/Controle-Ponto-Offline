@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="pt-br" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#030825">
+    <link rel="manifest" href="{{ url_for('manifesto_pwa') }}">
+    <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='icons/favicon-32.png') }}">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/apple-touch-icon.png') }}">
+    <title>Quiosque | 4Lab Orbit</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet" integrity="sha384-Ay26V7L8bsJTsX9Sxclnvsn+hkdiwRnrjZJXqKmkIDobPgIIWBOVguEcQQLDuhfN" crossorigin="anonymous">
+    <style>
+        :root {
+            --fundo: #030825; --cartao: #0f172a; --borda: #1f2a44; --texto: #f8fafc; --suave: #94a3b8;
+            --azul: #3b82f6; --azul-2: #2563eb; --verde: #10b981; --vermelho: #f43f5e; --ambar: #f59e0b;
+        }
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        [hidden] { display: none !important; }
+        .me-1 { margin-right: .25rem; } .mb-0 { margin-bottom: 0 !important; } .mt-3 { margin-top: 1rem; }
+        html, body { margin: 0; height: 100%; background: var(--fundo); color: var(--texto); font-family: 'Outfit', system-ui, sans-serif; overflow: hidden; user-select: none; -webkit-user-select: none; }
+        body { background: radial-gradient(ellipse at 50% 30%, #0b1640 0%, var(--fundo) 70%); }
+        .tela { position: fixed; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center; padding: max(24px, env(safe-area-inset-top)) 24px max(24px, env(safe-area-inset-bottom)); text-align: center; }
+        .tela.ativa { display: flex; animation: entrar .25s ease-out; }
+        @keyframes entrar { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+        .marca { position: fixed; top: max(18px, env(safe-area-inset-top)); left: 24px; display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 1.15rem; opacity: .9; z-index: 5; }
+        .marca img { width: 40px; height: 40px; border-radius: 11px; }
+
+        .relogio { font-size: clamp(4.5rem, 14vw, 9rem); font-weight: 800; letter-spacing: -2px; line-height: 1; font-variant-numeric: tabular-nums; }
+        .data { color: var(--suave); font-size: clamp(1.1rem, 2.6vw, 1.5rem); margin: .6rem 0 3rem; text-transform: capitalize; }
+
+        .btn-q { border: none; border-radius: 22px; font-family: inherit; font-weight: 700; cursor: pointer; transition: transform .12s ease, filter .12s ease; display: inline-flex; align-items: center; justify-content: center; gap: .6rem; }
+        .btn-q:active { transform: scale(.97); }
+        .btn-q:disabled { opacity: .5; }
+        .btn-principal { background: linear-gradient(135deg, var(--azul), var(--azul-2)); color: #fff; font-size: clamp(1.4rem, 3.4vw, 2rem); padding: 1.4rem 3.2rem; box-shadow: 0 14px 40px rgba(37, 99, 235, .35); }
+        .btn-gigante { font-size: clamp(1.8rem, 4.6vw, 2.6rem); padding: 1.8rem 4.5rem; border-radius: 28px; animation: pulso 2.6s ease-in-out infinite; }
+        @keyframes pulso { 0%, 100% { box-shadow: 0 14px 40px rgba(37, 99, 235, .35); } 50% { box-shadow: 0 14px 60px rgba(37, 99, 235, .6); } }
+        .btn-secundario { background: var(--cartao); color: var(--texto); border: 1px solid var(--borda); font-size: 1.2rem; padding: 1.1rem 2.2rem; }
+
+        .cartao { background: rgba(15, 23, 42, .85); border: 1px solid var(--borda); border-radius: 28px; padding: 2.2rem; width: min(560px, 100%); box-shadow: 0 20px 60px rgba(0, 0, 0, .45); }
+        h1.titulo { font-size: clamp(1.6rem, 3.6vw, 2.2rem); font-weight: 700; margin: 0 0 .4rem; }
+        .sub { color: var(--suave); font-size: 1.1rem; margin: 0 0 1.6rem; }
+
+        .seletor { display: flex; background: var(--fundo); border: 1px solid var(--borda); border-radius: 16px; padding: 5px; margin-bottom: 1.2rem; }
+        .seletor button { flex: 1; border: none; background: none; color: var(--suave); font: 600 1.1rem 'Outfit', sans-serif; padding: .8rem; border-radius: 12px; cursor: pointer; }
+        .seletor button.ativo { background: var(--azul); color: #fff; }
+        .campo { width: 100%; font: 600 1.6rem 'Outfit', sans-serif; text-align: center; background: var(--fundo); color: var(--texto); border: 2px solid var(--borda); border-radius: 18px; padding: 1.1rem; outline: none; user-select: text; -webkit-user-select: text; }
+        .campo:focus { border-color: var(--azul); box-shadow: 0 0 0 4px rgba(59, 130, 246, .2); }
+        .erro-campo { color: var(--vermelho); min-height: 1.6rem; margin: .7rem 0 .3rem; font-size: 1.05rem; }
+        .acoes { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; margin-top: 1rem; }
+
+        .avatar { width: 112px; height: 112px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 3rem; font-weight: 800; background: rgba(59, 130, 246, .18); color: var(--azul); border: 2px solid rgba(59, 130, 246, .4); margin-bottom: 1.2rem; }
+        .nome-grande { font-size: clamp(1.8rem, 4.4vw, 2.6rem); font-weight: 700; margin: 0; }
+        .chip { display: inline-flex; align-items: center; gap: .4rem; padding: .45rem 1rem; border-radius: 999px; font-weight: 700; font-size: 1.1rem; margin: 1rem 0 1.4rem; }
+        .chip.entrada { background: rgba(16, 185, 129, .15); color: #34d399; border: 1px solid rgba(16, 185, 129, .4); }
+        .chip.saida { background: rgba(245, 158, 11, .15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, .4); }
+
+        /* Câmera: vídeo espelhado, máscara escura com a moldura oval e o anel de progresso. */
+        #tela-camera { padding: 0; justify-content: flex-start; }
+        .palco { position: relative; width: 100%; flex: 1; overflow: hidden; background: #000; }
+        .palco video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+        .palco svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+        .instrucao { position: absolute; left: 50%; transform: translateX(-50%); bottom: max(130px, calc(env(safe-area-inset-bottom) + 120px)); background: rgba(3, 8, 37, .78); border: 1px solid var(--borda); padding: .9rem 1.6rem; border-radius: 18px; font-size: clamp(1.2rem, 3vw, 1.6rem); font-weight: 600; white-space: nowrap; backdrop-filter: blur(6px); }
+        .instrucao.ok { border-color: var(--verde); color: #6ee7b7; }
+        .topo-camera { position: absolute; top: max(18px, env(safe-area-inset-top)); left: 0; right: 0; text-align: center; font-size: 1.3rem; font-weight: 600; text-shadow: 0 2px 10px #000; }
+        .rodape-camera { position: absolute; bottom: max(24px, env(safe-area-inset-bottom)); left: 0; right: 0; display: flex; gap: 1rem; justify-content: center; }
+        .flash { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; }
+        .flash.dispara { animation: flash .35s ease-out; }
+        @keyframes flash { from { opacity: .85; } to { opacity: 0; } }
+
+        .spinner { width: 72px; height: 72px; border-radius: 50%; border: 6px solid var(--borda); border-top-color: var(--azul); animation: girar 1s linear infinite; margin-bottom: 1.4rem; }
+        @keyframes girar { to { transform: rotate(360deg); } }
+
+        .icone-grande { font-size: 6rem; line-height: 1; margin-bottom: 1rem; }
+        .sucesso .icone-grande { color: var(--verde); }
+        .foto-mini { width: 120px; height: 160px; object-fit: cover; border-radius: 18px; border: 3px solid var(--verde); margin: 1rem 0; }
+        .hora-registro { font-size: clamp(2.6rem, 7vw, 4rem); font-weight: 800; font-variant-numeric: tabular-nums; }
+        .contagem { color: var(--suave); margin-top: 1.4rem; }
+        .aviso-rodape { position: fixed; bottom: max(14px, env(safe-area-inset-bottom)); left: 0; right: 0; color: var(--suave); font-size: .95rem; opacity: .75; }
+    </style>
+</head>
+<body>
+    <div class="marca"><img src="{{ url_for('static', filename='icons/icon-192.png') }}" alt=""><span>4Lab Orbit</span></div>
+
+    <!-- 1. Início -->
+    <section class="tela ativa" id="tela-inicio">
+        <div class="relogio" id="relogio">--:--</div>
+        <div class="data" id="data"></div>
+        <button class="btn-q btn-principal btn-gigante" id="btnBater"><i class="bi bi-fingerprint"></i> Bater ponto</button>
+        <div class="aviso-rodape"><i class="bi bi-camera me-1"></i> Uma foto do rosto é registrada junto com a marcação.</div>
+    </section>
+
+    <!-- 2. Identificação -->
+    <section class="tela" id="tela-identificar">
+        <form class="cartao" id="formIdentificar" autocomplete="off" novalidate>
+            <h1 class="titulo">Quem está batendo o ponto?</h1>
+            <p class="sub">Digite seu CPF ou e-mail</p>
+            <div class="seletor" role="tablist">
+                <button type="button" class="ativo" data-modo="cpf"><i class="bi bi-123 me-1"></i> CPF</button>
+                <button type="button" data-modo="email"><i class="bi bi-envelope me-1"></i> E-mail</button>
+            </div>
+            <input class="campo" id="campoIdent" inputmode="numeric" placeholder="000.000.000-00" maxlength="100" autocapitalize="none" autocorrect="off" spellcheck="false">
+            <div class="erro-campo" id="erroIdent" role="alert"></div>
+            <div class="acoes">
+                <button type="button" class="btn-q btn-secundario" data-acao="voltar">Cancelar</button>
+                <button type="submit" class="btn-q btn-principal" id="btnContinuar">Continuar <i class="bi bi-arrow-right"></i></button>
+            </div>
+        </form>
+    </section>
+
+    <!-- 3. Confirmação -->
+    <section class="tela" id="tela-confirmar">
+        <div class="cartao">
+            <div class="avatar" id="confAvatar"></div>
+            <p class="nome-grande" id="confNome"></p>
+            <div class="chip" id="confTipo"></div>
+            <p class="sub mb-0">É você? Em seguida a câmera abre para a foto.</p>
+            <div class="acoes" style="margin-top: 1.6rem;">
+                <button type="button" class="btn-q btn-secundario" data-acao="voltar">Não sou eu</button>
+                <button type="button" class="btn-q btn-principal" id="btnSouEu"><i class="bi bi-check-lg"></i> Sou eu</button>
+            </div>
+        </div>
+    </section>
+
+    <!-- 4. Câmera -->
+    <section class="tela" id="tela-camera">
+        <div class="palco" id="palco">
+            <video id="video" playsinline muted autoplay></video>
+            <svg id="moldura" aria-hidden="true">
+                <defs><mask id="recorte"><rect width="100%" height="100%" fill="#fff"/><ellipse id="ovalMascara" fill="#000"/></mask></defs>
+                <rect width="100%" height="100%" fill="rgba(3,8,37,.72)" mask="url(#recorte)"/>
+                <ellipse id="ovalBorda" fill="none" stroke="rgba(255,255,255,.55)" stroke-width="4" stroke-dasharray="14 10"/>
+                <ellipse id="ovalProgresso" fill="none" stroke="#10b981" stroke-width="8" stroke-linecap="round"/>
+            </svg>
+            <div class="flash" id="flash"></div>
+            <div class="topo-camera" id="cameraNome"></div>
+            <div class="instrucao" id="instrucao">Abrindo a câmera…</div>
+            <div class="rodape-camera">
+                <button type="button" class="btn-q btn-secundario" data-acao="voltar">Cancelar</button>
+                <button type="button" class="btn-q btn-principal" id="btnFotoManual" hidden><i class="bi bi-camera"></i> Tirar foto</button>
+            </div>
+        </div>
+    </section>
+
+    <!-- 5. Enviando -->
+    <section class="tela" id="tela-enviando">
+        <div class="spinner"></div>
+        <h1 class="titulo">Registrando…</h1>
+    </section>
+
+    <!-- 6. Sucesso -->
+    <section class="tela sucesso" id="tela-sucesso">
+        <div class="icone-grande"><i class="bi bi-check-circle-fill"></i></div>
+        <h1 class="titulo" id="sucTitulo"></h1>
+        <div class="hora-registro" id="sucHora"></div>
+        <img class="foto-mini" id="sucFoto" alt="">
+        <p class="sub mb-0" id="sucNome"></p>
+        <button type="button" class="btn-q btn-principal mt-3" data-acao="voltar" style="margin-top: 1.4rem;">Concluir</button>
+        <div class="contagem" id="sucContagem"></div>
+    </section>
+
+    <!-- 7. Erro -->
+    <section class="tela" id="tela-erro">
+        <div class="icone-grande" style="color: var(--vermelho);"><i class="bi bi-exclamation-octagon"></i></div>
+        <h1 class="titulo">Não deu certo</h1>
+        <p class="sub" id="erroMsg"></p>
+        <button type="button" class="btn-q btn-principal" data-acao="voltar">Voltar ao início</button>
+    </section>
+
+    <script type="module" nonce="{{ csp_nonce() }}">
+        const BASE_MP = "{{ url_for('static', filename='quiosque/mediapipe') }}";
+        const $ = (id) => document.getElementById(id);
+        const estado = { csrf: null, token: null, nome: '', modo: 'cpf', stream: null, detector: null,
+                         detectorFalhou: false, loop: null, encaixadoDesde: 0, capturando: false,
+                         inatividade: null, fotoUrl: null };
+
+        // ---------- Utilidades ----------
+        function mostrar(id) {
+            document.querySelectorAll('.tela').forEach(t => t.classList.toggle('ativa', t.id === id));
+            clearTimeout(estado.inatividade);
+            // Fora do início, volta sozinho após 45 s sem conclusão (alguém desistiu no meio).
+            if (id !== 'tela-inicio' && id !== 'tela-enviando') estado.inatividade = setTimeout(reiniciar, 45000);
+        }
+        function reiniciar() {
+            pararCamera();
+            estado.token = null; estado.capturando = false;
+            if (estado.fotoUrl) { URL.revokeObjectURL(estado.fotoUrl); estado.fotoUrl = null; }
+            $('campoIdent').value = ''; $('erroIdent').textContent = '';
+            mostrar('tela-inicio');
+        }
+        function erro(msg) { pararCamera(); $('erroMsg').textContent = msg; mostrar('tela-erro'); }
+        function formatarCpf(v) {
+            const d = v.replace(/\D/g, '').slice(0, 11);
+            return d.replace(/^(\d{3})(\d)/, '$1.$2').replace(/^(\d{3})\.(\d{3})(\d)/, '$1.$2.$3').replace(/\.(\d{3})(\d{1,2})$/, '.$1-$2');
+        }
+
+        // ---------- Relógio, sessão viva e tela acesa ----------
+        function tique() {
+            const agora = new Date();
+            $('relogio').textContent = agora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+            $('data').textContent = agora.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
+            // De madrugada, parado no início: recarrega para pegar atualizações do sistema.
+            if (agora.getHours() === 3 && agora.getMinutes() === 30 && agora.getSeconds() < 2 && $('tela-inicio').classList.contains('ativa')) location.reload();
+        }
+        setInterval(tique, 1000); tique();
+
+        async function atualizarEstado() {
+            try {
+                const r = await fetch('/quiosque/api/estado', { credentials: 'same-origin', cache: 'no-store' });
+                if (r.status === 403) { location.href = '/login'; return false; }  // a TI desativou o tablet
+                if (r.ok) { estado.csrf = (await r.json()).csrf; return true; }
+            } catch (_) { /* sem rede: tenta de novo depois */ }
+            return false;
+        }
+        atualizarEstado();
+        setInterval(atualizarEstado, 5 * 60 * 1000);
+
+        let travaTela = null;
+        async function manterTelaAcesa() {
+            try { if ('wakeLock' in navigator && !travaTela) { travaTela = await navigator.wakeLock.request('screen'); travaTela.addEventListener('release', () => { travaTela = null; }); } } catch (_) {}
+        }
+        document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { manterTelaAcesa(); atualizarEstado(); } });
+        document.addEventListener('pointerdown', manterTelaAcesa, { once: false, passive: true });
+
+        // ---------- Navegação ----------
+        document.addEventListener('click', (e) => { if (e.target.closest('[data-acao="voltar"]')) reiniciar(); });
+        $('btnBater').addEventListener('click', () => {
+            mostrar('tela-identificar');
+            setTimeout(() => $('campoIdent').focus(), 50);
+            prepararDetector();  // carrega o detector enquanto a pessoa digita
+        });
+
+        document.querySelectorAll('.seletor button').forEach(b => b.addEventListener('click', () => {
+            estado.modo = b.dataset.modo;
+            document.querySelectorAll('.seletor button').forEach(x => x.classList.toggle('ativo', x === b));
+            const c = $('campoIdent');
+            c.value = ''; $('erroIdent').textContent = '';
+            c.inputMode = estado.modo === 'cpf' ? 'numeric' : 'email';
+            c.placeholder = estado.modo === 'cpf' ? '000.000.000-00' : 'seu@email.com';
+            c.focus();
+        }));
+        $('campoIdent').addEventListener('input', (e) => {
+            if (estado.modo === 'cpf') e.target.value = formatarCpf(e.target.value);
+            $('erroIdent').textContent = '';
+        });
+
+        $('formIdentificar').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const valor = $('campoIdent').value.trim();
+            if (estado.modo === 'cpf' && valor.replace(/\D/g, '').length !== 11) { $('erroIdent').textContent = 'O CPF tem 11 números.'; return; }
+            if (estado.modo === 'email' && !valor.includes('@')) { $('erroIdent').textContent = 'Digite o e-mail completo.'; return; }
+            $('btnContinuar').disabled = true;
+            try {
+                if (!estado.csrf) await atualizarEstado();
+                const r = await fetch('/quiosque/api/identificar', {
+                    method: 'POST', credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': estado.csrf || '' },
+                    body: JSON.stringify({ identificador: valor }),
+                });
+                const d = await r.json().catch(() => ({}));
+                if (r.status === 403 && !d.erro) { await atualizarEstado(); $('erroIdent').textContent = 'Tente de novo.'; return; }
+                if (!r.ok) { $('erroIdent').textContent = d.erro || 'Não foi possível continuar. Tente de novo.'; return; }
+                estado.token = d.token; estado.nome = d.nome;
+                $('confAvatar').textContent = d.inicial;
+                $('confNome').textContent = d.nome;
+                const chip = $('confTipo');
+                chip.className = 'chip ' + (d.proximo === 'Saída' ? 'saida' : 'entrada');
+                chip.innerHTML = '';
+                const icone = document.createElement('i');
+                icone.className = 'bi ' + (d.proximo === 'Saída' ? 'bi-box-arrow-right' : 'bi-box-arrow-in-right');
+                chip.append(icone, document.createTextNode(' Registrar ' + d.proximo));
+                mostrar('tela-confirmar');
+            } catch (_) {
+                $('erroIdent').textContent = 'Sem conexão. Tente de novo.';
+            } finally {
+                $('btnContinuar').disabled = false;
+            }
+        });
+
+        $('btnSouEu').addEventListener('click', abrirCamera);
+        $('btnFotoManual').addEventListener('click', () => capturar());
+
+        // ---------- Detector de rosto (MediaPipe, roda no próprio tablet) ----------
+        let carregandoDetector = null;
+        function prepararDetector() {
+            if (estado.detector || estado.detectorFalhou) return Promise.resolve(estado.detector);
+            if (carregandoDetector) return carregandoDetector;
+            carregandoDetector = (async () => {
+                try {
+                    const { FaceDetector } = await import(BASE_MP + '/vision_bundle.mjs');
+                    estado.detector = await FaceDetector.createFromOptions(
+                        { wasmLoaderPath: BASE_MP + '/vision_wasm_internal.js', wasmBinaryPath: BASE_MP + '/vision_wasm_internal.wasm' },
+                        { baseOptions: { modelAssetPath: BASE_MP + '/blaze_face_short_range.tflite', delegate: 'CPU' },
+                          runningMode: 'VIDEO', minDetectionConfidence: 0.6 });
+                } catch (err) {
+                    console.warn('Detector de rosto indisponível; usando foto manual.', err);
+                    estado.detectorFalhou = true;
+                }
+                return estado.detector;
+            })();
+            return carregandoDetector;
+        }
+
+        // ---------- Câmera ----------
+        let oval = { cx: 0, cy: 0, rx: 0, ry: 0 };
+        function desenharMoldura() {
+            const palco = $('palco'); const w = palco.clientWidth, h = palco.clientHeight;
+            const rx = Math.min(w * 0.32, h * 0.27), ry = rx * 1.32;
+            oval = { cx: w / 2, cy: h * 0.44, rx, ry };
+            for (const id of ['ovalMascara', 'ovalBorda', 'ovalProgresso']) {
+                const el = $(id);
+                el.setAttribute('cx', oval.cx); el.setAttribute('cy', oval.cy);
+                el.setAttribute('rx', id === 'ovalProgresso' ? rx + 10 : rx); el.setAttribute('ry', id === 'ovalProgresso' ? ry + 10 : ry);
+            }
+            progresso(0);
+        }
+        function progresso(frac) {
+            const el = $('ovalProgresso');
+            const a = oval.rx + 10, b = oval.ry + 10;
+            const perimetro = Math.PI * (3 * (a + b) - Math.sqrt((3 * a + b) * (a + 3 * b)));
+            el.style.strokeDasharray = `${perimetro * frac} ${perimetro}`;
+            el.style.opacity = frac > 0 ? 1 : 0;
+        }
+        function instrucao(texto, ok = false) { const el = $('instrucao'); el.textContent = texto; el.classList.toggle('ok', ok); }
+
+        async function abrirCamera() {
+            estado.capturando = false; estado.encaixadoDesde = 0;
+            $('cameraNome').textContent = estado.nome;
+            $('btnFotoManual').hidden = true;
+            mostrar('tela-camera');
+            desenharMoldura();
+            instrucao('Abrindo a câmera…');
+            try {
+                estado.stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 960 } }, audio: false });
+            } catch (err) {
+                erro('Não foi possível usar a câmera. Verifique se o navegador tem permissão para a câmera e tente de novo.');
+                return;
+            }
+            const video = $('video');
+            video.srcObject = estado.stream;
+            try { await video.play(); } catch (_) {}
+            await prepararDetector();
+            // Sem detector (aparelho sem suporte): foto pelo botão.
+            if (!estado.detector) { instrucao('Encaixe o rosto e toque em "Tirar foto"'); $('btnFotoManual').hidden = false; return; }
+            // Rede de segurança: se não encaixar em 15 s, libera o botão manual.
+            setTimeout(() => { if ($('tela-camera').classList.contains('ativa') && !estado.capturando) $('btnFotoManual').hidden = false; }, 15000);
+            instrucao('Encaixe o rosto na moldura');
+            loopDeteccao();
+        }
+
+        function pararCamera() {
+            if (estado.loop) { cancelAnimationFrame(estado.loop); estado.loop = null; }
+            if (estado.stream) { estado.stream.getTracks().forEach(t => t.stop()); estado.stream = null; }
+            const v = $('video'); if (v) v.srcObject = null;
+        }
+
+        // Converte a caixa do rosto (coordenadas do vídeo) para a tela, considerando
+        // o object-fit: cover e o espelhamento do vídeo.
+        function caixaNaTela(box) {
+            const v = $('video'), palco = $('palco');
+            const W = palco.clientWidth, H = palco.clientHeight, vw = v.videoWidth, vh = v.videoHeight;
+            const s = Math.max(W / vw, H / vh), ox = (W - vw * s) / 2, oy = (H - vh * s) / 2;
+            const x = ox + box.originX * s, y = oy + box.originY * s, w = box.width * s, h = box.height * s;
+            return { cx: W - (x + w / 2), cy: y + h / 2, w, h };
+        }
+
+        let ultimoTempo = -1, ultimaDeteccao = 0;
+        function loopDeteccao() {
+            const v = $('video');
+            const passo = (agora) => {
+                if (!estado.stream || estado.capturando) return;
+                estado.loop = requestAnimationFrame(passo);
+                if (v.readyState < 2 || v.currentTime === ultimoTempo || agora - ultimaDeteccao < 90) return;  // ~10 fps
+                ultimoTempo = v.currentTime; ultimaDeteccao = agora;
+                let resultado;
+                try { resultado = estado.detector.detectForVideo(v, agora); } catch (_) { return; }
+                avaliar(resultado.detections || [], agora);
+            };
+            estado.loop = requestAnimationFrame(passo);
+        }
+
+        function avaliar(rostos, agora) {
+            const desencaixar = (msg) => { estado.encaixadoDesde = 0; progresso(0); instrucao(msg); };
+            if (rostos.length === 0) return desencaixar('Encaixe o rosto na moldura');
+            if (rostos.length > 1) return desencaixar('Apenas uma pessoa por vez');
+            const r = caixaNaTela(rostos[0].boundingBox);
+            const largura = r.w / (2 * oval.rx);
+            if (largura < 0.5) return desencaixar('Aproxime-se um pouco');
+            if (largura > 1.05) return desencaixar('Afaste-se um pouco');
+            if (Math.abs(r.cx - oval.cx) > oval.rx * 0.28 || Math.abs(r.cy - oval.cy) > oval.ry * 0.28) return desencaixar('Centralize o rosto na moldura');
+            // Encaixado: segura firme por ~0,8 s e tira a foto.
+            if (!estado.encaixadoDesde) estado.encaixadoDesde = agora;
+            const frac = Math.min(1, (agora - estado.encaixadoDesde) / 800);
+            progresso(frac);
+            instrucao('Perfeito, fique parado…', true);
+            if (frac >= 1) capturar();
+        }
+
+        // ---------- Foto e registro ----------
+        async function capturar() {
+            if (estado.capturando || !estado.stream) return;
+            estado.capturando = true;
+            const v = $('video');
+            if (!v.videoWidth) { estado.capturando = false; return; }
+            // Recorta a região da moldura (com folga) no quadro original, sem espelhar.
+            const palco = $('palco'), W = palco.clientWidth, H = palco.clientHeight;
+            const s = Math.max(W / v.videoWidth, H / v.videoHeight), ox = (W - v.videoWidth * s) / 2, oy = (H - v.videoHeight * s) / 2;
+            const larguraTela = oval.rx * 2.6, alturaTela = larguraTela * 4 / 3;
+            const xTelaEsq = oval.cx - larguraTela / 2, yTelaTopo = oval.cy - alturaTela / 2;
+            // A tela mostra o vídeo espelhado: x na tela -> x no vídeo.
+            let sx = (W - (xTelaEsq + larguraTela) - ox) / s, sy = (yTelaTopo - oy) / s;
+            let sw = larguraTela / s, sh = alturaTela / s;
+            sx = Math.max(0, Math.min(sx, v.videoWidth - sw)); sy = Math.max(0, Math.min(sy, v.videoHeight - sh));
+            sw = Math.min(sw, v.videoWidth); sh = Math.min(sh, v.videoHeight);
+            const canvas = document.createElement('canvas');
+            canvas.width = 600; canvas.height = 800;
+            canvas.getContext('2d').drawImage(v, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+            $('flash').classList.remove('dispara'); void $('flash').offsetWidth; $('flash').classList.add('dispara');
+            const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.85));
+            pararCamera();
+            if (!blob) { erro('Não foi possível tirar a foto. Tente de novo.'); return; }
+            estado.fotoUrl = URL.createObjectURL(blob);
+            await enviar(blob);
+        }
+
+        async function enviar(blob) {
+            mostrar('tela-enviando');
+            const form = new FormData();
+            form.append('token', estado.token || '');
+            form.append('_csrf_token', estado.csrf || '');
+            form.append('foto', blob, 'foto.jpg');
+            try {
+                const r = await fetch('/quiosque/api/registrar', { method: 'POST', credentials: 'same-origin', body: form });
+                const d = await r.json().catch(() => ({}));
+                if (!r.ok) { erro(d.erro || 'Não foi possível registrar o ponto. Tente de novo.'); return; }
+                $('sucTitulo').textContent = `${d.tipo} registrada`;
+                $('sucHora').textContent = d.hora;
+                $('sucNome').textContent = d.nome;
+                $('sucFoto').src = estado.fotoUrl;
+                mostrar('tela-sucesso');
+                let n = 6;
+                const conta = () => { $('sucContagem').textContent = `Voltando ao início em ${n} s`; };
+                conta();
+                const t = setInterval(() => { n -= 1; if (n <= 0 || !$('tela-sucesso').classList.contains('ativa')) { clearInterval(t); if (n <= 0) reiniciar(); } else conta(); }, 1000);
+            } catch (_) {
+                erro('Sem conexão com o servidor. O ponto NÃO foi registrado; tente de novo.');
+            }
+        }
+
+        window.addEventListener('resize', () => { if ($('tela-camera').classList.contains('ativa')) desenharMoldura(); });
+    </script>
+</body>
+</html>

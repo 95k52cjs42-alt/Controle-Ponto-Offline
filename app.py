@@ -47,6 +47,7 @@ from flask_login import (
     logout_user,
 )
 from flask_sqlalchemy import SQLAlchemy
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -1087,6 +1088,7 @@ class Usuario(UserMixin, db.Model):
     foto_url = db.Column(db.String(255), nullable=True)
     departamento_id = db.Column(db.Integer, db.ForeignKey('departamento.id'), nullable=True)
     tipo_contrato = db.Column(db.String(10), nullable=False, default="CLT")
+    cpf = db.Column(db.String(11), nullable=True, unique=True, index=True)  # só dígitos
     data_cadastro = db.Column(db.DateTime, default=lambda: datetime.now(ZoneInfo("America/Sao_Paulo")))
     pontos = db.relationship("RegistroPonto", backref="usuario", lazy=True)
     solicitacoes = db.relationship("SolicitacaoCorrecao", backref="usuario", lazy=True)
@@ -1463,17 +1465,25 @@ def add_security_headers(response):
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
-    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=(self)")
+    # Só a tela do quiosque usa a câmera e o detector de rosto (WebAssembly,
+    # servido pelo próprio app); no resto do sistema os dois continuam barrados.
+    eh_quiosque = request.endpoint == "quiosque"
+    response.headers.setdefault(
+        "Permissions-Policy",
+        f"camera=({'self' if eh_quiosque else ''}), microphone=(), geolocation=(self), screen-wake-lock=(self)",
+    )
     response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
     response.headers.setdefault("Cross-Origin-Resource-Policy", "same-origin")
+    wasm = " 'wasm-unsafe-eval'" if eh_quiosque else ""
+    img_blob = " blob:" if eh_quiosque else ""  # prévia da foto tirada
     response.headers.setdefault(
         "Content-Security-Policy",
         "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; "
-        f"form-action 'self'; script-src 'self' 'nonce-{csp_nonce()}' {' '.join(_CDN_SCRIPTS)}; "
+        f"form-action 'self'; script-src 'self' 'nonce-{csp_nonce()}'{wasm} {' '.join(_CDN_SCRIPTS)}; "
         "script-src-attr 'none'; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; "
         "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; "
-        "img-src 'self' data:; connect-src 'self' https://api.bigdatacloud.net",
+        f"img-src 'self' data:{img_blob}; connect-src 'self' https://api.bigdatacloud.net",
     )
     if app.config["SESSION_COOKIE_SECURE"] and request.is_secure:
         response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
@@ -1499,6 +1509,31 @@ class RegistroPonto(db.Model):
     hora = db.Column(db.String(8), nullable=False)   # HH:MM:SS
     usuario_id = db.Column(db.Integer, db.ForeignKey("usuario.id"), nullable=False)
     foi_ajustado = db.Column(db.Boolean, default=False)
+    # Foto tirada no quiosque (comprovante); sai junto com o registro.
+    foto = db.relationship("FotoPonto", uselist=False, lazy=True, cascade="all, delete-orphan", passive_deletes=True)
+
+
+class FotoPonto(db.Model):
+    """Foto do rosto tirada no quiosque no momento da batida (comprovante).
+    Guardada pelo mesmo prazo do registro; o banco apaga junto com ele."""
+    __tablename__ = "foto_ponto"
+    id = db.Column(db.Integer, primary_key=True)
+    registro_id = db.Column(db.Integer, db.ForeignKey("registro_ponto.id", ondelete="CASCADE"),
+                            nullable=False, unique=True, index=True)
+    dados = db.Column(db.LargeBinary, nullable=False)
+    mime = db.Column(db.String(30), nullable=False, default="image/jpeg")
+    criado_em = db.Column(db.DateTime, default=lambda: datetime.now(ZoneInfo("America/Sao_Paulo")))
+
+
+class QuiosqueDispositivo(db.Model):
+    """Tablet autorizado pela TI a funcionar como quiosque de ponto.
+    Não é uma conta: o aparelho guarda um token opaco (só o hash fica aqui)."""
+    __tablename__ = "quiosque_dispositivo"
+    id = db.Column(db.Integer, primary_key=True)
+    token_hash = db.Column(db.String(64), nullable=False, unique=True)
+    criado_em = db.Column(db.DateTime, default=lambda: datetime.now(ZoneInfo("America/Sao_Paulo")))
+    criado_por_nome = db.Column(db.String(100), nullable=True)
+    ultimo_uso_em = db.Column(db.DateTime, nullable=True)
 
 class SolicitacaoCorrecao(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -1614,6 +1649,10 @@ def _apply_database_migrations():
         data_type = "TIMESTAMP" if db.engine.name == "postgresql" else "DATETIME"
         db.session.execute(text(f"ALTER TABLE usuario ADD COLUMN data_cadastro {data_type}"))
         db.session.execute(text("UPDATE usuario SET data_cadastro = CURRENT_TIMESTAMP"))
+    if "cpf" not in colunas_usuario:
+        # CPF (só dígitos) para identificar a pessoa no quiosque; único quando preenchido.
+        db.session.execute(text("ALTER TABLE usuario ADD COLUMN cpf VARCHAR(11)"))
+    db.session.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_usuario_cpf ON usuario (cpf)"))
 
     colunas_ponto = [c["name"] for c in inspector.get_columns("registro_ponto")]
     if "foi_ajustado" not in colunas_ponto:
@@ -2219,6 +2258,10 @@ def _registrar_falha_login(email_hash):
 def login():
     if current_user.is_authenticated:
         return redirect(url_for("index"))
+    # Tablet autorizado como quiosque: o app abre direto na tela do quiosque
+    # (também quando o ícone da tela inicial abre "/").
+    if request.method == "GET" and _quiosque_atual() is not None:
+        return redirect(url_for("quiosque"))
 
     if request.method == "POST":
         email = request.form.get("email", "").strip().lower()[:254]
@@ -2573,6 +2616,14 @@ def admin_cadastrar_usuario():
     if Usuario.query.filter(db.func.lower(Usuario.email) == email).first():
         flash(f"Já existe um usuário com o e-mail {email}.", "danger")
         return _redirect_admin("usuarios")
+    cpf_bruto = (request.form.get("cpf") or "").strip()
+    cpf = _cpf_normalizar(cpf_bruto) if cpf_bruto else None
+    if cpf_bruto and not cpf:
+        flash("CPF inválido. Confira os números.", "danger")
+        return _redirect_admin("usuarios")
+    if cpf and Usuario.query.filter_by(cpf=cpf).first():
+        flash("Este CPF já está no cadastro de outra pessoa.", "danger")
+        return _redirect_admin("usuarios")
 
     if enviar_convite:
         # Senha aleatória descartável: o colaborador define a própria pelo link.
@@ -2591,6 +2642,7 @@ def admin_cadastrar_usuario():
         email_confirmado=True,
         tipo_contrato=tipo_contrato,
         departamento_id=departamento_id,
+        cpf=cpf,
     )
     _aplicar_senha(novo_usuario, senha, exigir_troca)
     db.session.add(novo_usuario)
@@ -2899,54 +2951,62 @@ def registrar(tipo):
 @app.route("/registrar/auto", methods=["POST"])
 @login_required
 def registrar_auto():
-    # Registra automaticamente o próximo ponto (Entrada ou Saída) baseado no último
+    novo_ponto, erro = _registrar_proximo_ponto(current_user.id)
+    if erro:
+        flash(erro, "warning" if "recentemente" in erro else "danger")
+        return redirect(url_for("index"))
+    flash(f"Ponto ({novo_ponto.tipo}) registrado às {novo_ponto.hora} com sucesso!", "success")
+    return redirect(url_for("index"))
+
+
+def _proximo_tipo_ponto(usuario_id, data_atual):
+    """Entrada ou Saída, conforme as batidas do dia (nunca fica sem próximo)."""
+    registros_hoje = RegistroPonto.query.filter_by(
+        usuario_id=usuario_id, data=data_atual
+    ).order_by(RegistroPonto.hora.asc()).all()
+    faltantes = identificar_pontos_faltantes(registros_hoje)
+    return faltantes[0] if faltantes else "Entrada"
+
+
+def _registrar_proximo_ponto(usuario_id, foto_jpeg=None):
+    """Registra o próximo ponto (Entrada/Saída) do usuário agora.
+
+    Usado pelo botão do app e pelo quiosque (que manda a foto junto, gravada
+    na mesma transação). Devolve (registro, None) ou (None, mensagem de erro).
+    """
     agora = datetime.now(ZoneInfo("America/Sao_Paulo"))
     data_atual = agora.strftime("%d/%m/%Y")
-
-    registros_hoje = RegistroPonto.query.filter_by(
-        usuario_id=current_user.id, data=data_atual
-    ).order_by(RegistroPonto.hora.asc()).all()
-
-    faltantes = identificar_pontos_faltantes(registros_hoje)
-    # Nunca fica sem um próximo ponto: sempre será "Entrada" ou "Saída"
-    proximo = faltantes[0] if faltantes else "Entrada"
     hora_atual = agora.strftime("%H:%M:%S")
+    proximo = _proximo_tipo_ponto(usuario_id, data_atual)
 
-    # Anti-duplicata: evita duplo-clique - bloqueia QUALQUER ponto criado nos últimos 5s
+    # Anti-duplicata: bloqueia QUALQUER ponto criado nos últimos 5s (duplo
+    # clique, ou duas fotos seguidas no quiosque).
     try:
-        threshold = agora - timedelta(seconds=5)
         ultimo = RegistroPonto.query.filter(
-            RegistroPonto.usuario_id == current_user.id,
-            RegistroPonto.data == data_atual
+            RegistroPonto.usuario_id == usuario_id,
+            RegistroPonto.data == data_atual,
         ).order_by(RegistroPonto.id.desc()).first()
         if ultimo:
-            dup_hora = ultimo.hora
-            dup_h, dup_m, dup_s = (int(x) for x in dup_hora.split(":"))
-            dup_dt = agora.replace(hour=dup_h, minute=dup_m, second=int(dup_s), microsecond=0)
-            if dup_dt >= threshold:
-                flash("Ponto já registrado recentemente. Por favor, aguarde.", "warning")
-                return redirect(url_for("index"))
-    except Exception:
+            dup_h, dup_m, dup_s = (int(x) for x in ultimo.hora.split(":"))
+            dup_dt = agora.replace(hour=dup_h, minute=dup_m, second=dup_s, microsecond=0)
+            if dup_dt >= agora - timedelta(seconds=5):
+                return None, "Ponto já registrado recentemente. Por favor, aguarde."
+    except (ValueError, AttributeError):
         pass
 
-    novo_ponto = RegistroPonto(
-        data=data_atual,
-        tipo=proximo,
-        hora=hora_atual,
-        usuario_id=current_user.id,
-        foi_ajustado=False,
-    )
+    novo_ponto = RegistroPonto(data=data_atual, tipo=proximo, hora=hora_atual,
+                               usuario_id=usuario_id, foi_ajustado=False)
+    if foto_jpeg is not None:
+        novo_ponto.foto = FotoPonto(dados=foto_jpeg, mime="image/jpeg")
     db.session.add(novo_ponto)
     try:
         db.session.commit()
-        _invalidar_notif_cache(current_user.id)
     except Exception:
         db.session.rollback()
-        flash("Erro ao registrar ponto automaticamente. Tente novamente.", "danger")
-        return redirect(url_for("index"))
-
-    flash(f"Ponto ({proximo}) registrado às {hora_atual} com sucesso!", "success")
-    return redirect(url_for("index"))
+        app.logger.exception("Falha ao registrar ponto do usuário %s", usuario_id)
+        return None, "Erro ao registrar ponto. Tente novamente."
+    _invalidar_notif_cache(usuario_id)
+    return novo_ponto, None
 
 @app.route("/meu_historico")
 @login_required
@@ -3668,6 +3728,17 @@ def atualizar_usuario_admin(user_id):
             flash(f"Já existe um usuário com o e-mail {email}.", "danger")
             return _redirect_admin("usuarios")
 
+    cpf_bruto = request.form.get("cpf")
+    if cpf_bruto is not None:  # campo presente no formulário (vazio = remover)
+        cpf = _cpf_normalizar(cpf_bruto) if cpf_bruto.strip() else None
+        if cpf_bruto.strip() and not cpf:
+            flash("CPF inválido. Confira os números.", "danger")
+            return _redirect_admin("usuarios")
+        if cpf and Usuario.query.filter(Usuario.cpf == cpf, Usuario.id != user.id).first():
+            flash("Este CPF já está no cadastro de outra pessoa.", "danger")
+            return _redirect_admin("usuarios")
+        user.cpf = cpf
+
     user.nome = nome
     user.email = email
     user.departamento_id = _departamento_do_form(request.form.get("departamento_id"))
@@ -3705,6 +3776,7 @@ def _resumo_cadastro(user):
     return {
         "nome": user.nome or "",
         "e-mail": (user.email or "").lower(),
+        "CPF": _cpf_mascarado(user.cpf),  # mascarado: o log não guarda o CPF inteiro
         "setor": setor.nome if setor else "nenhum",
         "contrato": user.tipo_contrato or "CLT",
     }
@@ -4587,6 +4659,7 @@ def _contexto_parametros(form=None, erros=None):
         },
         "push_ativo": VAPID is not None,
         "correcao_janela": janela_correcao(hoje),
+        "quiosque": QuiosqueDispositivo.query.first(),
     }
 
 
@@ -5798,6 +5871,230 @@ def admin_parametros_lembretes():
     registrar_log(current_user.id, "Alterou os lembretes de ponto: " + "; ".join(mudancas))
     flash("Lembretes de ponto atualizados.", "success")
     return _redirect_admin("parametros", "lembretes")
+
+
+# ==========================================
+#   QUIOSQUE DE PONTO (tablet com foto)
+# ==========================================
+# O quiosque não é uma conta: a TI autoriza um tablet, que guarda um token
+# opaco num cookie de longa duração (renovado a cada uso, então não expira
+# enquanto estiver em uso). Só um tablet fica ativo por vez. Quem bate o ponto
+# se identifica por e-mail ou CPF, confirma o nome e a câmera tira a foto
+# quando o rosto encaixa na moldura (detecção no próprio aparelho).
+
+QUIOSQUE_COOKIE = "__Host-ponto_quiosque" if app.config["SESSION_COOKIE_SECURE"] else "ponto_quiosque"
+QUIOSQUE_COOKIE_DIAS = 400            # limite dos navegadores; renovado a cada uso
+QUIOSQUE_TOKEN_IDENT_SEG = 180        # tempo entre confirmar o nome e enviar a foto
+QUIOSQUE_FOTO_MAX_BYTES = 1_500_000
+QUIOSQUE_FOTO_LARGURA = 480           # a foto guardada é reduzida (≈20–40 KB)
+app.config["RATE_LIMITS"].update({"quiosque_identificar": (40, 300), "quiosque_registrar": (40, 300)})
+
+
+def _cpf_normalizar(valor):
+    """11 dígitos de um CPF válido (confere os dígitos verificadores) ou None."""
+    digitos = re.sub(r"\D", "", valor or "")
+    if len(digitos) != 11 or digitos == digitos[0] * 11:
+        return None
+    for tamanho in (9, 10):
+        soma = sum(int(d) * (tamanho + 1 - i) for i, d in enumerate(digitos[:tamanho]))
+        if int(digitos[tamanho]) != (soma * 10 % 11) % 10:
+            return None
+    return digitos
+
+
+def _cpf_mascarado(cpf):
+    return f"***.***.{cpf[6:9]}-{cpf[9:]}" if cpf and len(cpf) == 11 else "vazio"
+
+
+def _quiosque_atual():
+    """Tablet autorizado desta requisição (pelo cookie) ou None."""
+    # Cache no objeto da requisição (o g pode ser compartilhado por contextos aninhados).
+    if hasattr(request, "_quiosque_disp"):
+        return request._quiosque_disp
+    bruto = request.cookies.get(QUIOSQUE_COOKIE, "")
+    disp = None
+    if 30 <= len(bruto) <= 200:
+        disp = QuiosqueDispositivo.query.filter_by(token_hash=_token_digest(bruto)).first()
+    request._quiosque_disp = disp
+    return disp
+
+
+def _quiosque_cookie(resposta, token_bruto):
+    resposta.set_cookie(
+        QUIOSQUE_COOKIE, token_bruto, max_age=QUIOSQUE_COOKIE_DIAS * 86400, path="/",
+        secure=app.config["SESSION_COOKIE_SECURE"], httponly=True, samesite="Strict",
+    )
+    return resposta
+
+
+def quiosque_required(f):
+    @wraps(f)
+    def decorado(*args, **kwargs):
+        disp = _quiosque_atual()
+        if disp is None:
+            if request.path.startswith("/quiosque/api/"):
+                return jsonify(erro="Este aparelho não está autorizado como quiosque."), 403
+            flash("Este aparelho não está autorizado como quiosque. Peça à TI para ativá-lo.", "warning")
+            return redirect(url_for("login"))
+        agora = _local_now()
+        if disp.ultimo_uso_em is None or agora - disp.ultimo_uso_em > timedelta(minutes=10):
+            disp.ultimo_uso_em = agora
+            db.session.commit()
+        resposta = make_response(f(*args, **kwargs))
+        # Renova o cookie a cada uso: o quiosque não "cai" enquanto estiver ligado.
+        return _quiosque_cookie(resposta, request.cookies[QUIOSQUE_COOKIE])
+    return decorado
+
+
+def _quiosque_serializer():
+    return URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="quiosque-identificacao")
+
+
+def _quiosque_buscar_pessoa(identificador):
+    ident = (identificador or "").strip()
+    if "@" in ident:
+        return Usuario.query.filter(db.func.lower(Usuario.email) == ident.lower()[:100]).first()
+    cpf = _cpf_normalizar(ident)
+    return Usuario.query.filter_by(cpf=cpf).first() if cpf else None
+
+
+def _quiosque_foto_jpeg(arquivo):
+    """Valida a foto enviada pela câmera e devolve um JPEG reduzido e limpo."""
+    if arquivo is None:
+        raise ValueError("A foto não chegou. Tente de novo.")
+    dados = arquivo.read(QUIOSQUE_FOTO_MAX_BYTES + 1)
+    if not dados or len(dados) > QUIOSQUE_FOTO_MAX_BYTES:
+        raise ValueError("Foto inválida. Tente de novo.")
+    try:
+        with Image.open(io.BytesIO(dados)) as img:
+            if img.format not in {"JPEG", "PNG", "WEBP"}:
+                raise ValueError
+            largura, altura = img.size
+            if not (100 <= largura <= 4096 and 100 <= altura <= 4096):
+                raise ValueError
+            img.verify()
+        with Image.open(io.BytesIO(dados)) as img:
+            img = ImageOps.exif_transpose(img).convert("RGB")
+            if img.width > QUIOSQUE_FOTO_LARGURA:
+                img = img.resize((QUIOSQUE_FOTO_LARGURA, round(img.height * QUIOSQUE_FOTO_LARGURA / img.width)), Image.LANCZOS)
+            saida = io.BytesIO()
+            img.save(saida, format="JPEG", quality=72, optimize=True)  # sem EXIF/metadados
+            return saida.getvalue()
+    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
+        raise ValueError("Foto inválida. Tente de novo.") from exc
+
+
+def _primeiro_e_ultimo_nome(nome):
+    partes = (nome or "").split()
+    return " ".join([partes[0], partes[-1]]) if len(partes) > 1 else (nome or "")
+
+
+@app.route("/quiosque")
+@quiosque_required
+def quiosque():
+    return render_template("quiosque.html")
+
+
+@app.route("/quiosque/api/estado")
+@quiosque_required
+def quiosque_estado():
+    """Mantém o quiosque vivo e entrega um token CSRF atual (a página fica
+    aberta o dia todo; a sessão anônima de 8h por trás dela é renovada aqui)."""
+    session.permanent = True
+    token = csrf_token()
+    session.modified = True  # regrava o cookie: a sessão anônima nunca chega a expirar
+    return jsonify(ok=True, csrf=token, hora=_local_now().strftime("%H:%M:%S"))
+
+
+@app.route("/quiosque/api/identificar", methods=["POST"])
+@quiosque_required
+def quiosque_identificar():
+    _rate_limit("quiosque_identificar", ident=f"q{_quiosque_atual().id}")
+    dados = request.get_json(silent=True) or {}
+    pessoa = _quiosque_buscar_pessoa(str(dados.get("identificador") or ""))
+    if pessoa is None:
+        return jsonify(erro="Não encontramos ninguém com esse e-mail ou CPF. Confira e tente de novo."), 404
+    hoje = _local_now().strftime("%d/%m/%Y")
+    token = _quiosque_serializer().dumps({"u": pessoa.id, "q": _quiosque_atual().id})
+    return jsonify(token=token, nome=_primeiro_e_ultimo_nome(pessoa.nome),
+                   inicial=(pessoa.nome or "?")[0].upper(), proximo=_proximo_tipo_ponto(pessoa.id, hoje))
+
+
+@app.route("/quiosque/api/registrar", methods=["POST"])
+@quiosque_required
+def quiosque_registrar():
+    disp = _quiosque_atual()
+    _rate_limit("quiosque_registrar", ident=f"q{disp.id}")
+    try:
+        dados = _quiosque_serializer().loads(request.form.get("token", ""), max_age=QUIOSQUE_TOKEN_IDENT_SEG)
+    except (BadSignature, SignatureExpired):
+        return jsonify(erro="Tempo esgotado. Comece de novo."), 400
+    if not isinstance(dados, dict) or dados.get("q") != disp.id:
+        return jsonify(erro="Tempo esgotado. Comece de novo."), 400
+    pessoa = db.session.get(Usuario, dados.get("u"))
+    if pessoa is None:
+        return jsonify(erro="Cadastro não encontrado. Fale com o RH."), 404
+    try:
+        foto = _quiosque_foto_jpeg(request.files.get("foto"))
+    except ValueError as exc:
+        return jsonify(erro=str(exc)), 400
+    registro, erro = _registrar_proximo_ponto(pessoa.id, foto_jpeg=foto)
+    if erro:
+        return jsonify(erro=erro), 409 if "recentemente" in erro else 500
+    return jsonify(ok=True, tipo=registro.tipo, hora=registro.hora[:5],
+                   nome=_primeiro_e_ultimo_nome(pessoa.nome))
+
+
+@app.route("/admin/quiosque/ativar", methods=["POST"])
+@login_required
+@ti_required
+def admin_quiosque_ativar():
+    """Transforma ESTE aparelho no quiosque: grava o token, encerra a sessão
+    de quem ativou (o tablet não fica logado na conta da TI) e abre a tela."""
+    QuiosqueDispositivo.query.delete()  # só um tablet ativo por vez
+    token = secrets.token_urlsafe(32)
+    db.session.add(QuiosqueDispositivo(token_hash=_token_digest(token), criado_por_nome=current_user.nome))
+    db.session.commit()
+    registrar_log(current_user.id, "Ativou o quiosque de ponto neste aparelho (o anterior, se havia, foi desativado)")
+    logout_user()
+    session.clear()
+    return _quiosque_cookie(redirect(url_for("quiosque")), token)
+
+
+@app.route("/admin/quiosque/desativar", methods=["POST"])
+@login_required
+@ti_required
+def admin_quiosque_desativar():
+    n = QuiosqueDispositivo.query.delete()
+    db.session.commit()
+    if n:
+        registrar_log(current_user.id, "Desativou o quiosque de ponto")
+        flash("Quiosque desativado. O tablet volta para a tela de login.", "success")
+    else:
+        flash("Não havia quiosque ativo.", "info")
+    return _redirect_admin("parametros", "quiosque")
+
+
+def _ids_com_foto(registros):
+    """Ids dos registros (da lista) que têm foto do quiosque, numa consulta só."""
+    ids = [r.id for r in registros]
+    if not ids:
+        return set()
+    return {rid for (rid,) in db.session.query(FotoPonto.registro_id).filter(FotoPonto.registro_id.in_(ids))}
+
+
+app.jinja_env.globals["ids_com_foto"] = _ids_com_foto
+
+
+@app.route("/admin/ponto/<int:registro_id>/foto")
+@login_required
+@rh_required
+def admin_foto_ponto(registro_id):
+    foto = FotoPonto.query.filter_by(registro_id=registro_id).first_or_404()
+    resposta = make_response(foto.dados)
+    resposta.headers["Content-Type"] = foto.mime
+    resposta.headers["Cache-Control"] = "private, no-store"
+    return resposta
 
 
 if __name__ == "__main__":

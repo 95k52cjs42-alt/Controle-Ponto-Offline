@@ -330,6 +330,42 @@
     </form>
 </div>
 
+<!-- Quiosque de ponto (tablet com foto) -->
+<div class="dashboard-card mt-4" id="quiosque">
+    <h5 class="fw-bold mb-1"><i class="bi bi-tablet me-2 text-primary"></i>Quiosque de ponto</h5>
+    <p class="text-muted small mb-3">
+        Um tablet fixo onde as pessoas batem o ponto com e-mail ou CPF e uma foto do rosto, tirada sozinha quando o rosto encaixa na moldura.
+        Para ativar, entre <b>no próprio tablet</b> com uma conta da TI e toque em "Ativar este aparelho". O tablet sai da sua conta e fica só na tela do quiosque, sem expirar. Só um tablet fica ativo por vez.
+    </p>
+    {% if quiosque %}
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
+        <div class="small">
+            <span class="badge rounded-pill tag-ok me-1">Ativo</span>
+            desde {{ quiosque.criado_em.strftime('%d/%m/%Y %H:%M') }}{% if quiosque.criado_por_nome %} por {{ quiosque.criado_por_nome }}{% endif %}
+            · último uso: {{ quiosque.ultimo_uso_em.strftime('%d/%m/%Y %H:%M') if quiosque.ultimo_uso_em else 'ainda não usado' }}
+        </div>
+        <div class="d-flex gap-2">
+            <form method="POST" action="{{ url_for('admin_quiosque_ativar') }}" class="m-0" data-confirm="Ativar ESTE aparelho como quiosque? O tablet atual deixa de funcionar e este sai da sua conta.">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-outline-primary btn-sm"><i class="bi bi-arrow-repeat me-1"></i> Trocar para este aparelho</button>
+            </form>
+            <form method="POST" action="{{ url_for('admin_quiosque_desativar') }}" class="m-0" data-confirm="Desativar o quiosque? O tablet volta para a tela de login.">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-outline-danger btn-sm"><i class="bi bi-x-circle me-1"></i> Desativar</button>
+            </form>
+        </div>
+    </div>
+    {% else %}
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
+        <span class="small text-muted"><span class="badge rounded-pill tag-neutral me-1">Desativado</span> Nenhum tablet configurado.</span>
+        <form method="POST" action="{{ url_for('admin_quiosque_ativar') }}" class="m-0" data-confirm="Ativar ESTE aparelho como quiosque? Você sai da sua conta neste aparelho.">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-tablet me-1"></i> Ativar este aparelho</button>
+        </form>
+    </div>
+    {% endif %}
+</div>
+
 <!-- Prazo de correção -->
 {% set jan_inicio, jan_fechamento, jan_limite = correcao_janela %}
 <div class="dashboard-card mt-4" id="correcoes">
