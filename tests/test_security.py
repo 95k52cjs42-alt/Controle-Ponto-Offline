@@ -66,6 +66,8 @@ class SecurityRegressionTests(unittest.TestCase):
             self.module._RATE_BUCKETS.clear()
             self.module._NOTIF_CACHE.clear()
             self.module._FERIADOS_CACHE.clear()
+        # O fluxo continua testado; o teste do modo desligado troca isto.
+        self.app.config["ESQUECI_SENHA_ATIVO"] = True
 
     def make_user(self, email="user@example.com", admin=False, needs_reset=False, rh=None, ti=None):
         # admin=True equivale a RH + TI; rh/ti permitem papéis isolados.
@@ -1989,6 +1991,20 @@ class SecurityRegressionTests(unittest.TestCase):
         with self.app.app_context():
             self.assertIsNone(m._get_valid_security_token(convite, m.SecurityToken.PURPOSE_INVITE))
             self.assertEqual(m.LogAuditoria.query.filter(m.LogAuditoria.acao.like("Redefiniu a senha pelo e-mail%")).count(), 1)
+
+    def test_esqueci_senha_desligado_some_do_login_e_nao_envia(self):
+        self.make_user()
+        self.app.config["ESQUECI_SENHA_ATIVO"] = False
+        with self.app.test_client() as client:
+            html = client.get("/login").get_data(as_text=True)
+            self.assertNotIn("/forgot_password", html)
+            self.assertEqual(client.get("/forgot_password").location, "/login")
+            token = self.csrf(client, "/login")
+            with patch.object(self.module, "_send_email", return_value=True) as send:
+                r = client.post("/forgot_password", data={"_csrf_token": token, "email": "user@example.com"})
+            self.assertEqual(r.location, "/login")
+            send.assert_not_called()
+            self.assertIn("Peça ao RH", client.get("/login").get_data(as_text=True))
 
     def test_log_longo_e_truncado(self):
         uid = self.make_user()

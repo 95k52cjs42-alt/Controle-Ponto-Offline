@@ -84,13 +84,18 @@
                 <div class="mb-4">
                     <div class="d-flex justify-content-between align-items-center mb-1">
                         <label for="senha" class="form-label fw-medium text-dark small m-0">Senha</label>
+                        {% if config.ESQUECI_SENHA_ATIVO %}
                         <a href="{{ url_for('forgot_password') }}" class="small text-decoration-none text-muted">Esqueceu a senha?</a>
+                        {% endif %}
                     </div>
                     <div class="position-relative">
                         <input type="password" class="form-control pe-5" id="senha" name="senha" placeholder="••••••••" required>
                         <button type="button" class="password-toggle" id="toggleSenha" title="Mostrar/Ocultar senha" tabindex="-1">
                             <i class="bi bi-eye-slash" id="senhaIcon"></i>
                         </button>
+                    </div>
+                    <div id="avisoCapsLock" class="small text-warning mt-1 d-none" role="status" aria-live="polite">
+                        <i class="bi bi-exclamation-triangle-fill me-1"></i>Caps Lock está ativado
                     </div>
                 </div>
 
@@ -108,6 +113,22 @@
                                 senhaInput.type = 'password';
                                 senhaIcon.className = 'bi bi-eye-slash';
                             }
+                        });
+                    }
+
+                    // Aviso de Caps Lock: o navegador só informa o estado em
+                    // eventos de teclado/mouse, então checa a cada tecla e clique.
+                    const avisoCapsLock = document.getElementById('avisoCapsLock');
+                    if (senhaInput && avisoCapsLock) {
+                        const checarCapsLock = function(e) {
+                            if (typeof e.getModifierState !== 'function') return;
+                            avisoCapsLock.classList.toggle('d-none', !e.getModifierState('CapsLock'));
+                        };
+                        ['keydown', 'keyup', 'mousedown'].forEach(function(evento) {
+                            senhaInput.addEventListener(evento, checarCapsLock);
+                        });
+                        senhaInput.addEventListener('blur', function() {
+                            avisoCapsLock.classList.add('d-none');
                         });
                     }
                 </script>

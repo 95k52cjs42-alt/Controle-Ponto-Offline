@@ -186,6 +186,11 @@ if app.config["TRUST_PROXY_HEADERS"]:
 # (sem o ProxyFix, toda requisição atrás do proxy parece HTTP: laço infinito).
 app.config["FORCE_HTTPS"] = IS_PRODUCTION and app.config["TRUST_PROXY_HEADERS"]
 
+# "Esqueci minha senha" depende de e-mail (Resend com domínio verificado).
+# Enquanto estiver desligado, a troca de senha é feita pelo RH.
+app.config["ESQUECI_SENHA_ATIVO"] = _env_bool("ESQUECI_SENHA_ATIVO", False)
+_MSG_SENHA_PELO_RH = "Esqueceu a senha? Peça ao RH para definir uma nova."
+
 resend.api_key = os.environ.get("RESEND_API_KEY")
 if not resend.api_key:
     print("AVISO: RESEND_API_KEY não configurada. E-mails não serão enviados.")
@@ -2201,7 +2206,7 @@ def login():
         if _conta_bloqueada(email_hash):
             registrar_log(None, f"Login bloqueado por excesso de tentativas: {email} (IP {request.remote_addr})")
             flash(f"Muitas tentativas de login para esta conta. Aguarde {LOGIN_BLOQUEIO_MIN} minutos "
-                  "ou use \"Esqueci minha senha\".", "danger")
+                  "ou peça ao RH para definir uma nova senha.", "danger")
             return render_template("login.html", email=email), 429
         user = Usuario.query.filter(db.func.lower(Usuario.email) == email).first()
         password_hash = user.senha_hash if user is not None else DUMMY_PASSWORD_HASH
@@ -2609,9 +2614,8 @@ def admin_alterar_senha_usuario(user_id):
         return _redirect_admin("usuarios")
     if user.tem_gestao:
         # Trocar a senha de outra conta de RH/TI permitiria entrar nela e
-        # assumir os papéis dela; essas contas usam "Esqueci minha senha".
-        flash(f"{user.nome} tem papel de RH/TI: a senha só pode ser trocada por ele mesmo "
-              "(perfil ou \"Esqueci minha senha\").", "danger")
+        # assumir os papéis dela; essas contas trocam a senha pelo perfil.
+        flash(f"{user.nome} tem papel de RH/TI: a senha só pode ser trocada por ele mesmo, no perfil.", "danger")
         return _redirect_admin("usuarios")
 
     senha = request.form.get("nova_senha", "")
@@ -2668,6 +2672,9 @@ def definir_senha_usuario(token):
 def forgot_password():
     if current_user.is_authenticated:
         return redirect(url_for("index"))
+    if not app.config["ESQUECI_SENHA_ATIVO"]:
+        flash(_MSG_SENHA_PELO_RH, "info")
+        return redirect(url_for("login"))
 
     if request.method == "POST":
         email = request.form.get("email", "").strip().lower()[:254]
