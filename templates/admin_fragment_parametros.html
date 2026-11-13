@@ -330,6 +330,45 @@
     </form>
 </div>
 
+<!-- Local de trabalho (raio da batida pelo app) -->
+<div class="dashboard-card mt-4" id="local">
+    <h5 class="fw-bold mb-1"><i class="bi bi-geo-alt me-2 text-primary"></i>Local de trabalho</h5>
+    <p class="text-muted small mb-3">
+        Com o raio ligado, o app só registra o ponto se o celular/computador estiver dentro da distância abaixo. A localização é pedida na hora da batida e fica guardada nela.
+        O quiosque e os lançamentos do RH não passam por essa verificação.
+    </p>
+    <form method="POST" action="{{ url_for('admin_parametros_local') }}" class="row g-3 align-items-end">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="col-12">
+            <div class="form-check form-switch small">
+                <input class="form-check-input" type="checkbox" name="geo_ativo" id="pGeoAtivo" {% if local_trabalho.ativo %}checked{% endif %}>
+                <label class="form-check-label" for="pGeoAtivo">Só permitir bater o ponto pelo app dentro do raio</label>
+            </div>
+        </div>
+        <div class="col-sm-4">
+            <label for="pGeoLat" class="form-label small fw-semibold text-muted">Latitude</label>
+            <input type="text" inputmode="decimal" class="form-control" id="pGeoLat" name="geo_lat" value="{{ local_trabalho.lat }}" placeholder="-23.550520" style="{{ campo_style }}">
+        </div>
+        <div class="col-sm-4">
+            <label for="pGeoLon" class="form-label small fw-semibold text-muted">Longitude</label>
+            <input type="text" inputmode="decimal" class="form-control" id="pGeoLon" name="geo_lon" value="{{ local_trabalho.lon }}" placeholder="-46.633308" style="{{ campo_style }}">
+        </div>
+        <div class="col-sm-4">
+            <label for="pGeoRaio" class="form-label small fw-semibold text-muted">Raio (metros)</label>
+            <input type="number" class="form-control" id="pGeoRaio" name="geo_raio_m" min="{{ geo_raio_limites[0] }}" max="{{ geo_raio_limites[1] }}" required value="{{ local_trabalho.raio_m }}" style="{{ campo_style }}">
+        </div>
+        <div class="col-12 d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-geo-atual><i class="bi bi-crosshair me-1"></i> Usar minha localização atual</button>
+                <a class="small" id="pGeoMapa" target="_blank" rel="noopener" {% if local_trabalho.lat and local_trabalho.lon %}href="https://www.google.com/maps?q={{ local_trabalho.lat }},{{ local_trabalho.lon }}"{% else %}hidden{% endif %}><i class="bi bi-map me-1"></i>Conferir no mapa</a>
+                <span class="small text-muted" id="pGeoStatus"></span>
+            </div>
+            <button type="submit" class="btn btn-outline-primary"><i class="bi bi-check-lg me-1"></i> Salvar local</button>
+        </div>
+        <div class="col-12 small text-muted">Dica: use "Usar minha localização atual" estando no escritório, com o GPS ligado. Um raio de 150 a 300 m costuma compensar a imprecisão do GPS dentro de prédios.</div>
+    </form>
+</div>
+
 <!-- Quiosque de ponto (tablet com foto) -->
 <div class="dashboard-card mt-4" id="quiosque">
     <h5 class="fw-bold mb-1"><i class="bi bi-tablet me-2 text-primary"></i>Quiosque de ponto</h5>
@@ -337,6 +376,21 @@
         Um tablet fixo onde as pessoas batem o ponto com e-mail ou CPF e uma foto do rosto, tirada sozinha quando o rosto encaixa na moldura.
         Para ativar, entre <b>no próprio tablet</b> com uma conta da TI e toque em "Ativar este aparelho". O tablet sai da sua conta e fica só na tela do quiosque, sem expirar. Só um tablet fica ativo por vez.
     </p>
+    <form method="POST" action="{{ url_for('admin_quiosque_metodo') }}" class="mb-3">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="small fw-semibold text-muted mb-2">Como a pessoa se identifica no quiosque</div>
+        <div class="d-flex flex-column gap-2 mb-2">
+            <div class="form-check">
+                <input class="form-check-input" type="radio" name="quiosque_metodo" id="pMetodoCpf" value="cpf" {% if quiosque_metodo == 'cpf' %}checked{% endif %}>
+                <label class="form-check-label small" for="pMetodoCpf"><b>CPF ou e-mail</b>: digita, confirma o nome e tira a foto.</label>
+            </div>
+            <div class="form-check">
+                <input class="form-check-input" type="radio" name="quiosque_metodo" id="pMetodoFacial" value="facial" {% if quiosque_metodo == 'facial' %}checked{% endif %}>
+                <label class="form-check-label small" for="pMetodoFacial"><b>Reconhecimento facial</b>: olha para a câmera e o sistema reconhece quem é, sem digitar. Quem não tiver rosto cadastrado (Usuários &gt; Configurar &gt; Rosto) ou não for reconhecido usa o CPF.</label>
+            </div>
+        </div>
+        <button type="submit" class="btn btn-outline-primary btn-sm"><i class="bi bi-check-lg me-1"></i> Salvar método</button>
+    </form>
     {% if quiosque %}
     <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
         <div class="small">

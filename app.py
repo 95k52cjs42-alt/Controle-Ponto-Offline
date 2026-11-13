@@ -1,10 +1,12 @@
 import io
+import math
 import os
 import re
 import time
 import hashlib
 import html
 import secrets
+import struct
 import threading
 import click
 import holidays
@@ -1093,6 +1095,7 @@ class Usuario(UserMixin, db.Model):
     pontos = db.relationship("RegistroPonto", backref="usuario", lazy=True)
     solicitacoes = db.relationship("SolicitacaoCorrecao", backref="usuario", lazy=True)
     security_tokens = db.relationship("SecurityToken", back_populates="usuario", lazy=True, cascade="all, delete-orphan")
+    rostos = db.relationship("RostoCadastrado", lazy=True, cascade="all, delete-orphan", passive_deletes=True)
 
     @property
     def tem_gestao(self):
@@ -1468,9 +1471,12 @@ def add_security_headers(response):
     # Só a tela do quiosque usa a câmera e o detector de rosto (WebAssembly,
     # servido pelo próprio app); no resto do sistema os dois continuam barrados.
     eh_quiosque = request.endpoint == "quiosque"
+    # A TI usa a câmera no painel para cadastrar rostos do reconhecimento facial.
+    camera_ti = (request.path.startswith("/admin") and current_user.is_authenticated
+                 and bool(getattr(current_user, "is_ti", False)))
     response.headers.setdefault(
         "Permissions-Policy",
-        f"camera=({'self' if eh_quiosque else ''}), microphone=(), geolocation=(self), screen-wake-lock=(self)",
+        f"camera=({'self' if eh_quiosque or camera_ti else ''}), microphone=(), geolocation=(self), screen-wake-lock=(self)",
     )
     response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
     response.headers.setdefault("Cross-Origin-Resource-Policy", "same-origin")
@@ -1509,6 +1515,11 @@ class RegistroPonto(db.Model):
     hora = db.Column(db.String(8), nullable=False)   # HH:MM:SS
     usuario_id = db.Column(db.Integer, db.ForeignKey("usuario.id"), nullable=False)
     foi_ajustado = db.Column(db.Boolean, default=False)
+    # Onde a batida foi feita pelo app (quando o raio do local de trabalho está ativo).
+    latitude = db.Column(db.Float, nullable=True)
+    longitude = db.Column(db.Float, nullable=True)
+    precisao_m = db.Column(db.Integer, nullable=True)
+    distancia_m = db.Column(db.Integer, nullable=True)  # até o local de trabalho, no momento da batida
     # Foto tirada no quiosque (comprovante); sai junto com o registro.
     foto = db.relationship("FotoPonto", uselist=False, lazy=True, cascade="all, delete-orphan", passive_deletes=True)
 
@@ -1522,6 +1533,19 @@ class FotoPonto(db.Model):
                             nullable=False, unique=True, index=True)
     dados = db.Column(db.LargeBinary, nullable=False)
     mime = db.Column(db.String(30), nullable=False, default="image/jpeg")
+    criado_em = db.Column(db.DateTime, default=lambda: datetime.now(ZoneInfo("America/Sao_Paulo")))
+
+
+class RostoCadastrado(db.Model):
+    """Assinatura facial (descritor de 128 números, float32) de um colaborador,
+    cadastrada pela TI para o reconhecimento no quiosque. Não guarda a foto.
+    Biometria é dado sensível (LGPD): só com consentimento, registrado aqui."""
+    __tablename__ = "rosto_cadastrado"
+    id = db.Column(db.Integer, primary_key=True)
+    usuario_id = db.Column(db.Integer, db.ForeignKey("usuario.id", ondelete="CASCADE"), nullable=False, index=True)
+    descritor = db.Column(db.LargeBinary, nullable=False)  # 128 x float32 = 512 bytes
+    consentimento_em = db.Column(db.DateTime, nullable=False)
+    criado_por_nome = db.Column(db.String(100), nullable=True)
     criado_em = db.Column(db.DateTime, default=lambda: datetime.now(ZoneInfo("America/Sao_Paulo")))
 
 
@@ -1657,6 +1681,15 @@ def _apply_database_migrations():
     colunas_ponto = [c["name"] for c in inspector.get_columns("registro_ponto")]
     if "foi_ajustado" not in colunas_ponto:
         db.session.execute(text("ALTER TABLE registro_ponto ADD COLUMN foi_ajustado BOOLEAN DEFAULT FALSE"))
+    tipo_real = "DOUBLE PRECISION" if db.engine.name == "postgresql" else "REAL"
+    for coluna, ddl in (
+        ("latitude", f"ALTER TABLE registro_ponto ADD COLUMN latitude {tipo_real}"),
+        ("longitude", f"ALTER TABLE registro_ponto ADD COLUMN longitude {tipo_real}"),
+        ("precisao_m", "ALTER TABLE registro_ponto ADD COLUMN precisao_m INTEGER"),
+        ("distancia_m", "ALTER TABLE registro_ponto ADD COLUMN distancia_m INTEGER"),
+    ):
+        if coluna not in colunas_ponto:
+            db.session.execute(text(ddl))
     colunas_solicitacao = [c["name"] for c in inspector.get_columns("solicitacao_correcao")]
     if "hora_original" not in colunas_solicitacao:
         db.session.execute(text("ALTER TABLE solicitacao_correcao ADD COLUMN hora_original VARCHAR(8)"))
@@ -2677,6 +2710,17 @@ def admin_cadastrar_usuario():
     return _redirect_admin("usuarios")
 
 
+# Exceção temporária à separação de funções: contas (e-mails) que podem
+# aprovar/recusar a PRÓPRIA solicitação de correção. Fica no ambiente do
+# servidor (não na tela) para ninguém conseguir se incluir pelo sistema;
+# cada uso vai para o log com a marca [AUTOAPROVAÇÃO].
+AUTOAPROVACAO_EMAILS = set(_env_list("AUTOAPROVACAO_EMAILS"))
+
+
+def _pode_autoaprovar(usuario):
+    return bool(usuario.is_rh) and (usuario.email or "").lower() in AUTOAPROVACAO_EMAILS
+
+
 def _pode_trocar_senha_de(autor, alvo):
     """TI troca a senha de qualquer conta; RH, de colaboradores e do RH,
     nunca de contas com papel TI. A própria senha é trocada pelo perfil."""
@@ -2881,6 +2925,7 @@ def index():
 
     return render_template(
         "index.html",
+        exige_localizacao=config_local_trabalho() is not None,
         ultimo_ponto=ultimo_ponto,
         data_hoje=data_hoje,
         total_solicitacoes_pendentes=total_solicitacoes_pendentes,
@@ -2910,6 +2955,10 @@ def registrar(tipo):
     if tipo not in PONTOS_PERMITIDOS:
         flash("Tipo de ponto inválido.", "danger")
         return redirect(url_for("index"))
+    local, erro_local = _checar_local_da_batida(request.form)
+    if erro_local:
+        flash(erro_local, "danger")
+        return redirect(url_for("index"))
 
     # Anti-duplicata: evita duplo-clique - bloqueia QUALQUER ponto criado nos últimos 5s
     # (o frontend também desabilita o botão; esta é a camada de segurança do servidor)
@@ -2934,7 +2983,8 @@ def registrar(tipo):
         tipo=tipo,
         hora=hora_atual,
         usuario_id=current_user.id,
-        foi_ajustado=False
+        foi_ajustado=False,
+        **(local or {}),
     )
     db.session.add(novo_ponto)
     try:
@@ -2951,12 +3001,73 @@ def registrar(tipo):
 @app.route("/registrar/auto", methods=["POST"])
 @login_required
 def registrar_auto():
-    novo_ponto, erro = _registrar_proximo_ponto(current_user.id)
+    local, erro_local = _checar_local_da_batida(request.form)
+    if erro_local:
+        flash(erro_local, "danger")
+        return redirect(url_for("index"))
+    novo_ponto, erro = _registrar_proximo_ponto(current_user.id, local=local)
     if erro:
         flash(erro, "warning" if "recentemente" in erro else "danger")
         return redirect(url_for("index"))
     flash(f"Ponto ({novo_ponto.tipo}) registrado às {novo_ponto.hora} com sucesso!", "success")
     return redirect(url_for("index"))
+
+
+# ---------- Raio do local de trabalho (batida pelo app) ----------
+GEO_RAIO_MIN, GEO_RAIO_MAX = 30, 5000
+GEO_TOLERANCIA_MAX_M = 100     # imprecisão do GPS descontada da distância, no máximo
+GEO_PRECISAO_MAX_M = 1000      # acima disso a leitura não serve (ex.: localização só por IP)
+
+
+def config_local_trabalho():
+    """Local de trabalho configurado pela TI, ou None se o raio estiver desligado."""
+    if _get_config("geo_ativo", "false") != "true":
+        return None
+    try:
+        lat, lon = float(_get_config("geo_lat", "")), float(_get_config("geo_lon", ""))
+        raio = int(_get_config("geo_raio_m", "200"))
+    except ValueError:
+        return None
+    return {"lat": lat, "lon": lon, "raio_m": raio}
+
+
+def _distancia_m(lat1, lon1, lat2, lon2):
+    """Distância em metros entre dois pontos (fórmula de haversine)."""
+    r = 6_371_000
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp, dl = p2 - p1, math.radians(lon2 - lon1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * r * math.asin(math.sqrt(a))
+
+
+def _checar_local_da_batida(form):
+    """Com o raio ativo, exige a localização do aparelho dentro dele.
+
+    Devolve (dados_do_local | None, mensagem_de_erro | None). Obs.: a posição
+    vem do navegador; impede o uso comum fora da empresa, mas não resiste a
+    quem falsificar o GPS de propósito."""
+    local = config_local_trabalho()
+    if local is None:
+        return None, None
+    try:
+        lat, lon = float(form.get("lat", "")), float(form.get("lon", ""))
+        precisao = float(form.get("precisao", "") or 9999)
+    except ValueError:
+        return None, "Ative a localização do aparelho para bater o ponto."
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180) or not math.isfinite(precisao):
+        return None, "Localização inválida. Tente de novo."
+    if precisao > GEO_PRECISAO_MAX_M:
+        return None, "Localização imprecisa demais. Ative o GPS (localização precisa) e tente de novo."
+    distancia = _distancia_m(lat, lon, local["lat"], local["lon"])
+    dados = {"latitude": lat, "longitude": lon, "precisao_m": round(precisao), "distancia_m": round(distancia)}
+    if distancia - min(precisao, GEO_TOLERANCIA_MAX_M) > local["raio_m"]:
+        return None, (f"Você está a {_formatar_distancia(distancia)} do local de trabalho "
+                      f"(o limite é {_formatar_distancia(local['raio_m'])}). O ponto não foi registrado.")
+    return dados, None
+
+
+def _formatar_distancia(metros):
+    return f"{metros / 1000:.1f} km".replace(".", ",") if metros >= 1000 else f"{round(metros)} m"
 
 
 def _proximo_tipo_ponto(usuario_id, data_atual):
@@ -2968,7 +3079,7 @@ def _proximo_tipo_ponto(usuario_id, data_atual):
     return faltantes[0] if faltantes else "Entrada"
 
 
-def _registrar_proximo_ponto(usuario_id, foto_jpeg=None):
+def _registrar_proximo_ponto(usuario_id, foto_jpeg=None, local=None):
     """Registra o próximo ponto (Entrada/Saída) do usuário agora.
 
     Usado pelo botão do app e pelo quiosque (que manda a foto junto, gravada
@@ -2995,7 +3106,7 @@ def _registrar_proximo_ponto(usuario_id, foto_jpeg=None):
         pass
 
     novo_ponto = RegistroPonto(data=data_atual, tipo=proximo, hora=hora_atual,
-                               usuario_id=usuario_id, foi_ajustado=False)
+                               usuario_id=usuario_id, foi_ajustado=False, **(local or {}))
     if foto_jpeg is not None:
         novo_ponto.foto = FotoPonto(dados=foto_jpeg, mime="image/jpeg")
     db.session.add(novo_ponto)
@@ -4404,9 +4515,12 @@ def responder_solicitacao(id, acao):
     if acao not in {"aprovar", "recusar"}:
         abort(404)
     voltar = "painel" if request.form.get("voltar") == "painel" else "solicitacoes"
+    autoaprovacao = False
     if solicitacao.usuario_id == current_user.id:
-        flash("Você não pode responder à sua própria solicitação. Outra pessoa do RH precisa analisá-la.", "danger")
-        return _redirect_admin(voltar)
+        if not _pode_autoaprovar(current_user):
+            flash("Você não pode responder à sua própria solicitação. Outra pessoa do RH precisa analisá-la.", "danger")
+            return _redirect_admin(voltar)
+        autoaprovacao = True
     if solicitacao.status != "Pendente":
         # Reenvio (duplo clique, aba antiga) não pode duplicar batidas nem
         # inverter uma decisão já tomada.
@@ -4460,12 +4574,15 @@ def responder_solicitacao(id, acao):
             db.session.add(novo_ponto)
             descricao_acao = f"Aprovou novo registro (ponto esquecido) de {solicitacao.usuario.nome}: {solicitacao.tipo_ponto} em {solicitacao.data_ponto}"
 
+        if autoaprovacao:
+            descricao_acao = "[AUTOAPROVAÇÃO] " + descricao_acao
         registrar_log(current_user.id, descricao_acao, id)
         flash("Solicitação APROVADA e registro atualizado!", "success")
 
     elif acao == "recusar":
         solicitacao.status = "Recusada"
-        registrar_log(current_user.id, f"Recusou ajuste de {solicitacao.usuario.nome}: {solicitacao.tipo_ponto} em {solicitacao.data_ponto}", id)
+        registrar_log(current_user.id, ("[AUTOAPROVAÇÃO] " if autoaprovacao else "")
+                      + f"Recusou ajuste de {solicitacao.usuario.nome}: {solicitacao.tipo_ponto} em {solicitacao.data_ponto}", id)
         flash("Solicitação RECUSADA.", "warning")
 
     db.session.commit()
@@ -4578,6 +4695,7 @@ def excluir_usuario(user_id):
             LembreteEnviado.query.filter_by(usuario_id=user.id).delete()
             Afastamento.query.filter_by(usuario_id=user.id).delete()
             EspelhoMensal.query.filter_by(usuario_id=user.id).delete()
+            RostoCadastrado.query.filter_by(usuario_id=user.id).delete()  # biometria sai junto
             db.session.expire(user)
 
             db.session.delete(user)
@@ -4660,6 +4778,14 @@ def _contexto_parametros(form=None, erros=None):
         "push_ativo": VAPID is not None,
         "correcao_janela": janela_correcao(hoje),
         "quiosque": QuiosqueDispositivo.query.first(),
+        "quiosque_metodo": _quiosque_metodo(),
+        "local_trabalho": {
+            "ativo": _get_config("geo_ativo", "false") == "true",
+            "lat": _get_config("geo_lat", ""),
+            "lon": _get_config("geo_lon", ""),
+            "raio_m": _get_config("geo_raio_m", "200"),
+        },
+        "geo_raio_limites": (GEO_RAIO_MIN, GEO_RAIO_MAX),
     }
 
 
@@ -5994,7 +6120,11 @@ def _primeiro_e_ultimo_nome(nome):
 @app.route("/quiosque")
 @quiosque_required
 def quiosque():
-    return render_template("quiosque.html")
+    metodo = _quiosque_metodo()
+    # Sem nenhum rosto cadastrado o reconhecimento não teria com quem comparar.
+    if metodo == "facial" and RostoCadastrado.query.first() is None:
+        metodo = "cpf"
+    return render_template("quiosque.html", metodo=metodo)
 
 
 @app.route("/quiosque/api/estado")
@@ -6045,6 +6175,176 @@ def quiosque_registrar():
         return jsonify(erro=erro), 409 if "recentemente" in erro else 500
     return jsonify(ok=True, tipo=registro.tipo, hora=registro.hora[:5],
                    nome=_primeiro_e_ultimo_nome(pessoa.nome))
+
+
+# ---------- Reconhecimento facial no quiosque ----------
+# O aparelho calcula o descritor (128 números) com a face-api; o servidor só
+# compara descritores. Distância euclidiana: < 0,6 é "provavelmente a mesma
+# pessoa" na literatura do modelo; usamos 0,5 e exigimos folga para o segundo
+# colocado, preferindo "não reconheci" a confundir duas pessoas.
+QUIOSQUE_METODOS = {"cpf": "CPF ou e-mail", "facial": "Reconhecimento facial"}
+FACIAL_LIMIAR = 0.50
+FACIAL_FOLGA = 0.06
+FACIAL_AMOSTRAS_MAX = 5
+
+
+def _quiosque_metodo():
+    metodo = _get_config("quiosque_metodo", "cpf")
+    return metodo if metodo in QUIOSQUE_METODOS else "cpf"
+
+
+def _descritor_valido(valor):
+    """Lista de 128 números finitos e com tamanho plausível -> bytes float32."""
+    if not isinstance(valor, list) or len(valor) != 128:
+        return None
+    try:
+        nums = [float(x) for x in valor]
+    except (TypeError, ValueError):
+        return None
+    if not all(math.isfinite(x) and -2.0 < x < 2.0 for x in nums):
+        return None
+    norma = math.sqrt(sum(x * x for x in nums))
+    if not 0.3 < norma < 3.0:
+        return None
+    return struct.pack("<128f", *nums)
+
+
+def _descritor_lista(dados):
+    return struct.unpack("<128f", dados)
+
+
+def _reconhecer_rosto(descritor_bytes):
+    """(usuario, distância) da pessoa reconhecida, ou (None, melhor distância)."""
+    alvo = _descritor_lista(descritor_bytes)
+    melhor_por_usuario = {}
+    for rosto in RostoCadastrado.query.all():
+        cad = _descritor_lista(rosto.descritor)
+        d = math.sqrt(sum((a - b) ** 2 for a, b in zip(alvo, cad)))
+        if d < melhor_por_usuario.get(rosto.usuario_id, 99):
+            melhor_por_usuario[rosto.usuario_id] = d
+    if not melhor_por_usuario:
+        return None, None
+    ordenado = sorted(melhor_por_usuario.items(), key=lambda kv: kv[1])
+    uid, melhor = ordenado[0]
+    segundo = ordenado[1][1] if len(ordenado) > 1 else 99
+    if melhor <= FACIAL_LIMIAR and segundo - melhor >= FACIAL_FOLGA:
+        return db.session.get(Usuario, uid), melhor
+    return None, melhor
+
+
+@app.route("/quiosque/api/reconhecer", methods=["POST"])
+@quiosque_required
+def quiosque_reconhecer():
+    disp = _quiosque_atual()
+    _rate_limit("quiosque_identificar", ident=f"q{disp.id}")
+    descritor = _descritor_valido((request.get_json(silent=True) or {}).get("descritor"))
+    if descritor is None:
+        return jsonify(erro="Não foi possível ler o rosto. Tente de novo."), 400
+    pessoa, distancia = _reconhecer_rosto(descritor)
+    if pessoa is None:
+        return jsonify(erro="Não reconhecemos você. Tente de novo ou use o CPF."), 404
+    hoje = _local_now().strftime("%d/%m/%Y")
+    token = _quiosque_serializer().dumps({"u": pessoa.id, "q": disp.id, "f": round(distancia, 3)})
+    return jsonify(token=token, nome=_primeiro_e_ultimo_nome(pessoa.nome),
+                   inicial=(pessoa.nome or "?")[0].upper(), proximo=_proximo_tipo_ponto(pessoa.id, hoje))
+
+
+@app.route("/admin/usuarios/<int:user_id>/rosto", methods=["POST"])
+@login_required
+@ti_required
+def admin_cadastrar_rosto(user_id):
+    user = Usuario.query.get_or_404(user_id)
+    dados = request.get_json(silent=True) or {}
+    if dados.get("consentimento") is not True:
+        return jsonify(erro="Confirme que a pessoa autorizou o uso da biometria facial."), 400
+    amostras = dados.get("descritores")
+    if not isinstance(amostras, list) or not 1 <= len(amostras) <= FACIAL_AMOSTRAS_MAX:
+        return jsonify(erro="Amostras do rosto inválidas. Tente de novo."), 400
+    blobs = [_descritor_valido(a) for a in amostras]
+    if any(b is None for b in blobs):
+        return jsonify(erro="Amostras do rosto inválidas. Tente de novo."), 400
+    agora = _local_now()
+    RostoCadastrado.query.filter_by(usuario_id=user.id).delete()
+    for b in blobs:
+        db.session.add(RostoCadastrado(usuario_id=user.id, descritor=b, consentimento_em=agora,
+                                       criado_por_nome=current_user.nome))
+    db.session.commit()
+    registrar_log(current_user.id, f"Cadastrou o rosto de {user.nome} para o quiosque ({len(blobs)} amostras, com consentimento)", user.id)
+    return jsonify(ok=True, amostras=len(blobs))
+
+
+@app.route("/admin/usuarios/<int:user_id>/rosto/excluir", methods=["POST"])
+@login_required
+@ti_required
+def admin_excluir_rosto(user_id):
+    user = Usuario.query.get_or_404(user_id)
+    n = RostoCadastrado.query.filter_by(usuario_id=user.id).delete()
+    db.session.commit()
+    if n:
+        registrar_log(current_user.id, f"Excluiu o cadastro facial de {user.nome}", user.id)
+        flash(f"Cadastro facial de {user.nome} excluído.", "success")
+    else:
+        flash(f"{user.nome} não tinha rosto cadastrado.", "info")
+    return _redirect_admin("usuarios")
+
+
+@app.route("/admin/parametros/quiosque-metodo", methods=["POST"])
+@login_required
+@ti_required
+def admin_quiosque_metodo():
+    metodo = request.form.get("quiosque_metodo", "")
+    if metodo not in QUIOSQUE_METODOS:
+        flash("Método inválido.", "danger")
+        return _redirect_admin("parametros", "quiosque")
+    antes = _quiosque_metodo()
+    if metodo != antes:
+        _set_config("quiosque_metodo", metodo)
+        db.session.commit()
+        registrar_log(current_user.id, f"Alterou a identificação do quiosque: {QUIOSQUE_METODOS[antes]} -> {QUIOSQUE_METODOS[metodo]}")
+        flash(f"Quiosque agora identifica por {QUIOSQUE_METODOS[metodo].lower()}.", "success")
+    return _redirect_admin("parametros", "quiosque")
+
+
+@app.route("/admin/parametros/local", methods=["POST"])
+@login_required
+@ti_required
+def admin_parametros_local():
+    """Raio do local de trabalho: fora dele, a batida pelo app é recusada."""
+    ativo = request.form.get("geo_ativo") == "on"
+    try:
+        lat = float((request.form.get("geo_lat") or "").replace(",", "."))
+        lon = float((request.form.get("geo_lon") or "").replace(",", "."))
+        raio = int(request.form.get("geo_raio_m", ""))
+    except ValueError:
+        if ativo:
+            flash("Informe latitude, longitude e raio válidos (use \"Usar minha localização atual\").", "danger")
+            return _redirect_admin("parametros", "local")
+        lat = lon = None
+        raio = int(_get_config("geo_raio_m", "200"))
+    if lat is not None and not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        flash("Latitude ou longitude fora do intervalo válido.", "danger")
+        return _redirect_admin("parametros", "local")
+    if not (GEO_RAIO_MIN <= raio <= GEO_RAIO_MAX):
+        flash(f"O raio deve ficar entre {GEO_RAIO_MIN} m e {GEO_RAIO_MAX} m.", "danger")
+        return _redirect_admin("parametros", "local")
+
+    novos = {"geo_ativo": "true" if ativo else "false", "geo_raio_m": str(raio)}
+    if lat is not None:
+        novos.update(geo_lat=f"{lat:.6f}", geo_lon=f"{lon:.6f}")
+    rotulos = {"geo_ativo": "ativo", "geo_lat": "latitude", "geo_lon": "longitude", "geo_raio_m": "raio (m)"}
+    mudancas = []
+    for chave, valor in novos.items():
+        antes = _get_config(chave, "")
+        if antes != valor:
+            mudancas.append(f"{rotulos[chave]}: {antes or 'vazio'} -> {valor}")
+            _set_config(chave, valor)
+    if not mudancas:
+        flash("Nada foi alterado no local de trabalho.", "info")
+        return _redirect_admin("parametros", "local")
+    db.session.commit()
+    registrar_log(current_user.id, "Alterou o local de trabalho (raio da batida): " + "; ".join(mudancas))
+    flash("Local de trabalho atualizado." + ("" if ativo else " A verificação de raio está desligada."), "success")
+    return _redirect_admin("parametros", "local")
 
 
 @app.route("/quiosque/api/sair", methods=["POST"])

@@ -830,13 +830,19 @@
             <!-- Botão Único de Registro -->
             {% set pt = proximo_tipo|default('Entrada') %}
             <div class="mb-4">
-                <form action="{{ url_for('registrar_auto') }}" method="POST">
+                <form action="{{ url_for('registrar_auto') }}" method="POST" id="formPonto" {% if exige_localizacao %}data-exige-local="1"{% endif %}>
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="lat"><input type="hidden" name="lon"><input type="hidden" name="precisao">
                     <button type="submit" id="btnAuto" class="btn-ponto btn-auto btn-t3 btn-shape-tall btn-pulse-float w-100">
                         <i class="bi bi-clock-fill"></i>
                         <span id="btnAutoLabel">{{ pt }}</span>
                     </button>
                 </form>
+                {% if exige_localizacao %}
+                <div class="small text-center mt-2" id="avisoLocal" style="color: var(--text-muted);">
+                    <i class="bi bi-geo-alt me-1"></i>O ponto só é registrado no local de trabalho; a localização é pedida ao bater.
+                </div>
+                {% endif %}
             </div>
 
             <!-- Botões Secundários -->
@@ -1143,21 +1149,49 @@
             }
         }
 
-        // 3. ANTI-DUPLO-CLIQUE NO BOTAO REGISTRAR PONTO
+        // 3. BOTAO REGISTRAR PONTO: anti-duplo-clique e, com o raio do local de
+        //    trabalho ativo, pega a localização antes de enviar.
         (function() {
-            var form = document.querySelector('form[action*="/registrar"]');
+            var form = document.getElementById('formPonto');
             if (!form) return;
-            form.addEventListener('submit', function(e) {
-                var btn = document.getElementById('btnAuto');
-                if (!btn || btn.disabled) { e.preventDefault(); return; }
+            var btn = document.getElementById('btnAuto');
+            var label = document.getElementById('btnAutoLabel');
+            var icone = btn ? btn.querySelector('i') : null;
+            var textoOriginal = label ? label.textContent : '';
+            var iconeOriginal = icone ? icone.className : '';
+
+            function carregando(texto) {
                 btn.disabled = true;
                 btn.classList.add('btn-loading');
-                var label = document.getElementById('btnAutoLabel');
-                var icone = btn.querySelector('i.bi');
-                if (icone) {
-                    icone.className = 'spinner-border spinner-border-sm me-2';
-                }
-                if (label) label.textContent = 'Registrando...';
+                if (icone) icone.className = 'spinner-border spinner-border-sm me-2';
+                if (label) label.textContent = texto;
+            }
+            function restaurar(msg) {
+                btn.disabled = false;
+                btn.classList.remove('btn-loading');
+                if (icone) icone.className = iconeOriginal;
+                if (label) label.textContent = textoOriginal;
+                var aviso = document.getElementById('avisoLocal');
+                if (aviso && msg) { aviso.textContent = msg; aviso.style.color = '#f43f5e'; }
+            }
+
+            form.addEventListener('submit', function(e) {
+                if (!btn || btn.disabled) { e.preventDefault(); return; }
+                if (!form.dataset.exigeLocal) { carregando('Registrando...'); return; }
+                e.preventDefault();
+                if (!('geolocation' in navigator)) { restaurar('Este aparelho não informa a localização; não é possível bater o ponto por aqui.'); return; }
+                carregando('Localizando...');
+                navigator.geolocation.getCurrentPosition(function(pos) {
+                    form.elements.lat.value = pos.coords.latitude;
+                    form.elements.lon.value = pos.coords.longitude;
+                    form.elements.precisao.value = Math.round(pos.coords.accuracy || 9999);
+                    if (label) label.textContent = 'Registrando...';
+                    form.submit();  // envio programático: não dispara este listener de novo
+                }, function(err) {
+                    restaurar(err.code === 1
+                        ? 'Permita o acesso à localização (ícone ao lado do endereço) para bater o ponto.'
+                        : 'Não foi possível obter sua localização. Verifique o GPS e tente de novo.');
+                }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
             });
         })();
 

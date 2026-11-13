@@ -99,7 +99,10 @@
     <section class="tela ativa" id="tela-inicio">
         <div class="relogio" id="relogio">--:--</div>
         <div class="data" id="data"></div>
-        <button class="btn-q btn-principal btn-gigante" id="btnBater"><i class="bi bi-fingerprint"></i> Bater ponto</button>
+        <button class="btn-q btn-principal btn-gigante" id="btnBater"><i class="bi bi-{{ 'person-bounding-box' if metodo == 'facial' else 'fingerprint' }}"></i> Bater ponto</button>
+        {% if metodo == 'facial' %}
+        <button class="btn-q btn-secundario" id="btnUsarCpf" style="margin-top: 1.4rem; font-size: 1.05rem; padding: .8rem 1.6rem;"><i class="bi bi-123"></i> Usar CPF ou e-mail</button>
+        {% endif %}
         <div class="aviso-rodape"><i class="bi bi-camera me-1"></i> Uma foto do rosto é registrada junto com a marcação.</div>
     </section>
 
@@ -127,7 +130,7 @@
             <div class="avatar" id="confAvatar"></div>
             <p class="nome-grande" id="confNome"></p>
             <div class="chip" id="confTipo"></div>
-            <p class="sub mb-0">É você? Em seguida a câmera abre para a foto.</p>
+            <p class="sub mb-0" id="confSub">É você? Em seguida a câmera abre para a foto.</p>
             <div class="acoes" style="margin-top: 1.6rem;">
                 <button type="button" class="btn-q btn-secundario" data-acao="voltar">Não sou eu</button>
                 <button type="button" class="btn-q btn-principal" id="btnSouEu"><i class="bi bi-check-lg"></i> Sou eu</button>
@@ -158,7 +161,18 @@
     <!-- 5. Enviando -->
     <section class="tela" id="tela-enviando">
         <div class="spinner"></div>
-        <h1 class="titulo">Registrando…</h1>
+        <h1 class="titulo" id="enviandoTitulo">Registrando…</h1>
+    </section>
+
+    <!-- Reconhecimento facial sem sucesso -->
+    <section class="tela" id="tela-naoreconhecido">
+        <div class="icone-grande" style="color: var(--ambar);"><i class="bi bi-person-x"></i></div>
+        <h1 class="titulo">Não reconhecemos você</h1>
+        <p class="sub" id="naoRecMsg">Tente de novo olhando de frente para a câmera, ou use o CPF.</p>
+        <div class="acoes">
+            <button type="button" class="btn-q btn-secundario" id="btnRecUsarCpf"><i class="bi bi-123"></i> Usar CPF ou e-mail</button>
+            <button type="button" class="btn-q btn-principal" id="btnRecTentar"><i class="bi bi-arrow-repeat"></i> Tentar de novo</button>
+        </div>
     </section>
 
     <!-- 6. Sucesso -->
@@ -197,10 +211,12 @@
 
     <script type="module" nonce="{{ csp_nonce() }}">
         const BASE_MP = "{{ url_for('static', filename='quiosque/mediapipe') }}";
+        const BASE_FA = "{{ url_for('static', filename='quiosque/faceapi') }}";
+        const METODO = "{{ metodo }}";  // 'cpf' ou 'facial' (Parâmetros > Quiosque)
         const $ = (id) => document.getElementById(id);
         const estado = { csrf: null, token: null, nome: '', modo: 'cpf', stream: null, detector: null,
                          detectorFalhou: false, loop: null, encaixadoDesde: 0, capturando: false,
-                         inatividade: null, fotoUrl: null };
+                         inatividade: null, fotoUrl: null, fluxo: METODO, fotoPendente: null };
 
         // ---------- Utilidades ----------
         function mostrar(id) {
@@ -212,6 +228,7 @@
         function reiniciar() {
             pararCamera();
             estado.token = null; estado.capturando = false;
+            estado.fluxo = METODO; estado.fotoPendente = null;
             if (estado.fotoUrl) { URL.revokeObjectURL(estado.fotoUrl); estado.fotoUrl = null; }
             $('campoIdent').value = ''; $('erroIdent').textContent = '';
             mostrar('tela-inicio');
@@ -252,11 +269,20 @@
 
         // ---------- Navegação ----------
         document.addEventListener('click', (e) => { if (e.target.closest('[data-acao="voltar"]')) reiniciar(); });
-        $('btnBater').addEventListener('click', () => {
+        function irParaCpf() {
+            pararCamera();
+            estado.fluxo = 'cpf'; estado.fotoPendente = null; estado.token = null;
             mostrar('tela-identificar');
             setTimeout(() => $('campoIdent').focus(), 50);
             prepararDetector();  // carrega o detector enquanto a pessoa digita
+        }
+        $('btnBater').addEventListener('click', () => {
+            if (METODO === 'facial') { estado.fluxo = 'facial'; estado.nome = ''; abrirCamera(); }
+            else irParaCpf();
         });
+        $('btnUsarCpf')?.addEventListener('click', irParaCpf);
+        $('btnRecUsarCpf').addEventListener('click', irParaCpf);
+        $('btnRecTentar').addEventListener('click', () => { estado.fluxo = 'facial'; estado.fotoPendente = null; abrirCamera(); });
 
         document.querySelectorAll('.seletor button').forEach(b => b.addEventListener('click', () => {
             estado.modo = b.dataset.modo;
@@ -289,6 +315,7 @@
                 if (r.status === 403 && !d.erro) { await atualizarEstado(); $('erroIdent').textContent = 'Tente de novo.'; return; }
                 if (!r.ok) { $('erroIdent').textContent = d.erro || 'Não foi possível continuar. Tente de novo.'; return; }
                 estado.token = d.token; estado.nome = d.nome;
+                $('confSub').textContent = 'É você? Em seguida a câmera abre para a foto.';
                 $('confAvatar').textContent = d.inicial;
                 $('confNome').textContent = d.nome;
                 const chip = $('confTipo');
@@ -305,7 +332,11 @@
             }
         });
 
-        $('btnSouEu').addEventListener('click', abrirCamera);
+        // No reconhecimento facial a foto já foi tirada: "Sou eu" registra direto.
+        $('btnSouEu').addEventListener('click', () => {
+            if (estado.fotoPendente) { const f = estado.fotoPendente; estado.fotoPendente = null; enviar(f); }
+            else abrirCamera();
+        });
         $('btnFotoManual').addEventListener('click', () => capturar());
 
         // ---------- Detector de rosto (MediaPipe, roda no próprio tablet) ----------
@@ -353,7 +384,8 @@
 
         async function abrirCamera() {
             estado.capturando = false; estado.encaixadoDesde = 0;
-            $('cameraNome').textContent = estado.nome;
+            $('cameraNome').textContent = estado.fluxo === 'facial' ? 'Olhe para a câmera' : estado.nome;
+            if (estado.fluxo === 'facial') prepararReconhecimento();
             $('btnFotoManual').hidden = true;
             mostrar('tela-camera');
             desenharMoldura();
@@ -448,8 +480,78 @@
             const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.85));
             pararCamera();
             if (!blob) { erro('Não foi possível tirar a foto. Tente de novo.'); return; }
+            if (estado.fotoUrl) URL.revokeObjectURL(estado.fotoUrl);
             estado.fotoUrl = URL.createObjectURL(blob);
-            await enviar(blob);
+            if (estado.fluxo === 'facial') await reconhecer(canvas, blob);
+            else await enviar(blob);
+        }
+
+        // ---------- Reconhecimento facial (face-api no aparelho) ----------
+        let carregandoRec = null;
+        function prepararReconhecimento() {
+            if (carregandoRec) return carregandoRec;
+            carregandoRec = (async () => {
+                const api = await import(BASE_FA + '/face-api.esm.js');
+                try { await api.tf.setBackend('webgl'); } catch (_) { await api.tf.setBackend('cpu'); }
+                await api.tf.ready();
+                await Promise.all([
+                    api.nets.tinyFaceDetector.loadFromUri(BASE_FA + '/model'),
+                    api.nets.faceLandmark68TinyNet.loadFromUri(BASE_FA + '/model'),
+                    api.nets.faceRecognitionNet.loadFromUri(BASE_FA + '/model'),
+                ]);
+                return api;
+            })().catch((err) => { carregandoRec = null; throw err; });
+            return carregandoRec;
+        }
+        if (METODO === 'facial') setTimeout(() => prepararReconhecimento().catch(() => {}), 1500);
+
+        function naoReconhecido(msg) {
+            estado.fotoPendente = null;
+            $('naoRecMsg').textContent = msg;
+            mostrar('tela-naoreconhecido');
+        }
+
+        async function reconhecer(canvas, blob) {
+            $('enviandoTitulo').textContent = 'Reconhecendo…';
+            mostrar('tela-enviando');
+            let descritor;
+            try {
+                const api = await prepararReconhecimento();
+                const r = await api.detectSingleFace(canvas, new api.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.5 }))
+                    .withFaceLandmarks(true).withFaceDescriptor();
+                if (!r) { naoReconhecido('Não encontramos um rosto na foto. Olhe de frente para a câmera e tente de novo.'); return; }
+                descritor = Array.from(r.descriptor);
+            } catch (err) {
+                console.warn('Reconhecimento indisponível', err);
+                naoReconhecido('O reconhecimento facial não funcionou neste aparelho agora. Use o CPF.');
+                return;
+            }
+            try {
+                if (!estado.csrf) await atualizarEstado();
+                const resp = await fetch('/quiosque/api/reconhecer', {
+                    method: 'POST', credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': estado.csrf || '' },
+                    body: JSON.stringify({ descritor }),
+                });
+                const d = await resp.json().catch(() => ({}));
+                if (resp.status === 403 && !d.erro) { await atualizarEstado(); naoReconhecido('Tente de novo.'); return; }
+                if (!resp.ok) { naoReconhecido(d.erro || 'Não reconhecemos você. Tente de novo ou use o CPF.'); return; }
+                estado.token = d.token; estado.nome = d.nome; estado.fotoPendente = blob;
+                $('confSub').textContent = 'É você? Toque em "Sou eu" para registrar.';
+                $('confAvatar').textContent = d.inicial;
+                $('confNome').textContent = d.nome;
+                const chip = $('confTipo');
+                chip.className = 'chip ' + (d.proximo === 'Saída' ? 'saida' : 'entrada');
+                chip.innerHTML = '';
+                const icone = document.createElement('i');
+                icone.className = 'bi ' + (d.proximo === 'Saída' ? 'bi-box-arrow-right' : 'bi-box-arrow-in-right');
+                chip.append(icone, document.createTextNode(' Registrar ' + d.proximo));
+                mostrar('tela-confirmar');
+            } catch (_) {
+                erro('Sem conexão com o servidor. Tente de novo.');
+            } finally {
+                $('enviandoTitulo').textContent = 'Registrando…';
+            }
         }
 
         async function enviar(blob) {

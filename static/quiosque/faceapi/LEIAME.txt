@@ -1,0 +1,7 @@
+@vladmandic/face-api 1.7.15 (MIT) — https://www.npmjs.com/package/@vladmandic/face-api
+Inclui TensorFlow.js (Apache-2.0). Modelos: tiny_face_detector, face_landmark_68_tiny,
+face_recognition (descritor de 128 números por rosto).
+
+Usado pelo reconhecimento facial do quiosque e pelo cadastro de rostos da TI.
+Roda no aparelho (WebGL, com fallback no processador). O servidor recebe só o
+descritor de 128 números e o compara com os rostos cadastrados.

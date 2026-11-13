@@ -1957,6 +1957,163 @@ class SecurityRegressionTests(unittest.TestCase):
             self.assertEqual(m.LogAuditoria.query.filter(m.LogAuditoria.acao.like("Desativou o quiosque pelo próprio tablet%")).count(), 1)
             self.assertEqual(m.LogAuditoria.query.filter(m.LogAuditoria.acao.like("Tentativa de sair do quiosque recusada%")).count(), 3)
 
+    # ------------------------------------------------------------------
+    # Autoaprovação, raio do local de trabalho e reconhecimento facial
+    # ------------------------------------------------------------------
+    def test_autoaprovacao_so_para_emails_liberados_no_servidor(self):
+        rh_id = self.make_user(email="admin@ponto.com", admin=True)
+        m = self.module
+        with self.app.app_context():
+            sol = m.SolicitacaoCorrecao(data_ponto=m._local_now().strftime("%d/%m/%Y"), tipo_ponto="Entrada",
+                                        hora_correta="08:00:00", justificativa="x", usuario_id=rh_id)
+            m.db.session.add(sol)
+            m.db.session.commit()
+            sol_id = sol.id
+        with self.app.test_client() as client:
+            self.login(client, email="admin@ponto.com")
+            self._post(client, f"/admin/solicitacoes/{sol_id}/aprovar")  # sem liberação: bloqueado
+            with self.app.app_context():
+                self.assertEqual(m.db.session.get(m.SolicitacaoCorrecao, sol_id).status, "Pendente")
+            with patch.object(m, "AUTOAPROVACAO_EMAILS", {"admin@ponto.com"}):
+                self._post(client, f"/admin/solicitacoes/{sol_id}/aprovar")
+        with self.app.app_context():
+            self.assertEqual(m.db.session.get(m.SolicitacaoCorrecao, sol_id).status, "Aprovada")
+            self.assertEqual(m.LogAuditoria.query.filter(m.LogAuditoria.acao.like("[AUTOAPROVAÇÃO]%")).count(), 1)
+
+    def _configurar_local(self, client, **campos):
+        dados = {"geo_ativo": "on", "geo_lat": "-23.550520", "geo_lon": "-46.633308", "geo_raio_m": "200"}
+        dados.update(campos)
+        return self._post(client, "/admin/parametros/local", **dados)
+
+    def test_raio_do_local_de_trabalho(self):
+        self.make_user(email="ti@example.com", ti=True)
+        self.make_user(email="rh@example.com", rh=True)
+        func_id = self.make_user(email="func@example.com")
+        m = self.module
+        with self.app.test_client() as client:
+            self.login(client, email="rh@example.com")
+            self._configurar_local(client)  # RH não configura
+        with self.app.app_context():
+            self.assertIsNone(m.config_local_trabalho())
+        with self.app.test_client() as client:
+            self.login(client, email="ti@example.com")
+            self._configurar_local(client, geo_raio_m="5")       # raio pequeno demais: recusado
+            self._configurar_local(client, geo_lat="200")        # latitude inválida: recusada
+            self._configurar_local(client)
+        with self.app.app_context():
+            self.assertEqual(m.config_local_trabalho(), {"lat": -23.55052, "lon": -46.633308, "raio_m": 200})
+
+        def bater(client, **local):
+            token = self.csrf(client, "/")
+            return client.post("/registrar/auto", data={"_csrf_token": token, **local})
+
+        with self.app.test_client() as client:
+            self.login(client, email="func@example.com")
+            self.assertIn('data-exige-local="1"', client.get("/").get_data(as_text=True))
+            bater(client)                                                            # sem localização
+            bater(client, lat="-23.560520", lon="-46.633308", precisao="20")         # ~1,1 km: fora
+            bater(client, lat="-23.550520", lon="-46.633308", precisao="5000")       # imprecisa demais
+            with self.app.app_context():
+                self.assertEqual(m.RegistroPonto.query.filter_by(usuario_id=func_id).count(), 0)
+            bater(client, lat="-23.551400", lon="-46.633308", precisao="30")         # ~98 m: dentro
+        with self.app.app_context():
+            reg = m.RegistroPonto.query.filter_by(usuario_id=func_id).one()
+            self.assertTrue(90 <= reg.distancia_m <= 110)
+            self.assertEqual(reg.precisao_m, 30)
+
+        # Desligado: volta a bater sem localização.
+        with self.app.test_client() as client:
+            self.login(client, email="ti@example.com")
+            self._post(client, "/admin/parametros/local", geo_lat="-23.550520", geo_lon="-46.633308", geo_raio_m="200")
+        with self.app.app_context():
+            self.assertIsNone(m.config_local_trabalho())
+
+    def _descritor(self, base=0.05, ruido=0.0, semente=1):
+        import random
+        rnd = random.Random(semente)
+        return [base + rnd.uniform(-0.1, 0.1) + ruido for _ in range(128)]
+
+    def test_reconhecimento_facial_no_quiosque(self):
+        a_id = self.make_user(email="a@example.com")
+        b_id = self.make_user(email="b@example.com")
+        self.make_user(email="rh@example.com", rh=True)
+        m = self.module
+        rosto_a = self._descritor(semente=1)
+        rosto_b = self._descritor(semente=2)
+        with self.app.test_client() as tablet:
+            self._ativar_quiosque(tablet)  # cria ti@example.com
+            # Sem rosto cadastrado, o quiosque continua no CPF mesmo com o método facial.
+            with self.app.app_context():
+                m._set_config("quiosque_metodo", "facial")
+                m.db.session.commit()
+            self.assertIn('const METODO = "cpf"', tablet.get("/quiosque").get_data(as_text=True))
+
+        with self.app.test_client() as client:
+            self.login(client, email="ti@example.com")
+            h = {"X-CSRF-Token": self.csrf(client, "/admin")}
+            # Sem consentimento ou com amostra inválida: recusado.
+            self.assertEqual(client.post(f"/admin/usuarios/{a_id}/rosto", headers=h, json={"descritores": [rosto_a]}).status_code, 400)
+            self.assertEqual(client.post(f"/admin/usuarios/{a_id}/rosto", headers=h,
+                                         json={"descritores": [[1] * 10], "consentimento": True}).status_code, 400)
+            for uid, rosto in ((a_id, rosto_a), (b_id, rosto_b)):
+                r = client.post(f"/admin/usuarios/{uid}/rosto", headers=h, json={"descritores": [rosto, rosto], "consentimento": True})
+                self.assertEqual(r.status_code, 200)
+        with self.app.test_client() as client:  # RH não cadastra rosto
+            self.login(client, email="rh@example.com")
+            h = {"X-CSRF-Token": self.csrf(client, "/admin")}
+            self.assertNotEqual(client.post(f"/admin/usuarios/{a_id}/rosto", headers=h,
+                                            json={"descritores": [rosto_a], "consentimento": True}).status_code, 200)
+
+        with self.app.test_client() as tablet:
+            self.login(tablet, email="ti@example.com")
+            self._post(tablet, "/admin/quiosque/ativar")
+            self.assertIn('const METODO = "facial"', tablet.get("/quiosque").get_data(as_text=True))
+            h = {"X-CSRF-Token": self._csrf_quiosque(tablet)}
+            # Mesmo rosto com pequena variação: reconhecido como A.
+            perto_a = [x + 0.01 for x in rosto_a]
+            r = tablet.post("/quiosque/api/reconhecer", headers=h, json={"descritor": perto_a})
+            self.assertEqual(r.status_code, 200)
+            dados = r.get_json()
+            self.assertEqual(dados["proximo"], "Entrada")
+            # O token serve para registrar com a foto, como no fluxo do CPF.
+            csrf = h["X-CSRF-Token"]
+            r = tablet.post("/quiosque/api/registrar", data={"_csrf_token": csrf, "token": dados["token"],
+                                                            "foto": (self._jpeg(), "f.jpg")}, content_type="multipart/form-data")
+            self.assertEqual(r.status_code, 200)
+            # Rosto desconhecido e rosto "no meio" de A e B: não reconhece.
+            self.assertEqual(tablet.post("/quiosque/api/reconhecer", headers=h,
+                                         json={"descritor": self._descritor(semente=9)}).status_code, 404)
+            meio = [(x + y) / 2 for x, y in zip(rosto_a, rosto_b)]
+            self.assertEqual(tablet.post("/quiosque/api/reconhecer", headers=h, json={"descritor": meio}).status_code, 404)
+            self.assertEqual(tablet.post("/quiosque/api/reconhecer", headers=h, json={"descritor": "x"}).status_code, 400)
+        with self.app.app_context():
+            self.assertEqual(m.RegistroPonto.query.one().usuario_id, a_id)
+            self.assertEqual(m.RostoCadastrado.query.count(), 4)
+            self.assertEqual(m.LogAuditoria.query.filter(m.LogAuditoria.acao.like("Cadastrou o rosto de%")).count(), 2)
+
+        # Excluir o usuário apaga a biometria.
+        with self.app.test_client() as client:
+            self.login(client, email="rh@example.com")
+            self._post(client, f"/admin/excluir-usuario/{b_id}")
+        with self.app.app_context():
+            self.assertEqual(m.RostoCadastrado.query.filter_by(usuario_id=b_id).count(), 0)
+
+    def test_metodo_do_quiosque_so_pela_ti(self):
+        self.make_user(email="ti@example.com", ti=True)
+        self.make_user(email="rh@example.com", rh=True)
+        m = self.module
+        with self.app.test_client() as client:
+            self.login(client, email="rh@example.com")
+            self._post(client, "/admin/parametros/quiosque-metodo", quiosque_metodo="facial")
+        with self.app.app_context():
+            self.assertEqual(m._quiosque_metodo(), "cpf")
+        with self.app.test_client() as client:
+            self.login(client, email="ti@example.com")
+            self._post(client, "/admin/parametros/quiosque-metodo", quiosque_metodo="xyz")
+            self._post(client, "/admin/parametros/quiosque-metodo", quiosque_metodo="facial")
+        with self.app.app_context():
+            self.assertEqual(m._quiosque_metodo(), "facial")
+
     def test_excluir_registro_apaga_a_foto(self):
         self.make_user(email="rh@example.com", rh=True)
         func_id = self.make_user(email="func@example.com")

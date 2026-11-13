@@ -125,6 +125,9 @@
 
                     <td class="fw-bold text-center" style="white-space: nowrap; color: var(--text-main);">
                         {{ reg.hora }}
+                        {% if reg.distancia_m is not none %}
+                        <div class="small fw-normal" style="color: var(--text-muted);" title="Distância do local de trabalho na hora da batida (precisão ~{{ reg.precisao_m }} m)"><i class="bi bi-geo-alt"></i> {{ reg.distancia_m }} m</div>
+                        {% endif %}
                         {% if reg.id in com_foto %}
                         <a href="{{ url_for('admin_foto_ponto', registro_id=reg.id) }}" target="_blank" rel="noopener" class="ms-1 text-primary" title="Ver a foto tirada no quiosque"><i class="bi bi-camera-fill"></i></a>
                         {% endif %}
