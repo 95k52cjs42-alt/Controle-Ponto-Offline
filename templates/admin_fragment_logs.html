@@ -3,6 +3,56 @@
     <p class="text-muted small m-0">Registro detalhado de todas as ações críticas realizadas no sistema.</p>
 </div>
 
+{% set campo_style = "background: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main);" %}
+<!-- Filtros: o painel recarrega a aba sozinho ao mudar um campo (ver data-filtro-view no admin.html) -->
+<form id="logs-filter-form" data-filtro-view="logs" class="dashboard-card mb-3" autocomplete="off">
+    <div class="row g-2 align-items-end">
+        <div class="col-lg-4">
+            <label class="form-label small fw-semibold text-muted mb-1" for="logsBusca">Buscar</label>
+            <div class="position-relative">
+                <i class="bi bi-search position-absolute" style="left: 12px; top: 50%; transform: translateY(-50%); color: var(--text-muted);"></i>
+                <input type="search" class="form-control ps-5" id="logsBusca" name="q" value="{{ filtros.q }}" placeholder="Ação, nome, e-mail…" style="{{ campo_style }}">
+            </div>
+        </div>
+        <div class="col-sm-6 col-lg-2">
+            <label class="form-label small fw-semibold text-muted mb-1" for="logsAutor">Autor</label>
+            <select class="form-select" id="logsAutor" name="autor" style="{{ campo_style }}">
+                <option value="">Todos</option>
+                <option value="sistema" {% if filtros.autor == 'sistema' %}selected{% endif %}>Sistema / sem autor</option>
+                {% for u in autores %}
+                <option value="{{ u.id }}" {% if filtros.autor == u.id|string %}selected{% endif %}>{{ u.nome }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-sm-6 col-lg-2">
+            <label class="form-label small fw-semibold text-muted mb-1" for="logsCategoria">Categoria</label>
+            <select class="form-select" id="logsCategoria" name="categoria" style="{{ campo_style }}">
+                <option value="">Todas</option>
+                {% for chave, rotulo in categorias.items() %}
+                <option value="{{ chave }}" {% if filtros.categoria == chave %}selected{% endif %}>{{ rotulo }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-6 col-lg-2">
+            <label class="form-label small fw-semibold text-muted mb-1" for="logsDe">De</label>
+            <input type="date" class="form-control" id="logsDe" name="data_inicio" value="{{ filtros.data_inicio }}" style="{{ campo_style }}">
+        </div>
+        <div class="col-6 col-lg-2">
+            <label class="form-label small fw-semibold text-muted mb-1" for="logsAte">Até</label>
+            <input type="date" class="form-control" id="logsAte" name="data_fim" value="{{ filtros.data_fim }}" style="{{ campo_style }}">
+        </div>
+    </div>
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mt-2">
+        <span class="small text-muted">
+            {% if total %}{{ total }} registro{{ 's' if total != 1 }}{% if filtrando %} encontrado{{ 's' if total != 1 }}{% endif %}{% if paginas > 1 %} · página {{ pagina }} de {{ paginas }}{% endif %}{% else %}Nenhum registro{% endif %}
+        </span>
+        {% if filtrando %}
+        <button type="button" class="btn btn-link btn-sm p-0 text-decoration-none" data-filtro-limpar><i class="bi bi-x-circle me-1"></i>Limpar filtros</button>
+        {% endif %}
+    </div>
+    <input type="hidden" name="pagina" value="1">
+</form>
+
 <div class="table-responsive">
     {% if logs %}
         <table class="table table-custom align-middle">
@@ -45,7 +95,15 @@
     {% else %}
         <div class="text-center py-5 text-muted">
             <i class="bi bi-journal-text fs-2 d-block mb-2"></i>
-            Nenhum log registrado ainda.
+            {{ 'Nenhum registro com esses filtros.' if filtrando else 'Nenhum log registrado ainda.' }}
         </div>
     {% endif %}
 </div>
+
+{% if paginas > 1 %}
+<nav class="d-flex justify-content-center align-items-center gap-2 mt-3" aria-label="Páginas dos logs">
+    <button type="button" class="btn btn-outline-secondary btn-sm" data-filtro-pagina="{{ pagina - 1 }}" {% if pagina <= 1 %}disabled{% endif %}><i class="bi bi-chevron-left"></i> Anteriores</button>
+    <span class="small text-muted px-2">{{ pagina }} / {{ paginas }}</span>
+    <button type="button" class="btn btn-outline-secondary btn-sm" data-filtro-pagina="{{ pagina + 1 }}" {% if pagina >= paginas %}disabled{% endif %}>Mais antigos <i class="bi bi-chevron-right"></i></button>
+</nav>
+{% endif %}

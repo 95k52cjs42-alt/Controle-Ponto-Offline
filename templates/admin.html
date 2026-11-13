@@ -1422,6 +1422,75 @@
                 .finally(function() { contentWrap.classList.remove('loading'); });
         });
 
+        // ------------------------------------------------------------------
+        // Filtros genéricos de aba (ex.: Logs): formulário com data-filtro-view.
+        // Recarrega só o fragmento, sem empilhar histórico a cada tecla, e
+        // devolve o foco/cursor ao campo de busca.
+        // ------------------------------------------------------------------
+        (function () {
+            let pedido = null, espera = null;
+            async function aplicarFiltro(form, pagina, limpar) {
+                const view = form.dataset.filtroView;
+                const params = new URLSearchParams();
+                if (!limpar) {
+                    for (const [k, v] of new FormData(form).entries()) {
+                        if (v && k !== 'pagina') params.append(k, v);
+                    }
+                    if (pagina && pagina > 1) params.set('pagina', pagina);
+                }
+                const qs = params.toString();
+                const ativo = document.activeElement;
+                const campoFoco = ativo && form.contains(ativo) ? ativo.id : null;
+                const cursor = campoFoco && typeof ativo.selectionStart === 'number' ? ativo.selectionStart : null;
+                const contentWrap = document.getElementById('adminContent');
+                if (pedido) pedido.abort();
+                pedido = new AbortController();
+                contentWrap.classList.add('loading');
+                try {
+                    const r = await fetch(`/admin/fragment/${view}${qs ? '?' + qs : ''}`, { signal: pedido.signal });
+                    if (!r.ok) throw new Error('falha ao filtrar');
+                    contentWrap.innerHTML = await r.text();
+                    history.replaceState({}, '', `/admin/${view}${qs ? '?' + qs : ''}`);
+                    aposCarregarView(view, contentWrap);
+                    if (campoFoco && !limpar) {
+                        const el = document.getElementById(campoFoco);
+                        if (el) { el.focus(); if (cursor !== null && el.setSelectionRange) try { el.setSelectionRange(cursor, cursor); } catch (_) {} }
+                    }
+                } catch (err) {
+                    if (err.name !== 'AbortError') console.error('Erro ao filtrar:', err);
+                } finally {
+                    contentWrap.classList.remove('loading');
+                }
+            }
+            const formDe = (el) => el && el.closest && el.closest('form[data-filtro-view]');
+            document.addEventListener('input', (e) => {
+                const form = formDe(e.target);
+                if (!form || e.target.type !== 'search') return;
+                clearTimeout(espera);
+                espera = setTimeout(() => aplicarFiltro(form, 1), 350);
+            });
+            document.addEventListener('change', (e) => {
+                const form = formDe(e.target);
+                if (form && e.target.type !== 'search') aplicarFiltro(form, 1);
+            });
+            document.addEventListener('submit', (e) => {
+                const form = formDe(e.target);
+                if (!form) return;
+                e.preventDefault();
+                clearTimeout(espera);
+                aplicarFiltro(form, 1);
+            });
+            document.addEventListener('click', (e) => {
+                const limpar = e.target.closest('[data-filtro-limpar]');
+                const pag = e.target.closest('[data-filtro-pagina]');
+                if (!limpar && !pag) return;
+                const form = document.querySelector('#adminContent form[data-filtro-view]');
+                if (!form) return;
+                if (limpar) aplicarFiltro(form, 1, true);
+                else aplicarFiltro(form, parseInt(pag.dataset.filtroPagina, 10) || 1);
+            });
+        })();
+
         document.addEventListener('click', function(e) {
             const clearBtn = e.target.closest('a[href*="/admin/historico"]');
             if (!clearBtn) return;

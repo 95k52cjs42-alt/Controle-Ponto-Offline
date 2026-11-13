@@ -4426,8 +4426,7 @@ def admin_fragment(view_name):
         return render_template("admin_fragment_fechamento.html", **_contexto_fechamento(request.args.get("mes")))
 
     if view_name == "logs":
-        logs = LogAuditoria.query.order_by(LogAuditoria.id.desc()).limit(100).all()
-        return render_template("admin_fragment_logs.html", logs=logs)
+        return render_template("admin_fragment_logs.html", **_contexto_logs(request.args))
 
     return _redirect_admin("painel")
 
@@ -5110,15 +5109,67 @@ def anexo_afastamento(id):
 @login_required
 @ti_required
 def admin_logs():
-    logs = LogAuditoria.query.order_by(LogAuditoria.id.desc()).limit(100).all()
-    usuarios = Usuario.query.all()
-    total_solicitacoes_pendentes = SolicitacaoCorrecao.query.filter_by(status="Pendente").count()
-    return render_admin_shell(
-        initial_view="logs",
-        logs=logs,
-        usuarios=usuarios,
-        total_solicitacoes_pendentes=total_solicitacoes_pendentes,
-    )
+    return render_admin_shell(initial_view="logs")
+
+
+# Categorias do filtro dos logs: padrões (LIKE, sem diferenciar maiúsculas)
+# sobre o texto da ação. Uma ação pode cair em mais de uma categoria.
+LOG_CATEGORIAS = {
+    "acesso": ("Acessos (login, logout, bloqueios)",
+               ["Entrou no sistema%", "Saiu do sistema%", "Falha de login%", "Login bloqueado%"]),
+    "senha": ("Senhas", ["%senha%"]),
+    "usuarios": ("Usuários, papéis e rostos",
+                 ["Cadastrou usuário%", "Excluiu usuário%", "Atualizou o cadastro%", "Alterou papéis%", "%rosto%", "%facial%"]),
+    "ponto": ("Ponto, correções e afastamentos",
+              ["%ponto%", "%correção%", "%ajuste%", "Aprovou%", "Recusou%", "[AUTOAPROVAÇÃO]%", "%afastamento%"]),
+    "fechamento": ("Fechamento do mês", ["%fech%", "%reabr%", "%espelho%"]),
+    "parametros": ("Parâmetros, setores, feriados e quiosque",
+                   ["Alterou parâmetros%", "%setor%", "%feriado%", "%lembrete%", "%local de trabalho%",
+                    "%quiosque%", "Alterou o prazo%", "%região%"]),
+}
+LOGS_POR_PAGINA = 50
+
+
+def _contexto_logs(args):
+    """Logs de auditoria com busca, autor, categoria, período e paginação."""
+    busca = (args.get("q") or "").strip()[:100]
+    autor = (args.get("autor") or "").strip()
+    categoria = args.get("categoria") or ""
+    data_inicio, data_fim = _data_iso(args.get("data_inicio")), _data_iso(args.get("data_fim"))
+    pagina = max(1, args.get("pagina", 1, type=int) or 1)
+
+    query = LogAuditoria.query
+    if busca:
+        termo = f"%{busca}%"
+        query = query.filter(db.or_(LogAuditoria.acao.ilike(termo), LogAuditoria.usuario_nome.ilike(termo)))
+    if autor == "sistema":
+        query = query.filter(LogAuditoria.usuario_id.is_(None))
+    elif autor.isdigit():
+        query = query.filter(LogAuditoria.usuario_id == int(autor))
+    if categoria in LOG_CATEGORIAS:
+        query = query.filter(db.or_(*[LogAuditoria.acao.ilike(p) for p in LOG_CATEGORIAS[categoria][1]]))
+    if data_inicio:
+        query = query.filter(LogAuditoria.data_criacao >= datetime.combine(data_inicio, datetime.min.time()))
+    if data_fim:
+        query = query.filter(LogAuditoria.data_criacao < datetime.combine(data_fim + timedelta(days=1), datetime.min.time()))
+
+    total = query.count()
+    paginas = max(1, -(-total // LOGS_POR_PAGINA))
+    pagina = min(pagina, paginas)
+    logs = (query.order_by(LogAuditoria.data_criacao.desc(), LogAuditoria.id.desc())
+            .offset((pagina - 1) * LOGS_POR_PAGINA).limit(LOGS_POR_PAGINA).all())
+    return {
+        "logs": logs,
+        "total": total,
+        "pagina": pagina,
+        "paginas": paginas,
+        "filtros": {"q": busca, "autor": autor, "categoria": categoria,
+                    "data_inicio": data_inicio.isoformat() if data_inicio else "",
+                    "data_fim": data_fim.isoformat() if data_fim else ""},
+        "filtrando": bool(busca or autor or categoria in LOG_CATEGORIAS or data_inicio or data_fim),
+        "categorias": {k: v[0] for k, v in LOG_CATEGORIAS.items()},
+        "autores": Usuario.query.order_by(Usuario.nome.asc()).all(),
+    }
 
 @app.route('/admin/exportar-afd')
 @login_required

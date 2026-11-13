@@ -2098,6 +2098,51 @@ class SecurityRegressionTests(unittest.TestCase):
         with self.app.app_context():
             self.assertEqual(m.RostoCadastrado.query.filter_by(usuario_id=b_id).count(), 0)
 
+    def test_filtros_dos_logs(self):
+        ti_id = self.make_user(email="ti@example.com", ti=True)
+        outro_id = self.make_user(email="outro@example.com")
+        m = self.module
+        with self.app.app_context():
+            m.registrar_log(ti_id, "Alterou parâmetros de jornada: Carga 8h -> 9h")
+            m.registrar_log(outro_id, "Entrou no sistema (IP 1.2.3.4)", outro_id)
+            m.registrar_log(None, "Falha de login: x@y.com (IP 9.9.9.9)")
+            for i in range(60):
+                m.registrar_log(ti_id, f"Ação de teste {i}")
+            antigo = m.LogAuditoria(usuario_id=ti_id, usuario_nome="Usuário <Teste>", acao="Excluiu ponto antigo",
+                                    data_criacao=m.datetime(2026, 1, 10, 12, 0))
+            m.db.session.add(antigo)
+            m.db.session.commit()
+
+        def frag(client, **params):
+            from urllib.parse import urlencode
+            return client.get("/admin/fragment/logs?" + urlencode(params)).get_data(as_text=True)
+
+        with self.app.test_client() as client:
+            self.login(client, email="ti@example.com")
+            html = frag(client)
+            self.assertIn("página 1 de 2", html)
+            self.assertIn("Mais antigos", html)
+            self.assertIn("Excluiu ponto antigo", frag(client, pagina=2))
+            html = frag(client, q="jornada")
+            self.assertIn("Alterou parâmetros de jornada", html)
+            self.assertNotIn("Ação de teste", html)
+            html = frag(client, categoria="acesso")
+            self.assertIn("Entrou no sistema", html)
+            self.assertIn("Falha de login", html)
+            self.assertNotIn("Alterou parâmetros", html)
+            html = frag(client, autor="sistema")
+            self.assertIn("Falha de login", html)
+            self.assertNotIn("Entrou no sistema", html)
+            html = frag(client, autor=str(outro_id))
+            self.assertIn("Entrou no sistema", html)
+            self.assertNotIn("Ação de teste", html)
+            html = frag(client, data_inicio="2026-01-01", data_fim="2026-01-31")
+            self.assertIn("Excluiu ponto antigo", html)
+            self.assertNotIn("Ação de teste", html)
+            self.assertIn("Nenhum registro com esses filtros", frag(client, q="nada-disso-existe"))
+            # A página completa (shell) também respeita os filtros da URL.
+            self.assertIn("Alterou parâmetros de jornada", client.get("/admin/logs?q=jornada").get_data(as_text=True))
+
     def test_arquivos_do_quiosque_com_cache_longo(self):
         with self.app.test_client() as client:
             r = client.get("/static/quiosque/faceapi/model/tiny_face_detector_model-weights_manifest.json")
