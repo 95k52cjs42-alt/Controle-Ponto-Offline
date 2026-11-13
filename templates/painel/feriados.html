@@ -51,7 +51,7 @@
                             </div>
                             {% if f.id %}
 {% if current_user.is_ti %}
-                            <form method="POST" action="{{ url_for('excluir_feriado', id=f.id) }}" class="d-inline" onsubmit="return confirm('Deseja remover este feriado?');">
+                            <form method="POST" action="{{ url_for('excluir_feriado', id=f.id) }}" class="d-inline" data-confirm="Deseja remover este feriado?">
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                                 <button type="submit" class="btn btn-link text-danger p-0 border-0 shadow-none ms-2" title="Excluir feriado">
                                     <i class="bi bi-trash"></i>

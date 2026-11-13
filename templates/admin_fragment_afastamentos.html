@@ -32,7 +32,7 @@
                         </a>
                         {% endif %}
                         <form method="POST" action="{{ url_for('excluir_afastamento', id=a.id) }}" class="d-inline"
-                              onsubmit="return confirm('Cancelar {{ a.rotulo|lower }} de {{ a.usuario.nome|e }}? Os dias voltam a contar como dias de trabalho.');">
+                              data-confirm="Cancelar {{ a.rotulo|lower }} de {{ a.usuario.nome|e }}? Os dias voltam a contar como dias de trabalho.">
                             <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                             <button type="submit" class="btn btn-sm btn-outline-danger" title="Cancelar afastamento"><i class="bi bi-x-lg"></i></button>
                         </form>

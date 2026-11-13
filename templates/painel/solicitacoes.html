@@ -22,7 +22,7 @@
                     <input type="hidden" name="voltar" value="painel">
                     <button type="submit" class="btn btn-sm btn-outline-success rounded-3" title="Aprovar"><i class="bi bi-check-lg"></i></button>
                 </form>
-                <form method="POST" action="{{ url_for('responder_solicitacao', id=sol.id, acao='recusar') }}" class="m-0" onsubmit="return confirm('Recusar esta solicitação?');">
+                <form method="POST" action="{{ url_for('responder_solicitacao', id=sol.id, acao='recusar') }}" class="m-0" data-confirm="Recusar esta solicitação?">
                     <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                     <input type="hidden" name="voltar" value="painel">
                     <button type="submit" class="btn btn-sm btn-outline-danger rounded-3" title="Recusar"><i class="bi bi-x-lg"></i></button>

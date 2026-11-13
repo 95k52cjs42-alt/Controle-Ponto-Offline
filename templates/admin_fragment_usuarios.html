@@ -109,7 +109,7 @@
 
                     {% if current_user and u.id != current_user.id %}
                         {% if current_user.is_rh %}
-                        <form action="{{ url_for('excluir_usuario', user_id=u.id) }}" method="POST" class="d-inline-block" onsubmit="return confirm('Tem certeza que deseja excluir este colaborador? Esta ação não pode ser desfeita.');">
+                        <form action="{{ url_for('excluir_usuario', user_id=u.id) }}" method="POST" class="d-inline-block" data-confirm="Tem certeza que deseja excluir este colaborador? Esta ação não pode ser desfeita.">
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                             <button type="submit" class="btn-delete-user" title="Excluir Usuário" style="height: 38px;">
                                 <i class="bi bi-trash"></i>

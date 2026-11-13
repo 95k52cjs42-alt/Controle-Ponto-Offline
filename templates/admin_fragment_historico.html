@@ -138,7 +138,7 @@
 
                     <td class="text-center">
                         <form method="POST" action="{{ url_for('admin_excluir_ponto', ponto_id=reg.id) }}{% if request.query_string %}?{{ request.query_string.decode('utf-8', errors='replace') }}{% endif %}" class="d-inline"
-                              onsubmit="return confirm('Tem certeza que deseja excluir este registro de ponto?');">
+                              data-confirm="Tem certeza que deseja excluir este registro de ponto?">
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                             <button type="submit" class="btn btn-link text-danger p-0 border-0 shadow-none" title="Excluir ponto">
                                 <i class="bi bi-trash"></i>

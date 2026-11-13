@@ -229,7 +229,7 @@
                         <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="collapse" data-bs-target="#editarSetor{{ dep.id }}" aria-expanded="false">
                             <i class="bi bi-pencil"></i> Editar
                         </button>
-                        <form method="POST" action="{{ url_for('excluir_departamento', id=dep.id) }}" class="d-inline" onsubmit="return confirm('Excluir o setor {{ dep.nome|e }}?');">
+                        <form method="POST" action="{{ url_for('excluir_departamento', id=dep.id) }}" class="d-inline" data-confirm="Excluir o setor {{ dep.nome|e }}?">
                             <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                             <button type="submit" class="btn btn-sm btn-outline-danger" {% if item.membros %}disabled title="Mova os colaboradores para outro setor antes de excluir"{% else %}title="Excluir setor"{% endif %}>
                                 <i class="bi bi-trash"></i>

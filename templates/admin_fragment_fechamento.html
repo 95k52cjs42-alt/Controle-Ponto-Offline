@@ -102,7 +102,7 @@
         {% endif %}
         {% if d.pode_fechar %}
         <form method="POST" action="{{ url_for('fechar_mes', ano=d.ano, mes=d.mes) }}"
-              onsubmit="return confirm('Fechar {{ d.rotulo }}? As edições deste mês serão travadas e os colaboradores serão avisados para dar ciência no espelho.');">
+              data-confirm="Fechar {{ d.rotulo }}? As edições deste mês serão travadas e os colaboradores serão avisados para dar ciência no espelho.">
             <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
             <button type="submit" class="btn btn-primary"><i class="bi bi-lock me-1"></i> Fechar {{ d.rotulo }}</button>
         </form>

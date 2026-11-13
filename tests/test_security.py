@@ -1830,6 +1830,100 @@ class SecurityRegressionTests(unittest.TestCase):
             livre = m.Usuario.query.filter_by(email="livre@example.com").one()
             self.assertTrue(m.check_password_hash(livre.senha_hash, "Abcdef1@"))
 
+    # ------------------------------------------------------------------
+    # XSS, CSP e push (auditoria de segurança, etapa 2)
+    # ------------------------------------------------------------------
+    def test_csp_sem_unsafe_inline_e_scripts_com_nonce(self):
+        self.make_user(email="admin@example.com", admin=True)
+        with self.app.test_client() as client:
+            for path in ("/login",):
+                r = client.get(path)
+                csp = r.headers["Content-Security-Policy"]
+                script_src = re.search(r"script-src ([^;]+)", csp).group(1)
+                self.assertNotIn("unsafe-inline", script_src)
+                self.assertNotIn("https://cdn.jsdelivr.net ", script_src + " ")  # domínio inteiro não
+                nonce = re.search(r"'nonce-([^']+)'", script_src).group(1)
+                html = r.get_data(as_text=True)
+                for tag in re.findall(r"<script\b[^>]*>", html):
+                    self.assertTrue(f'nonce="{nonce}"' in tag or "integrity=" in tag, tag)
+            self.login(client, "admin@example.com")
+            for path in ("/", "/admin", "/meu_historico", "/solicitar-correcao"):
+                html = client.get(path).get_data(as_text=True)
+                self.assertIsNone(re.search(r"<[^>]+\son[a-z]+\s*=", html), path)
+                for tag in re.findall(r"<script\b[^>]*>", html):
+                    self.assertTrue("nonce=" in tag or "integrity=" in tag, f"{path}: {tag}")
+        # Nonce muda a cada requisição.
+        with self.app.test_client() as client:
+            a = client.get("/login").headers["Content-Security-Policy"]
+            b = client.get("/login").headers["Content-Security-Policy"]
+            self.assertNotEqual(a, b)
+
+    def test_nome_malicioso_nao_vira_javascript_nos_fragmentos(self):
+        self.make_user(email="admin@example.com", admin=True)
+        payload = "x');alert(1);//"
+        with self.app.app_context():
+            m = self.module
+            hoje = m.datetime.now(m.ZoneInfo("America/Sao_Paulo")).date()
+            alvo = m.Usuario(nome=payload, email="alvo@example.com", senha_hash="x", email_confirmado=True)
+            m.db.session.add(alvo)
+            m.db.session.add(m.Departamento(nome=payload))
+            m.db.session.flush()
+            m.db.session.add(m.Afastamento(usuario_id=alvo.id, tipo="ferias", data_inicio=hoje, data_fim=hoje))
+            m.db.session.commit()
+        with self.app.test_client() as client:
+            self.login(client, "admin@example.com")
+            for frag in ("afastamentos", "parametros"):
+                html = client.get(f"/admin/fragment/{frag}").get_data(as_text=True)
+                self.assertIn("data-confirm=", html, frag)
+                self.assertNotIn("confirm('", html, frag)
+                self.assertIn("x&#39;);alert(1);//", html, frag)
+
+    def test_push_so_aceita_servicos_conhecidos_e_limita_aparelhos(self):
+        uid = self.make_user()
+        m = self.module
+        validos = ["https://fcm.googleapis.com/fcm/send/a", "https://updates.push.services.mozilla.com/wpush/v2/b",
+                   "https://wns2-par02p.notify.windows.com/w/?token=c", "https://web.push.apple.com/d"]
+        invalidos = ["https://10.0.0.1/x", "https://evil.example/fcm.googleapis.com", "https://fcm.googleapis.com.evil.example/x",
+                     "https://user@fcm.googleapis.com/x", "https://fcm.googleapis.com:8443/x", "http://fcm.googleapis.com/x"]
+        for e in validos:
+            self.assertTrue(m._endpoint_push_valido(e), e)
+        for e in invalidos:
+            self.assertFalse(m._endpoint_push_valido(e), e)
+        with self.app.test_client() as client:
+            self.login(client)
+            h = {"X-CSRF-Token": self.csrf(client, "/")}
+            with patch.object(m, "VAPID", {"publica": "x", "privada": "y", "claim": "mailto:a@b.c"}):
+                self.assertEqual(client.post("/api/push/inscrever", headers=h, json={
+                    "endpoint": "https://10.0.0.1/x", "keys": {"p256dh": "k", "auth": "a"}}).status_code, 400)
+                for i in range(m.PUSH_MAX_POR_USUARIO + 3):
+                    r = client.post("/api/push/inscrever", headers=h, json={
+                        "endpoint": f"https://fcm.googleapis.com/fcm/send/{i}", "keys": {"p256dh": "k", "auth": "a"}})
+                    self.assertEqual(r.status_code, 200)
+        with self.app.app_context():
+            restantes = m.PushInscricao.query.filter_by(usuario_id=uid).all()
+            self.assertEqual(len(restantes), m.PUSH_MAX_POR_USUARIO)
+            self.assertIn(f"/send/{m.PUSH_MAX_POR_USUARIO + 2}", restantes[-1].endpoint if restantes else "")
+
+    def test_push_teste_tem_limite(self):
+        self.make_user()
+        self.app.config["RATE_LIMIT_ENABLED"] = True
+        try:
+            with self.app.test_client() as client:
+                self.login(client)
+                h = {"X-CSRF-Token": self.csrf(client, "/")}
+                with patch.object(self.module, "enviar_push", return_value=0):
+                    codigos = [client.post("/api/push/teste", headers=h).status_code for _ in range(7)]
+            self.assertEqual(codigos[:5], [200] * 5)
+            self.assertEqual(codigos[-1], 429)
+        finally:
+            self.app.config["RATE_LIMIT_ENABLED"] = False
+
+    def test_filtro_de_historico_com_data_invalida_nao_da_500(self):
+        self.make_user(email="rh@example.com", rh=True)
+        with self.app.test_client() as client:
+            self.login(client, "rh@example.com")
+            self.assertEqual(client.get("/admin/fragment/historico?data_inicio=x&data_fim=y").status_code, 200)
+
 if __name__ == "__main__":
     unittest.main()
 

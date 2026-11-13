@@ -14,7 +14,7 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, date
 from functools import wraps
-from urllib.parse import parse_qsl, urlencode, urlsplit
+from urllib.parse import parse_qsl, urlencode, urlparse, urlsplit
 from zoneinfo import ZoneInfo
 from xml.sax.saxutils import escape as xml_escape
 
@@ -218,6 +218,7 @@ app.config["RATE_LIMITS"] = {
     "reset_password": (10, 900),
     "definir_senha_usuario": (10, 900),
     "api_localizacao": (30, 900),
+    "push_teste": (5, 600),
 }
 app.config["CSRF_FIELD_NAME"] = "_csrf_token"
 app.config["CSRF_HEADER_NAME"] = "X-CSRF-Token"
@@ -1320,11 +1321,11 @@ def _internal_referrer_path(fallback):
     return _internal_path(request.referrer, fallback)
 
 
-def _rate_limit(name):
+def _rate_limit(name, ident=None):
     if not app.config.get("RATE_LIMIT_ENABLED", True):
         return
     limit, window = app.config["RATE_LIMITS"].get(name, (10, 300))
-    key = (name, request.remote_addr or "unknown")
+    key = (name, ident if ident is not None else (request.remote_addr or "unknown"))
     now = time.monotonic()
     with _RATE_LIMIT_LOCK:
         bucket = _RATE_BUCKETS.setdefault(key, deque())
@@ -1389,9 +1390,26 @@ def exigir_troca_de_senha():
     return redirect(url_for("redefinir_senha_forca"))
 
 
+def csp_nonce():
+    """Nonce da requisição para os <script> inline (CSP sem 'unsafe-inline')."""
+    if "csp_nonce" not in g:
+        g.csp_nonce = secrets.token_urlsafe(18)
+    return g.csp_nonce
+
+
+# Só estes arquivos do CDN podem rodar (o jsDelivr serve qualquer pacote npm
+# ou repositório do GitHub, então liberar o domínio inteiro não protege).
+# As tags nos templates também levam o hash SRI de cada arquivo.
+_CDN_SCRIPTS = (
+    "https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js",
+    "https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js",
+    "https://cdn.jsdelivr.net/npm/gridstack@12.6.0/dist/gridstack-all.js",
+)
+
+
 @app.context_processor
 def inject_security_context():
-    return {"csrf_token": csrf_token}
+    return {"csrf_token": csrf_token, "csp_nonce": csp_nonce}
 
 
 @app.after_request
@@ -1405,7 +1423,8 @@ def add_security_headers(response):
     response.headers.setdefault(
         "Content-Security-Policy",
         "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; "
-        "form-action 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        f"form-action 'self'; script-src 'self' 'nonce-{csp_nonce()}' {' '.join(_CDN_SCRIPTS)}; "
+        "script-src-attr 'none'; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; "
         "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; "
         "img-src 'self' data:; connect-src 'self' https://api.bigdatacloud.net",
@@ -1650,6 +1669,14 @@ def bootstrap_admin(email, nome, senha):
 # ==========================================
 
 PONTOS_PERMITIDOS = ["Entrada", "Saída"]
+
+
+def _data_iso(valor):
+    """AAAA-MM-DD vinda de filtro; valor inválido vira None (sem erro 500)."""
+    try:
+        return datetime.strptime(valor, "%Y-%m-%d").date() if valor else None
+    except ValueError:
+        return None
 _HORA_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$")
 
 
@@ -3978,8 +4005,8 @@ def admin_fragment(view_name):
 
         if data_inicio or data_fim:
             registros_filtrados = []
-            d_inicio = datetime.strptime(data_inicio, "%Y-%m-%d").date() if data_inicio else None
-            d_fim = datetime.strptime(data_fim, "%Y-%m-%d").date() if data_fim else None
+            d_inicio = _data_iso(data_inicio)
+            d_fim = _data_iso(data_fim)
 
             for r in registros:
                 try:
@@ -4068,8 +4095,8 @@ def admin_historico():
 
     if data_inicio or data_fim:
         registros_filtrados = []
-        d_inicio = datetime.strptime(data_inicio, "%Y-%m-%d").date() if data_inicio else None
-        d_fim = datetime.strptime(data_fim, "%Y-%m-%d").date() if data_fim else None
+        d_inicio = _data_iso(data_inicio)
+        d_fim = _data_iso(data_fim)
 
         for r in registros:
             try:
@@ -5484,6 +5511,28 @@ def manifesto_pwa():
 
 
 # ---------- Inscrição de aparelhos ----------
+# O servidor faz POST no endpoint informado pelo navegador; aceitar qualquer
+# URL deixaria um colaborador apontar o servidor para hosts arbitrários ou
+# lentos (travando o laço de lembretes). Só os serviços de push reais.
+_PUSH_HOSTS = ("fcm.googleapis.com", "android.googleapis.com", "web.push.apple.com")
+_PUSH_HOST_SUFIXOS = (".push.services.mozilla.com", ".notify.windows.com", ".push.apple.com")
+PUSH_MAX_POR_USUARIO = 5
+
+
+def _endpoint_push_valido(endpoint):
+    if not endpoint or len(endpoint) > 2000:
+        return False
+    try:
+        partes = urlparse(endpoint)
+        porta = partes.port
+    except ValueError:
+        return False
+    host = (partes.hostname or "").lower()
+    if partes.scheme != "https" or partes.username or partes.password or porta not in (None, 443):
+        return False
+    return host in _PUSH_HOSTS or host.endswith(_PUSH_HOST_SUFIXOS)
+
+
 @app.route("/api/push/chave")
 @login_required
 def api_push_chave():
@@ -5500,11 +5549,17 @@ def api_push_inscrever():
     endpoint = str(dados.get("endpoint") or "")
     chaves = dados.get("keys") or {}
     p256dh, auth = str(chaves.get("p256dh") or ""), str(chaves.get("auth") or "")
-    if not endpoint.startswith("https://") or len(endpoint) > 2000 or not p256dh or not auth or len(p256dh) > 255 or len(auth) > 255:
+    if (not _endpoint_push_valido(endpoint) or not p256dh or not auth
+            or len(p256dh) > 255 or len(auth) > 255):
         return jsonify(erro="Inscrição inválida."), 400
     h = hashlib.sha256(endpoint.encode()).hexdigest()
     insc = PushInscricao.query.filter_by(endpoint_hash=h).first()
     if insc is None:
+        # Limita aparelhos por pessoa: os mais antigos saem primeiro.
+        antigas = (PushInscricao.query.filter_by(usuario_id=current_user.id)
+                   .order_by(PushInscricao.id.desc()).offset(PUSH_MAX_POR_USUARIO - 1).all())
+        for velha in antigas:
+            db.session.delete(velha)
         insc = PushInscricao(endpoint=endpoint, endpoint_hash=h)
         db.session.add(insc)
     insc.usuario_id = current_user.id  # aparelho passa a ser de quem está logado
@@ -5528,6 +5583,7 @@ def api_push_cancelar():
 @app.route("/api/push/teste", methods=["POST"])
 @login_required
 def api_push_teste():
+    _rate_limit("push_teste", ident=current_user.id)
     n = enviar_push(current_user.id, "Lembretes ativados ✅", "É assim que os lembretes de ponto vão aparecer.", url="/", tag="teste")
     return jsonify(enviados=n)
 
